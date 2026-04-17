@@ -21,11 +21,10 @@ jobs:
       with:
         node-version: '20'
     
-    - name: Install dependencies and Build JS Core Bundle
+    - name: Build JS Core Bundle
       run: |
         npm install
         node esbuild.android.js
-      working-directory: core-js-source
     
     - name: Build APK
       run: |
