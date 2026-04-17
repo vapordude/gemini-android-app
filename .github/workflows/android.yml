@@ -1,0 +1,37 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    
+    - name: Build JS Core Bundle
+      run: |
+        npm install
+        node esbuild.android.js
+      working-directory: core-js-source
+    
+    - name: Build APK
+      run: ./gradlew assembleRelease
+    
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: gemini-android-app
+        path: app/build/outputs/apk/release/*.apk
