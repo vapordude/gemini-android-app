@@ -21,7 +21,7 @@ jobs:
       with:
         node-version: '20'
     
-    - name: Build JS Core Bundle
+    - name: Install dependencies and Build JS Core Bundle
       run: |
         npm install
         node esbuild.android.js
