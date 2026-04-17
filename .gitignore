@@ -1,0 +1,10 @@
+*.class
+.gradle/
+build/
+core-js-source/
+*.keystore
+.idea/
+*.iml
+local.properties
+core-bridge/src/main/assets/gemini-core-bundle.*
+node_modules/
