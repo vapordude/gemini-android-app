@@ -10,26 +10,27 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @Composable
 fun LoginScreen(onLoginSuccess: (Map<String, Any>) -> Unit) {
     var apiKey by remember { mutableStateOf("") }
-    var selectedTab by remember { mutableIntStateOf(0) }
+    val uriHandler = LocalUriHandler.current
 
     Column(
         modifier = Modifier
@@ -52,51 +53,44 @@ fun LoginScreen(onLoginSuccess: (Map<String, Any>) -> Unit) {
 
         Spacer(modifier = Modifier.height(48.dp))
 
-        TabRow(selectedTabIndex = selectedTab) {
-            Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }) {
-                Text("Google Account", modifier = Modifier.padding(16.dp))
-            }
-            Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }) {
-                Text("API Key", modifier = Modifier.padding(16.dp))
-            }
+        Text(
+            "Paste your Gemini API key to start chatting. Your key is kept only in memory for this session.",
+            style = MaterialTheme.typography.bodyMedium,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
+
+        OutlinedTextField(
+            value = apiKey,
+            onValueChange = { apiKey = it },
+            label = { Text("Gemini API Key") },
+            placeholder = { Text("AIza…") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Button(
+            onClick = {
+                if (apiKey.isNotBlank()) {
+                    onLoginSuccess(mapOf("api_key" to apiKey.trim()))
+                }
+            },
+            enabled = apiKey.isNotBlank(),
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.medium
+        ) {
+            Text("Continue")
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        if (selectedTab == 0) {
-            Button(
-                onClick = {
-                    // Google OAuth à brancher ultérieurement. Pour l'instant
-                    // on démarre quand même le core avec une config vide
-                    // afin que la navigation fonctionne.
-                    onLoginSuccess(mapOf("auth" to "google"))
-                },
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.medium
-            ) {
-                Text("Sign in with Google")
-            }
-        } else {
-            OutlinedTextField(
-                value = apiKey,
-                onValueChange = { apiKey = it },
-                label = { Text("Enter Gemini API Key") },
-                visualTransformation = PasswordVisualTransformation(),
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            Button(
-                onClick = {
-                    if (apiKey.isNotBlank()) {
-                        onLoginSuccess(mapOf("api_key" to apiKey.trim()))
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.medium
-            ) {
-                Text("Continue with API Key")
-            }
+        TextButton(onClick = {
+            uriHandler.openUri("https://aistudio.google.com/app/apikey")
+        }) {
+            Text("Get an API key from Google AI Studio")
         }
     }
 }

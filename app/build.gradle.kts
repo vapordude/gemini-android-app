@@ -27,6 +27,9 @@ android {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Debug-sign release until a proper keystore/CI secret is wired up,
+            // so the APK uploaded by the workflow can actually be installed.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {

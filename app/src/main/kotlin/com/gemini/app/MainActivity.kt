@@ -15,16 +15,15 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.gemini.app.ui.chat.ChatScreen
 import com.gemini.app.ui.chat.ChatViewModel
 import com.gemini.app.ui.login.LoginScreen
-import com.gemini.bridge.QuickJSGeminiCore
+import com.gemini.bridge.RestGeminiCore
 import com.gemini.ui.GeminiTheme
 
 class MainActivity : ComponentActivity() {
 
-    private lateinit var core: QuickJSGeminiCore
+    private val core by lazy { RestGeminiCore() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        core = QuickJSGeminiCore(applicationContext)
 
         setContent {
             GeminiTheme {
@@ -49,10 +48,5 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        core.close()
     }
 }
