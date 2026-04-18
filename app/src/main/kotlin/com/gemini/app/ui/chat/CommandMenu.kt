@@ -1,76 +1,105 @@
 package com.gemini.app.ui.chat
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 
-data class CliCommand(
+private data class QuickAction(
     val id: String,
-    val name: String,
+    val label: String,
     val icon: ImageVector,
     val description: String
 )
 
-val availableCommands = listOf(
-    CliCommand("reset", "Reset", Icons.Default.Refresh, "Clear current session"),
-    CliCommand("history", "History", Icons.Default.List, "Show previous messages"),
-    CliCommand("context", "Context", Icons.Default.Info, "See active context files"),
-    CliCommand("skills", "Skills", Icons.Default.Star, "Manage active skills"),
-    CliCommand("settings", "Settings", Icons.Default.Settings, "Edit configuration"),
-    CliCommand("clear", "Clear", Icons.Default.Delete, "Wipe local data")
+private val actions = listOf(
+    QuickAction("reset", "Reset", Icons.Default.Refresh, "Clear history + memory"),
+    QuickAction("clear", "Clear UI", Icons.Default.Delete, "Clear messages on screen"),
+    QuickAction("folder", "Folder", Icons.Default.Folder, "Pick workspace folder"),
+    QuickAction("tools", "Tools", Icons.Default.Build, "See enabled tools"),
+    QuickAction("settings", "Settings", Icons.Default.Settings, "Model, approvals, key"),
+    QuickAction("about", "About", Icons.Default.Info, "Version & Termux status")
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CommandBottomSheet(
-    onCommandClick: (String) -> Unit,
-    onDismiss: () -> Unit
+fun QuickActionsSheet(
+    viewModel: ChatViewModel,
+    onDismiss: () -> Unit,
+    onOpenSettings: () -> Unit
 ) {
+    val folderLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.setProjectFolder(uri.toString())
+            onDismiss()
+        }
+    }
+
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Text(
-                "Gemini Commands",
+                "Quick actions",
                 style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(bottom = 16.dp)
+                modifier = Modifier.padding(bottom = 12.dp)
             )
-            
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
-                modifier = Modifier.height(300.dp),
+                modifier = Modifier.height(260.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                items(availableCommands) { command ->
-                    CommandItem(command) {
-                        onCommandClick(command.id)
-                        onDismiss()
+                items(actions) { action ->
+                    ActionTile(action) {
+                        when (action.id) {
+                            "reset" -> { viewModel.resetSession(); onDismiss() }
+                            "clear" -> { viewModel.clearMessages(); onDismiss() }
+                            "folder" -> folderLauncher.launch(null)
+                            "settings" -> onOpenSettings()
+                            "tools" -> onOpenSettings()
+                            "about" -> onOpenSettings()
+                        }
                     }
                 }
             }
+            Spacer(Modifier.height(8.dp))
         }
     }
 }
 
 @Composable
-fun CommandItem(command: CliCommand, onClick: () -> Unit) {
+private fun ActionTile(action: QuickAction, onClick: () -> Unit) {
     Column(
-        modifier = Modifier
-            .clickable(onClick = onClick)
-            .padding(8.dp),
+        modifier = Modifier.clickable(onClick = onClick).padding(4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Surface(
@@ -79,10 +108,15 @@ fun CommandItem(command: CliCommand, onClick: () -> Unit) {
             color = MaterialTheme.colorScheme.secondaryContainer
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(command.icon, contentDescription = command.name)
+                Icon(action.icon, contentDescription = action.label)
             }
         }
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(command.name, style = MaterialTheme.typography.labelMedium)
+        Spacer(Modifier.height(4.dp))
+        Text(action.label, style = MaterialTheme.typography.labelMedium)
+        Text(
+            action.description,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }

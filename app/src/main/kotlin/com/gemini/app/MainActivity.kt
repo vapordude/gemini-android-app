@@ -9,6 +9,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -20,14 +21,13 @@ import com.gemini.ui.GeminiTheme
 
 class MainActivity : ComponentActivity() {
 
-    private val core by lazy { RestGeminiCore() }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         setContent {
             GeminiTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
+                    val appContext = LocalContext.current.applicationContext
+                    val core = remember { RestGeminiCore(appContext) }
                     val factory = remember {
                         object : ViewModelProvider.Factory {
                             @Suppress("UNCHECKED_CAST")
@@ -38,13 +38,8 @@ class MainActivity : ComponentActivity() {
                     val vm: ChatViewModel = viewModel(factory = factory)
                     val isReady by vm.isReady.collectAsState()
 
-                    if (isReady) {
-                        ChatScreen(vm)
-                    } else {
-                        LoginScreen(onLoginSuccess = { config ->
-                            vm.initCore(config)
-                        })
-                    }
+                    if (isReady) ChatScreen(vm)
+                    else LoginScreen(onLoginSuccess = { config -> vm.initCore(config) })
                 }
             }
         }

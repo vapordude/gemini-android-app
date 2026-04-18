@@ -17,7 +17,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -25,6 +32,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -43,28 +51,33 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import com.gemini.app.ui.settings.SettingsSheet
 import com.gemini.domain.GeminiMessage
+import com.gemini.domain.MessageRole
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(viewModel: ChatViewModel) {
     var textState by remember { mutableStateOf("") }
-    var showCommands by remember { mutableStateOf(false) }
+    var showActions by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
 
     val messages = viewModel.messages
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
+    val pendingCall by viewModel.pendingCall.collectAsState()
+    val model by viewModel.model.collectAsState()
+    val workspaceLabel by viewModel.workspaceLabel.collectAsState()
 
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
-        }
+        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
     }
 
     LaunchedEffect(error) {
@@ -79,7 +92,20 @@ fun ChatScreen(viewModel: ChatViewModel) {
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Gemini UI") },
+                title = {
+                    Column {
+                        Text("Gemini UI", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "$model · ${workspaceLabel.substringAfterLast('/')}",
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { showSettings = true }) {
+                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                    }
+                },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
                 )
@@ -88,9 +114,9 @@ fun ChatScreen(viewModel: ChatViewModel) {
         bottomBar = {
             BottomChatBar(
                 text = textState,
-                enabled = !isLoading,
+                enabled = !isLoading && pendingCall == null,
                 onTextChange = { textState = it },
-                onAddClick = { showCommands = true },
+                onAddClick = { showActions = true },
                 onSend = {
                     if (textState.isNotBlank()) {
                         viewModel.sendMessage(textState)
@@ -103,12 +129,7 @@ fun ChatScreen(viewModel: ChatViewModel) {
     ) { paddingValues ->
         Box(modifier = Modifier.padding(paddingValues)) {
             Column(modifier = Modifier.fillMaxSize()) {
-                if (isLoading) {
-                    LinearProgressIndicator(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
+                if (isLoading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 if (messages.isEmpty()) {
                     EmptyState()
                 } else {
@@ -116,20 +137,44 @@ fun ChatScreen(viewModel: ChatViewModel) {
                         state = listState,
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         items(messages, key = { it.id }) { message ->
-                            MessageBubble(message)
+                            when (message.role) {
+                                MessageRole.TOOL -> ToolBubble(message)
+                                else -> MessageBubble(message)
+                            }
                         }
                     }
                 }
             }
 
-            if (showCommands) {
-                CommandBottomSheet(
-                    onCommandClick = { viewModel.execCommand(it) },
-                    onDismiss = { showCommands = false }
+            pendingCall?.let { call ->
+                ToolApprovalCard(
+                    name = call.name,
+                    arguments = call.arguments,
+                    onApprove = { viewModel.approve(call.id, always = false) },
+                    onAlwaysApprove = { viewModel.approve(call.id, always = true) },
+                    onReject = { viewModel.reject(call.id) }
+                )
+            }
+
+            if (showActions) {
+                QuickActionsSheet(
+                    viewModel = viewModel,
+                    onDismiss = { showActions = false },
+                    onOpenSettings = {
+                        showActions = false
+                        showSettings = true
+                    }
+                )
+            }
+
+            if (showSettings) {
+                SettingsSheet(
+                    viewModel = viewModel,
+                    onDismiss = { showSettings = false }
                 )
             }
         }
@@ -139,15 +184,19 @@ fun ChatScreen(viewModel: ChatViewModel) {
 @Composable
 private fun EmptyState() {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(32.dp)
+        ) {
             Text(
-                "Ready to chat with Gemini",
+                "Ready when you are",
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.primary
             )
             Spacer(Modifier.size(8.dp))
             Text(
-                "Type a message or tap + for CLI commands.",
+                "Ask Gemini to read, write, search, or run shell commands. " +
+                    "Tap + for quick actions, the gear for settings.",
                 style = MaterialTheme.typography.bodyMedium
             )
         }
@@ -157,18 +206,109 @@ private fun EmptyState() {
 @Composable
 fun MessageBubble(message: GeminiMessage) {
     val alignment = if (message.isUser) Alignment.CenterEnd else Alignment.CenterStart
-    val color = if (message.isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer
+    val container = if (message.isUser) MaterialTheme.colorScheme.primary
+        else MaterialTheme.colorScheme.secondaryContainer
+    val content = if (message.isUser) MaterialTheme.colorScheme.onPrimary
+        else MaterialTheme.colorScheme.onSecondaryContainer
 
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = alignment) {
-        Surface(
-            color = color,
-            shape = MaterialTheme.shapes.medium,
-            tonalElevation = 4.dp
-        ) {
+        Surface(color = container, shape = MaterialTheme.shapes.medium, tonalElevation = 2.dp) {
             Text(
                 text = message.text,
                 modifier = Modifier.padding(12.dp),
-                color = if (message.isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer
+                color = content
+            )
+        }
+    }
+}
+
+@Composable
+fun ToolBubble(message: GeminiMessage) {
+    val ok = message.toolResult?.ok ?: true
+    val border = if (ok) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = MaterialTheme.shapes.medium,
+        tonalElevation = 1.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.Build,
+                    contentDescription = null,
+                    tint = border,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = message.toolCall?.name ?: message.toolResult?.callId ?: "tool",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = border
+                )
+            }
+            Spacer(Modifier.size(4.dp))
+            Text(
+                text = message.text,
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ToolApprovalCard(
+    name: String,
+    arguments: Map<String, Any?>,
+    onApprove: () -> Unit,
+    onAlwaysApprove: () -> Unit,
+    onReject: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.errorContainer,
+        tonalElevation = 8.dp
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                "Gemini wants to run: $name",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+            Spacer(Modifier.size(6.dp))
+            arguments.forEach { (k, v) ->
+                val str = v?.toString().orEmpty()
+                val rendered = if (str.length > 200) str.substring(0, 200) + "…" else str
+                Text(
+                    "$k: $rendered",
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
+            Spacer(Modifier.size(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onReject,
+                    modifier = Modifier.weight(1f)
+                ) { Icon(Icons.Default.Close, null); Spacer(Modifier.width(4.dp)); Text("Reject") }
+                Button(
+                    onClick = onApprove,
+                    modifier = Modifier.weight(1f)
+                ) { Icon(Icons.Default.Check, null); Spacer(Modifier.width(4.dp)); Text("Approve") }
+            }
+            Spacer(Modifier.size(4.dp))
+            AssistChip(
+                onClick = onAlwaysApprove,
+                label = { Text("Always approve this session") },
+                colors = AssistChipDefaults.assistChipColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
             )
         }
     }
@@ -192,23 +332,20 @@ fun BottomChatBar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onAddClick) {
-                Icon(Icons.Default.Add, contentDescription = "CLI Commands")
+                Icon(Icons.Default.Add, contentDescription = "Quick actions")
             }
-
             TextField(
                 value = text,
                 onValueChange = onTextChange,
                 modifier = Modifier.weight(1f),
                 enabled = enabled,
-                placeholder = { Text("Type a message…") },
+                placeholder = { Text("Message Gemini…") },
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = MaterialTheme.colorScheme.surface,
                     unfocusedContainerColor = MaterialTheme.colorScheme.surface
                 )
             )
-
             Spacer(modifier = Modifier.width(8.dp))
-
             FloatingActionButton(
                 onClick = onSend,
                 containerColor = MaterialTheme.colorScheme.primary,
