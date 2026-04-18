@@ -1,0 +1,12 @@
+{
+  "name": "gemini-android-core-bundler",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bundler script that produces gemini-core-bundle.mjs consumed by the Android app via QuickJS.",
+  "scripts": {
+    "bundle": "node esbuild.android.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.23.0"
+  }
+}

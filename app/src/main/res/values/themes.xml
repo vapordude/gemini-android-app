@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.GeminiUI" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/gemini_surface</item>
+        <item name="android:statusBarColor">@color/gemini_blue</item>
+    </style>
+</resources>

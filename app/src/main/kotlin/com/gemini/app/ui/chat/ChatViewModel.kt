@@ -8,6 +8,7 @@ import com.gemini.domain.GeminiMessage
 import com.gemini.domain.GeminiResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class ChatViewModel(private val geminiCore: GeminiCore) : ViewModel() {
@@ -16,22 +17,34 @@ class ChatViewModel(private val geminiCore: GeminiCore) : ViewModel() {
     val messages: List<GeminiMessage> = _messages
 
     private val _isLoading = MutableStateFlow(false)
-    val isLoading: StateFlow<Boolean> = _isLoading
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    private val _isReady = MutableStateFlow(false)
+    val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
 
     private val _error = MutableStateFlow<String?>(null)
-    val error: StateFlow<String?> = _error
+    val error: StateFlow<String?> = _error.asStateFlow()
 
     fun initCore(config: Map<String, Any>) {
         viewModelScope.launch {
             _isLoading.value = true
             when (val result = geminiCore.init(config)) {
                 is GeminiResult.Success -> {
-                    _isLoading.value = false
+                    _isReady.value = true
                 }
                 is GeminiResult.Error -> {
                     _error.value = result.message
-                    _isLoading.value = false
                 }
+            }
+            _isLoading.value = false
+        }
+    }
+
+    fun setProjectFolder(uri: String) {
+        viewModelScope.launch {
+            when (val r = geminiCore.setProjectFolder(uri)) {
+                is GeminiResult.Error -> _error.value = r.message
+                is GeminiResult.Success -> {}
             }
         }
     }
@@ -39,7 +52,6 @@ class ChatViewModel(private val geminiCore: GeminiCore) : ViewModel() {
     fun sendMessage(text: String) {
         if (text.isBlank()) return
 
-        // Ajouter le message utilisateur immédiatement
         val userMsg = GeminiMessage(
             id = System.currentTimeMillis().toString(),
             text = text,
@@ -69,18 +81,20 @@ class ChatViewModel(private val geminiCore: GeminiCore) : ViewModel() {
     }
 
     fun execCommand(command: String) {
-        // Ici on mappe les commandes CLI vers des fonctions du Core
         when (command) {
             "reset" -> resetSession()
             "history" -> loadHistory()
-            // Ajoutez d'autres commandes ici
+            "clear" -> _messages.clear()
+            else -> {
+                // Commandes non encore câblées côté core — on les injecte
+                // comme message utilisateur pour feedback visuel.
+                sendMessage("/$command")
+            }
         }
     }
 
-    fun setProjectFolder(uri: String) {
-        viewModelScope.launch {
-            geminiCore.setProjectFolder(uri)
-        }
+    fun clearError() {
+        _error.value = null
     }
 
     private fun resetSession() {
