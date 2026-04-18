@@ -23,16 +23,22 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.NoteAdd
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
@@ -65,20 +71,27 @@ private data class QuickAction(
 )
 
 private val actions = listOf(
-    QuickAction("help", "Help", Icons.Default.HelpOutline, "What can Gemini do?"),
-    QuickAction("stats", "Stats", Icons.Default.BugReport, "Session counters"),
-    QuickAction("copy", "Copy last", Icons.Default.ContentCopy, "Last reply → clipboard"),
-    QuickAction("share", "Share last", Icons.Default.Share, "Share last reply"),
-    QuickAction("compress", "Compress", Icons.Default.Compress, "Summarise & continue"),
-    QuickAction("memory", "Memory", Icons.Default.Memory, "Edit GEMINI.md"),
+    QuickAction("help", "Help", Icons.Default.HelpOutline, "/help"),
+    QuickAction("stats", "Stats", Icons.Default.Info, "/stats"),
+    QuickAction("copy", "Copy last", Icons.Default.ContentCopy, "/copy"),
+    QuickAction("share", "Share", Icons.Default.Share, "Share last reply"),
+    QuickAction("compress", "Compress", Icons.Default.Compress, "/compress"),
+    QuickAction("memory", "Memory", Icons.Default.Memory, "/memory"),
+    QuickAction("init", "Init", Icons.Default.NoteAdd, "/init GEMINI.md"),
     QuickAction("history", "History", Icons.Default.History, "Recent prompts"),
-    QuickAction("reset", "Reset", Icons.Default.Refresh, "Clear context + history"),
-    QuickAction("clear", "Clear UI", Icons.Default.Delete, "Clear messages on screen"),
-    QuickAction("folder", "Folder", Icons.Default.Folder, "Pick workspace folder"),
+    QuickAction("reset", "Reset", Icons.Default.Refresh, "/clear"),
+    QuickAction("clearui", "Clear UI", Icons.Default.Delete, "wipe UI only"),
+    QuickAction("folder", "Folder", Icons.Default.Folder, "/directory"),
     QuickAction("shell", "Shell test", Icons.Default.Terminal, "Run echo via Termux"),
-    QuickAction("tools", "Tools", Icons.Default.Build, "See enabled tools"),
-    QuickAction("settings", "Settings", Icons.Default.Settings, "Model, approvals, key"),
-    QuickAction("about", "About", Icons.Default.Info, "Version & status")
+    QuickAction("tools", "Tools", Icons.Default.Build, "/tools"),
+    QuickAction("auth", "Auth", Icons.Default.AccountCircle, "/auth — change key"),
+    QuickAction("theme", "Theme", Icons.Default.Palette, "/theme (system)"),
+    QuickAction("docs", "Docs", Icons.Default.Article, "/docs"),
+    QuickAction("bug", "Report bug", Icons.Default.BugReport, "/bug"),
+    QuickAction("privacy", "Privacy", Icons.Default.PrivacyTip, "/privacy"),
+    QuickAction("settings", "Settings", Icons.Default.Settings, "Model + approvals"),
+    QuickAction("about", "About", Icons.Default.Info, "/about"),
+    QuickAction("quit", "Quit", Icons.Default.ExitToApp, "/quit")
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -115,7 +128,7 @@ fun QuickActionsSheet(
             )
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
-                modifier = Modifier.heightIn(min = 260.dp, max = 520.dp),
+                modifier = Modifier.heightIn(min = 300.dp, max = 640.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -148,8 +161,16 @@ fun QuickActionsSheet(
                                 onDismiss()
                             }
                             "history" -> dialog = historyDialog(viewModel)
+                            "init" -> {
+                                viewModel.sendMessage(
+                                    "Create GEMINI.md in the workspace using write_file with this " +
+                                        "content:\n# Gemini memory\n\n- Project style & commands\n" +
+                                        "- Key decisions\n- Known gotchas\n\nThen confirm."
+                                )
+                                onDismiss()
+                            }
                             "reset" -> { viewModel.resetSession(); onDismiss() }
-                            "clear" -> { viewModel.clearMessages(); onDismiss() }
+                            "clearui" -> { viewModel.clearMessages(); onDismiss() }
                             "folder" -> folderLauncher.launch(null)
                             "shell" -> {
                                 viewModel.sendMessage(
@@ -157,7 +178,16 @@ fun QuickActionsSheet(
                                 )
                                 onDismiss()
                             }
-                            "tools", "settings" -> onOpenSettings()
+                            "tools", "settings", "auth", "theme" -> onOpenSettings()
+                            "docs" -> openUrl(context, "https://ai.google.dev/gemini-api/docs")
+                            "bug" -> openUrl(
+                                context,
+                                "https://github.com/aciderix/gemini-android-app/issues/new"
+                            )
+                            "privacy" -> openUrl(context, "https://policies.google.com/privacy")
+                            "quit" -> {
+                                (context as? android.app.Activity)?.finish()
+                            }
                             "about" -> dialog = aboutDialog(viewModel)
                         }
                     }
@@ -223,12 +253,16 @@ private fun helpDialog(): DialogContent = DialogContent(
         "• Read / write / edit / delete files in the workspace",
         "• Glob + grep across the workspace",
         "• Run shell commands through Termux",
-        "• Call tools automatically during a reply",
+        "• Auto-invoke tools during a reply with your approval",
         "",
-        "Tiles above map the CLI slash-commands to buttons:",
-        "reset = /clear  ·  compress = /compress  ·  stats = /stats",
-        "memory = /memory  ·  folder = /directory  ·  tools = /tools",
-        "help = /help  ·  about = /about"
+        "Tile → CLI slash-command mapping:",
+        "Help = /help  ·  Stats = /stats  ·  About = /about",
+        "Copy = /copy  ·  Share = new  ·  Compress = /compress",
+        "Memory = /memory  ·  Init = /init  ·  History = new",
+        "Reset = /clear  ·  Clear UI = new  ·  Folder = /directory",
+        "Shell = /! test  ·  Tools = /tools  ·  Auth = /auth",
+        "Theme = /theme  ·  Docs = /docs  ·  Bug = /bug",
+        "Privacy = /privacy  ·  Settings = /settings  ·  Quit = /quit"
     )
 )
 
@@ -288,9 +322,10 @@ private fun toast(context: Context, text: String) {
     Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
 }
 
-@Suppress("unused")
 private fun openUrl(context: Context, url: String) {
-    context.startActivity(
-        Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    )
+    runCatching {
+        context.startActivity(
+            Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    }
 }

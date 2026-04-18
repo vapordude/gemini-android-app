@@ -19,11 +19,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Terminal
+import android.widget.Toast
 import androidx.compose.material3.Button
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -247,26 +249,22 @@ private fun TermuxSection(viewModel: ChatViewModel) {
     }
 
     Text(
-        "Termux detected. To let this app run commands, you must enable " +
-            "allow-external-apps once:",
+        "Termux detected. Run the two commands below inside Termux once, then " +
+            "return here. Tap the copy icon to paste them without typing.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
     Spacer(Modifier.height(6.dp))
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = MaterialTheme.shapes.small,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Text(
-            "1. Open Termux\n" +
-                "2. Run: mkdir -p ~/.termux && echo 'allow-external-apps=true' >> ~/.termux/termux.properties\n" +
-                "3. Run: termux-reload-settings\n" +
-                "4. Come back and tap \"Test shell\"",
-            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-            modifier = Modifier.padding(10.dp)
-        )
-    }
+    TermuxCommandRow(
+        step = "1.",
+        command = "mkdir -p ~/.termux && echo 'allow-external-apps=true' >> ~/.termux/termux.properties",
+        context = context
+    )
+    TermuxCommandRow(
+        step = "2.",
+        command = "termux-reload-settings",
+        context = context
+    )
     Spacer(Modifier.height(8.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(onClick = { openTermux(context) }) {
@@ -280,6 +278,32 @@ private fun TermuxSection(viewModel: ChatViewModel) {
             Icon(Icons.Default.PlayArrow, contentDescription = null)
             Spacer(Modifier.width(6.dp))
             Text("Test shell")
+        }
+    }
+}
+
+@Composable
+private fun TermuxCommandRow(step: String, command: String, context: Context) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "$step $command",
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                modifier = Modifier.weight(1f)
+            )
+            androidx.compose.material3.IconButton(onClick = {
+                copyToClipboard(context, "termux-command", command)
+                Toast.makeText(context, "Copied — paste it in Termux", Toast.LENGTH_SHORT).show()
+            }) {
+                Icon(Icons.Default.ContentCopy, contentDescription = "Copy command")
+            }
         }
     }
 }
@@ -310,7 +334,6 @@ private fun openTermux(context: Context) {
     openUrl(context, "https://f-droid.org/packages/com.termux/")
 }
 
-@Suppress("unused")
 private fun copyToClipboard(context: Context, label: String, text: String) {
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     cm.setPrimaryClip(ClipData.newPlainText(label, text))
