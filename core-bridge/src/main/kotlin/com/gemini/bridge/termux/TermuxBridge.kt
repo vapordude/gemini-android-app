@@ -35,9 +35,12 @@ class TermuxBridge(private val appContext: Context) {
     suspend fun run(
         command: String,
         workdir: String? = null,
-        timeoutMs: Long = 30_000
+        timeoutMs: Long = 12_000
     ): Result {
-        if (!isInstalled()) return Result(false, -1, "", "Termux is not installed")
+        if (!isInstalled()) return Result(
+            false, -1, "",
+            "Termux is not installed. Install it from F-Droid then enable RUN_COMMAND."
+        )
         val resultAction = ACTION_RESULT_PREFIX + UUID.randomUUID().toString()
 
         return withTimeoutOrNull(timeoutMs) {
@@ -74,13 +77,33 @@ class TermuxBridge(private val appContext: Context) {
                 }
 
                 try {
-                    appContext.startService(intent)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        appContext.startForegroundService(intent)
+                    } else {
+                        appContext.startService(intent)
+                    }
                 } catch (t: Throwable) {
                     runCatching { appContext.unregisterReceiver(receiver) }
-                    cont.resumeSafely(Result(false, -1, "", t.message ?: "Cannot reach Termux"))
+                    cont.resumeSafely(
+                        Result(
+                            false, -1, "",
+                            "Cannot reach Termux: ${t.message ?: "service refused"}. " +
+                                "Open Termux once, then in it run:\n" +
+                                "  mkdir -p ~/.termux && echo 'allow-external-apps=true' >> ~/.termux/termux.properties\n" +
+                                "  termux-reload-settings\n" +
+                                "Also grant the RUN_COMMAND permission in Android Settings."
+                        )
+                    )
                 }
             }
-        } ?: Result(false, -1, "", "Timed out after ${timeoutMs}ms")
+        } ?: Result(
+            false, -1, "",
+            "Timed out after ${timeoutMs}ms — Termux did not reply. Check that " +
+                "(1) the RUN_COMMAND permission is granted to this app and " +
+                "(2) ~/.termux/termux.properties contains `allow-external-apps=true` " +
+                "(then run `termux-reload-settings` inside Termux). Open Termux once " +
+                "manually before retrying."
+        )
     }
 
     private fun parseResult(extras: Bundle?): Result {

@@ -1,5 +1,7 @@
 package com.gemini.app.ui.chat
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -7,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -20,6 +23,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AssistChip
@@ -32,6 +36,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -41,6 +47,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.material3.DrawerValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -51,8 +59,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import com.gemini.app.R
 import com.gemini.app.ui.settings.SettingsSheet
 import com.gemini.app.ui.settings.ThemeMode
 import com.gemini.domain.GeminiMessage
@@ -69,6 +79,11 @@ fun ChatScreen(
     var textState by remember { mutableStateOf("") }
     var showActions by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    var showChats by remember { mutableStateOf(false) }
+    var showAbout by remember { mutableStateOf(false) }
+
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
 
     val messages = viewModel.messages
     val isLoading by viewModel.isLoading.collectAsState()
@@ -79,7 +94,6 @@ fun ChatScreen(
 
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
@@ -94,95 +108,138 @@ fun ChatScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Column {
-                        Text("Gemini UI", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "$model · ${workspaceLabel.substringAfterLast('/')}",
-                            style = MaterialTheme.typography.labelSmall
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { showSettings = true }) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings")
-                    }
-                },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet {
+                AppDrawer(
+                    viewModel = viewModel,
+                    onClose = { scope.launch { drawerState.close() } },
+                    onOpenSettings = { showSettings = true },
+                    onOpenChats = { showChats = true },
+                    onOpenAbout = { showAbout = true }
                 )
-            )
-        },
-        bottomBar = {
-            BottomChatBar(
-                text = textState,
-                enabled = !isLoading && pendingCall == null,
-                onTextChange = { textState = it },
-                onAddClick = { showActions = true },
-                onSend = {
-                    if (textState.isNotBlank()) {
-                        viewModel.sendMessage(textState)
-                        textState = ""
+            }
+        }
+    ) {
+        Scaffold(
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Image(
+                                painter = painterResource(id = R.drawable.logo_gemini),
+                                contentDescription = "Gemini",
+                                modifier = Modifier.height(28.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    model,
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                                Text(
+                                    workspaceLabel.substringAfterLast('/'),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                            Icon(Icons.Default.Menu, contentDescription = "Menu")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { showSettings = true }) {
+                            Icon(Icons.Default.Settings, contentDescription = "Settings")
+                        }
+                    },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    )
+                )
+            },
+            bottomBar = {
+                BottomChatBar(
+                    text = textState,
+                    enabled = !isLoading && pendingCall == null,
+                    onTextChange = { textState = it },
+                    onAddClick = { showActions = true },
+                    onSend = {
+                        if (textState.isNotBlank()) {
+                            viewModel.sendMessage(textState)
+                            textState = ""
+                        }
                     }
-                }
-            )
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) }
-    ) { paddingValues ->
-        Box(modifier = Modifier.padding(paddingValues)) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                if (isLoading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                if (messages.isEmpty()) {
-                    EmptyState()
-                } else {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        items(messages, key = { it.id }) { message ->
-                            when (message.role) {
-                                MessageRole.TOOL -> ToolBubble(message)
-                                else -> MessageBubble(message)
+                )
+            },
+            snackbarHost = { SnackbarHost(snackbarHostState) }
+        ) { paddingValues ->
+            Box(modifier = Modifier.padding(paddingValues).background(MaterialTheme.colorScheme.background)) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    if (isLoading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    if (messages.isEmpty()) {
+                        EmptyState()
+                    } else {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            items(messages, key = { it.id }) { message ->
+                                when (message.role) {
+                                    MessageRole.TOOL -> ToolBubble(message)
+                                    else -> MessageBubble(message)
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            pendingCall?.let { call ->
-                ToolApprovalCard(
-                    name = call.name,
-                    arguments = call.arguments,
-                    onApprove = { viewModel.approve(call.id, always = false) },
-                    onAlwaysApprove = { viewModel.approve(call.id, always = true) },
-                    onReject = { viewModel.reject(call.id) }
-                )
-            }
+                pendingCall?.let { call ->
+                    ToolApprovalCard(
+                        name = call.name,
+                        arguments = call.arguments,
+                        onApprove = { viewModel.approve(call.id, always = false) },
+                        onAlwaysApprove = { viewModel.approve(call.id, always = true) },
+                        onReject = { viewModel.reject(call.id) }
+                    )
+                }
 
-            if (showActions) {
-                QuickActionsSheet(
-                    viewModel = viewModel,
-                    onDismiss = { showActions = false },
-                    onOpenSettings = {
-                        showActions = false
-                        showSettings = true
-                    }
-                )
-            }
+                if (showActions) {
+                    QuickActionsSheet(
+                        viewModel = viewModel,
+                        onDismiss = { showActions = false }
+                    )
+                }
 
-            if (showSettings) {
-                SettingsSheet(
-                    viewModel = viewModel,
-                    onDismiss = { showSettings = false },
-                    themeMode = themeMode,
-                    onThemeChange = onThemeChange
-                )
+                if (showSettings) {
+                    SettingsSheet(
+                        viewModel = viewModel,
+                        onDismiss = { showSettings = false },
+                        themeMode = themeMode,
+                        onThemeChange = onThemeChange
+                    )
+                }
+
+                if (showChats) {
+                    ChatsDialog(
+                        viewModel = viewModel,
+                        onDismiss = { showChats = false },
+                        onResumed = { showChats = false }
+                    )
+                }
+
+                if (showAbout) {
+                    AboutDialog(
+                        viewModel = viewModel,
+                        onDismiss = { showAbout = false }
+                    )
+                }
             }
         }
     }
@@ -195,6 +252,12 @@ private fun EmptyState() {
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.padding(32.dp)
         ) {
+            Image(
+                painter = painterResource(id = R.mipmap.ic_launcher_foreground),
+                contentDescription = null,
+                modifier = Modifier.size(96.dp)
+            )
+            Spacer(Modifier.size(8.dp))
             Text(
                 "Ready when you are",
                 style = MaterialTheme.typography.titleLarge,
@@ -202,9 +265,10 @@ private fun EmptyState() {
             )
             Spacer(Modifier.size(8.dp))
             Text(
-                "Ask Gemini to read, write, search, or run shell commands. " +
-                    "Tap + for quick actions, the gear for settings.",
-                style = MaterialTheme.typography.bodyMedium
+                "Ask Gemini to read, write, search or run shell commands. " +
+                    "Tap + for quick actions, ☰ for navigation, ⚙ for settings.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -214,15 +278,15 @@ private fun EmptyState() {
 fun MessageBubble(message: GeminiMessage) {
     val alignment = if (message.isUser) Alignment.CenterEnd else Alignment.CenterStart
     val container = if (message.isUser) MaterialTheme.colorScheme.primary
-        else MaterialTheme.colorScheme.secondaryContainer
+        else MaterialTheme.colorScheme.surfaceVariant
     val content = if (message.isUser) MaterialTheme.colorScheme.onPrimary
-        else MaterialTheme.colorScheme.onSecondaryContainer
+        else MaterialTheme.colorScheme.onSurface
 
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = alignment) {
-        Surface(color = container, shape = MaterialTheme.shapes.medium, tonalElevation = 2.dp) {
+        Surface(color = container, shape = MaterialTheme.shapes.large, tonalElevation = 1.dp) {
             Text(
                 text = message.text,
-                modifier = Modifier.padding(12.dp),
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                 color = content
             )
         }
@@ -232,7 +296,7 @@ fun MessageBubble(message: GeminiMessage) {
 @Composable
 fun ToolBubble(message: GeminiMessage) {
     val ok = message.toolResult?.ok ?: true
-    val border = if (ok) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error
+    val accent = if (ok) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,
         shape = MaterialTheme.shapes.medium,
@@ -244,14 +308,14 @@ fun ToolBubble(message: GeminiMessage) {
                 Icon(
                     Icons.Default.Build,
                     contentDescription = null,
-                    tint = border,
+                    tint = accent,
                     modifier = Modifier.size(16.dp)
                 )
                 Spacer(Modifier.width(6.dp))
                 Text(
                     text = message.toolCall?.name ?: message.toolResult?.callId ?: "tool",
                     style = MaterialTheme.typography.labelMedium,
-                    color = border
+                    color = accent
                 )
             }
             Spacer(Modifier.size(4.dp))

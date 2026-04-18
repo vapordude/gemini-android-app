@@ -6,8 +6,11 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,15 +22,20 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Terminal
-import android.widget.Toast
 import androidx.compose.material3.Button
-import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -47,6 +55,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -67,6 +76,7 @@ fun SettingsSheet(
     val models by viewModel.availableModels.collectAsState()
 
     var customModel by remember { mutableStateOf("") }
+    var expanded by remember { mutableStateOf(setOf("Account", "Model")) }
 
     val folderLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -74,194 +84,212 @@ fun SettingsSheet(
         if (uri != null) viewModel.setProjectFolder(uri.toString())
     }
 
+    fun toggle(name: String) {
+        expanded = if (name in expanded) expanded - name else expanded + name
+    }
+
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 8.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp)
                 .verticalScroll(rememberScrollState())
         ) {
             Text("Settings", style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(12.dp))
 
-            SectionTitle("Account")
-            Text(
-                "Use an API key from Google AI Studio. Sign in with your Google account there " +
-                    "to create one, then paste it here.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { openUrl(context, "https://aistudio.google.com/app/apikey") }) {
-                    Icon(Icons.Default.Key, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Get API key")
-                }
-                OutlinedButton(onClick = {
-                    openUrl(context, "https://accounts.google.com/signin?continue=" +
-                        Uri.encode("https://aistudio.google.com/app/apikey"))
-                }) {
-                    Icon(Icons.Default.OpenInNew, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Sign in")
-                }
-            }
-
-            Divider(Modifier.padding(vertical = 12.dp))
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                SectionTitle("Model")
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = { viewModel.refreshModels() }) {
-                    Text("Refresh")
-                }
-            }
-            Text(
-                "Detected from your API key (${models.size} model${if (models.size == 1) "" else "s"})",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            models.forEach { name ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(
-                        selected = name == currentModel,
-                        onClick = { viewModel.setModel(name) }
-                    )
-                    Text(name, style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "Or type a custom model ID",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    value = customModel,
-                    onValueChange = { customModel = it },
-                    placeholder = { Text("e.g. gemini-3.0-pro-exp") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f)
+            SettingsAccordion(
+                title = "Account",
+                icon = Icons.Default.AccountCircle,
+                expanded = "Account" in expanded,
+                onToggle = { toggle("Account") }
+            ) {
+                Text(
+                    "API key from Google AI Studio. Sign in with your Google " +
+                        "account there to create one, then paste it here.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(Modifier.width(8.dp))
-                TextButton(
-                    onClick = {
-                        if (customModel.isNotBlank()) {
-                            viewModel.setModel(customModel.trim())
-                            customModel = ""
-                        }
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { openUrl(context, "https://aistudio.google.com/app/apikey") }) {
+                        Icon(Icons.Default.Key, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Get API key")
                     }
-                ) { Text("Use") }
-            }
-
-            Divider(Modifier.padding(vertical = 12.dp))
-
-            SectionTitle("Workspace")
-            Text(
-                workspaceLabel,
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                modifier = Modifier.padding(vertical = 4.dp)
-            )
-            OutlinedButton(
-                onClick = { folderLauncher.launch(null) },
-                modifier = Modifier.padding(top = 4.dp)
-            ) {
-                Icon(Icons.Default.Folder, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Pick folder")
-            }
-
-            Divider(Modifier.padding(vertical = 12.dp))
-
-            SectionTitle("Tool approvals")
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Auto-approve destructive tools", style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "Skips the approval dialog for write/edit/delete/shell.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    OutlinedButton(onClick = {
+                        viewModel.signOut()
+                        onDismiss()
+                    }) { Text("Sign out") }
                 }
-                Switch(
-                    checked = autoApprove,
-                    onCheckedChange = { viewModel.setAutoApprove(it) }
-                )
             }
 
-            Divider(Modifier.padding(vertical = 12.dp))
+            SettingsAccordion(
+                title = "Model",
+                icon = Icons.Default.Memory,
+                expanded = "Model" in expanded,
+                onToggle = { toggle("Model") }
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "${models.size} available",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = { viewModel.refreshModels() }) { Text("Refresh") }
+                }
+                models.forEach { name ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { viewModel.setModel(name) }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = name == currentModel,
+                            onClick = { viewModel.setModel(name) }
+                        )
+                        Text(name, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Or type a custom model ID",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = customModel,
+                        onValueChange = { customModel = it },
+                        placeholder = { Text("e.g. gemini-3.0-pro-exp") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(
+                        onClick = {
+                            if (customModel.isNotBlank()) {
+                                viewModel.setModel(customModel.trim())
+                                customModel = ""
+                            }
+                        }
+                    ) { Text("Use") }
+                }
+            }
 
-            SectionTitle("Theme")
-            ThemeMode.values().forEach { mode ->
+            SettingsAccordion(
+                title = "Workspace",
+                icon = Icons.Default.Folder,
+                expanded = "Workspace" in expanded,
+                onToggle = { toggle("Workspace") }
+            ) {
+                Text(
+                    workspaceLabel,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
+                )
+                Spacer(Modifier.height(6.dp))
+                OutlinedButton(onClick = { folderLauncher.launch(null) }) {
+                    Icon(Icons.Default.Folder, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Pick folder")
+                }
+            }
+
+            SettingsAccordion(
+                title = "Tool approvals",
+                icon = Icons.Default.Security,
+                expanded = "Tool approvals" in expanded,
+                onToggle = { toggle("Tool approvals") }
+            ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 2.dp),
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    RadioButton(
-                        selected = mode == themeMode,
-                        onClick = { onThemeChange(mode) }
-                    )
-                    Text(mode.label, style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-
-            Divider(Modifier.padding(vertical = 12.dp))
-
-            SectionTitle("Tools available")
-            viewModel.availableTools.forEach { tool ->
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(tool.name, style = MaterialTheme.typography.bodyMedium)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Auto-approve destructive tools", style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            tool.description,
+                            "Skips the approval dialog for write/edit/delete/shell.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    val badge = tool.category.name.lowercase() + if (tool.destructive) " · write" else ""
-                    Surface(
-                        color = if (tool.destructive) MaterialTheme.colorScheme.errorContainer
-                            else MaterialTheme.colorScheme.secondaryContainer,
-                        shape = MaterialTheme.shapes.small
+                    Switch(
+                        checked = autoApprove,
+                        onCheckedChange = { viewModel.setAutoApprove(it) }
+                    )
+                }
+            }
+
+            SettingsAccordion(
+                title = "Theme",
+                icon = Icons.Default.Palette,
+                expanded = "Theme" in expanded,
+                onToggle = { toggle("Theme") }
+            ) {
+                ThemeMode.values().forEach { mode ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onThemeChange(mode) }
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            badge,
-                            style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        RadioButton(
+                            selected = mode == themeMode,
+                            onClick = { onThemeChange(mode) }
                         )
+                        Text(mode.label, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }
 
-            Divider(Modifier.padding(vertical = 12.dp))
+            SettingsAccordion(
+                title = "Tools available",
+                icon = Icons.Default.Build,
+                expanded = "Tools available" in expanded,
+                onToggle = { toggle("Tools available") }
+            ) {
+                viewModel.availableTools.forEach { tool ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(tool.name, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                tool.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        val badge = tool.category.name.lowercase() +
+                            if (tool.destructive) " · write" else ""
+                        Surface(
+                            color = if (tool.destructive) MaterialTheme.colorScheme.errorContainer
+                                else MaterialTheme.colorScheme.secondaryContainer,
+                            shape = MaterialTheme.shapes.small
+                        ) {
+                            Text(
+                                badge,
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+            }
 
-            TermuxSection(viewModel)
-
-            Divider(Modifier.padding(vertical = 12.dp))
-
-            SectionTitle("Account")
-            OutlinedButton(
-                onClick = {
-                    viewModel.signOut()
-                    onDismiss()
-                },
-                modifier = Modifier.padding(top = 4.dp)
-            ) { Text("Sign out / change API key") }
+            SettingsAccordion(
+                title = "Termux shell",
+                icon = Icons.Default.Terminal,
+                expanded = "Termux shell" in expanded,
+                onToggle = { toggle("Termux shell") }
+            ) {
+                TermuxBody(viewModel)
+            }
             Spacer(Modifier.height(24.dp))
         }
     }
@@ -274,15 +302,65 @@ enum class ThemeMode(val label: String) {
 }
 
 @Composable
-private fun TermuxSection(viewModel: ChatViewModel) {
+private fun SettingsAccordion(
+    title: String,
+    icon: ImageVector,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.medium,
+        tonalElevation = 1.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggle)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(
+                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            AnimatedVisibility(visible = expanded) {
+                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
+                    content()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TermuxBody(viewModel: ChatViewModel) {
     val context = LocalContext.current
     val installed = viewModel.termuxInstalled
 
-    SectionTitle("Termux shell")
     if (!installed) {
         Text(
             "Termux is not installed. It powers real shell commands " +
-                "(git, gradle, curl…). Install it from F-Droid (the Play Store build is outdated).",
+                "(git, gradle, curl…). Install from F-Droid (the Play Store build is outdated).",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -301,8 +379,7 @@ private fun TermuxSection(viewModel: ChatViewModel) {
     }
 
     Text(
-        "Termux detected. Run the two commands below inside Termux once, then " +
-            "return here. Tap the copy icon to paste them without typing.",
+        "Termux is installed. Run these once inside Termux, then return:",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -316,6 +393,13 @@ private fun TermuxSection(viewModel: ChatViewModel) {
         step = "2.",
         command = "termux-reload-settings",
         context = context
+    )
+    Spacer(Modifier.height(6.dp))
+    Text(
+        "Then in Android Settings → Apps → Gemini, grant the RUN_COMMAND permission " +
+            "(Permissions → Additional permissions → Termux RUN_COMMAND).",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
     )
     Spacer(Modifier.height(8.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -358,11 +442,6 @@ private fun TermuxCommandRow(step: String, command: String, context: Context) {
             }
         }
     }
-}
-
-@Composable
-private fun SectionTitle(text: String) {
-    Text(text, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
 }
 
 private fun openUrl(context: Context, url: String) {
