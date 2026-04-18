@@ -42,7 +42,9 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
     private val _workspaceLabel = MutableStateFlow(core.workspace.rootLabel())
     val workspaceLabel: StateFlow<String> = _workspaceLabel.asStateFlow()
 
-    val availableModels: List<String> = RestGeminiCore.AVAILABLE_MODELS
+    private val _availableModels = MutableStateFlow(core.listModels())
+    val availableModels: StateFlow<List<String>> = _availableModels.asStateFlow()
+
     val availableTools: List<ToolSpec> get() = core.availableTools()
     val termuxInstalled: Boolean get() = core.termux.isInstalled()
 
@@ -68,10 +70,27 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
                 is GeminiResult.Success -> {
                     _isReady.value = true
                     _model.value = core.currentModel()
+                    _availableModels.value = core.listModels()
                 }
                 is GeminiResult.Error -> _error.value = result.message
             }
             _isLoading.value = false
+        }
+    }
+
+    fun refreshModels() {
+        viewModelScope.launch {
+            _availableModels.value = core.refreshModels()
+        }
+    }
+
+    fun signOut() {
+        viewModelScope.launch {
+            core.signOut()
+            _messages.clear()
+            _model.value = core.currentModel()
+            _availableModels.value = core.listModels()
+            _isReady.value = false
         }
     }
 

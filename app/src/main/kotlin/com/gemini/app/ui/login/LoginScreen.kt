@@ -1,6 +1,5 @@
 package com.gemini.app.ui.login
 
-import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -21,15 +20,12 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,8 +41,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 private const val AISTUDIO_KEY_URL = "https://aistudio.google.com/app/apikey"
-private const val GOOGLE_SIGNIN_URL =
-    "https://accounts.google.com/AccountChooser?continue=https%3A%2F%2Faistudio.google.com%2Fapp%2Fapikey"
 
 @Composable
 fun LoginScreen(onLoginSuccess: (Map<String, Any>) -> Unit) {
@@ -69,7 +63,7 @@ fun LoginScreen(onLoginSuccess: (Map<String, Any>) -> Unit) {
             color = MaterialTheme.colorScheme.primary
         )
         Text(
-            "Pick how you want to authenticate.",
+            "Authenticate with a Gemini API key.",
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.secondary,
             textAlign = TextAlign.Center,
@@ -78,67 +72,44 @@ fun LoginScreen(onLoginSuccess: (Map<String, Any>) -> Unit) {
 
         Spacer(Modifier.height(32.dp))
 
-        // -- Option A: Google sign-in to grab a key --
         Surface(
             shape = MaterialTheme.shapes.large,
             tonalElevation = 2.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(Modifier.padding(16.dp)) {
-                Text(
-                    "Option A — Sign in with Google",
-                    style = MaterialTheme.typography.titleMedium
-                )
+                Text("Step 1 — Get a key", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Opens your browser, signs you in with Google, and lands on AI Studio. " +
-                        "Tap \"Create API key\", copy it, return here and paste below.",
+                    "Open Google AI Studio (signs you in with your Google account if needed), " +
+                        "tap \"Create API key\", and copy it.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(12.dp))
                 Button(
-                    onClick = { openUrl(context, GOOGLE_SIGNIN_URL) },
+                    onClick = { openUrl(context, AISTUDIO_KEY_URL) },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(Icons.Default.OpenInNew, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
-                    Text("Sign in with Google")
+                    Text("Open Google AI Studio")
                 }
-                TextButton(
-                    onClick = { openUrl(context, AISTUDIO_KEY_URL) },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("…or skip sign-in and open AI Studio directly") }
             }
         }
 
         Spacer(Modifier.height(16.dp))
 
-        Divider()
-        Text(
-            "then",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(vertical = 4.dp)
-        )
-        Divider()
-
-        Spacer(Modifier.height(16.dp))
-
-        // -- Option B: paste the key --
         Surface(
             shape = MaterialTheme.shapes.large,
             tonalElevation = 2.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(Modifier.padding(16.dp)) {
-                Text(
-                    "Option B — Paste your API key",
-                    style = MaterialTheme.typography.titleMedium
-                )
+                Text("Step 2 — Paste it here", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Kept only in memory for this session.",
+                    "Kept only in memory for this session. You can change it later from Settings.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -167,10 +138,7 @@ fun LoginScreen(onLoginSuccess: (Map<String, Any>) -> Unit) {
                         if (apiKey.isNotBlank()) onLoginSuccess(mapOf("api_key" to apiKey.trim()))
                     },
                     enabled = apiKey.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary
-                    )
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(Icons.Default.Key, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
@@ -179,9 +147,10 @@ fun LoginScreen(onLoginSuccess: (Map<String, Any>) -> Unit) {
             }
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(20.dp))
         Text(
-            "You can change the model, workspace and tools any time from Settings.",
+            "Note: full Google account login (without an API key) requires the CLI's Code Assist " +
+                "backend and is not implemented yet.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center

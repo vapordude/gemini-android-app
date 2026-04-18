@@ -54,13 +54,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.gemini.app.ui.settings.SettingsSheet
+import com.gemini.app.ui.settings.ThemeMode
 import com.gemini.domain.GeminiMessage
 import com.gemini.domain.MessageRole
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(viewModel: ChatViewModel) {
+fun ChatScreen(
+    viewModel: ChatViewModel,
+    themeMode: ThemeMode = ThemeMode.SYSTEM,
+    onThemeChange: (ThemeMode) -> Unit = {}
+) {
     var textState by remember { mutableStateOf("") }
     var showActions by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
@@ -174,7 +179,9 @@ fun ChatScreen(viewModel: ChatViewModel) {
             if (showSettings) {
                 SettingsSheet(
                     viewModel = viewModel,
-                    onDismiss = { showSettings = false }
+                    onDismiss = { showSettings = false },
+                    themeMode = themeMode,
+                    onThemeChange = onThemeChange
                 )
             }
         }

@@ -76,6 +76,8 @@ class RestGeminiCore(
     private val sendLock = Mutex()
     private val pending = ConcurrentHashMap<String, CompletableDeferred<ToolDecision>>()
 
+    @Volatile private var discoveredModels: List<String> = AVAILABLE_MODELS
+
     private val _events = MutableSharedFlow<GeminiEvent>(
         replay = 0,
         extraBufferCapacity = 64,
@@ -88,14 +90,66 @@ class RestGeminiCore(
     override suspend fun init(config: Map<String, Any>): GeminiResult {
         apiKey = (config["api_key"] ?: config["apiKey"] ?: "").toString().trim()
         model = (config["model"] as? String)?.ifBlank { defaultModel } ?: defaultModel
-        return if (apiKey.isBlank()) GeminiResult.Error("API key is required")
-        else GeminiResult.Success("Ready")
+        if (apiKey.isBlank()) return GeminiResult.Error("API key is required")
+        // Best-effort live model fetch; if it fails we keep the static fallback.
+        runCatching { discoveredModels = fetchAvailableModels() }
+            .onFailure { Log.w(TAG, "model discovery failed: ${it.message}") }
+        if (model !in discoveredModels && discoveredModels.isNotEmpty()) {
+            model = discoveredModels.firstOrNull { it.contains("flash") } ?: discoveredModels.first()
+        }
+        return GeminiResult.Success("Ready")
     }
 
     fun setModel(newModel: String) { model = newModel.ifBlank { defaultModel } }
     fun currentModel(): String = model
+    fun listModels(): List<String> = discoveredModels
+    suspend fun refreshModels(): List<String> = runCatching { fetchAvailableModels() }
+        .onSuccess { discoveredModels = it }
+        .getOrDefault(discoveredModels)
     fun setAutoApprove(enabled: Boolean) { autoApproveDestructive = enabled }
     fun isAutoApprove(): Boolean = autoApproveDestructive
+
+    fun signOut() {
+        apiKey = ""
+        turns.clear()
+        uiMessages.clear()
+        pending.values.forEach { it.cancel() }
+        pending.clear()
+        discoveredModels = AVAILABLE_MODELS
+        model = defaultModel
+    }
+
+    private suspend fun fetchAvailableModels(): List<String> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) return@withContext AVAILABLE_MODELS
+        val url = "https://generativelanguage.googleapis.com/v1beta/models" +
+            "?key=${URLEncoder.encode(apiKey, "UTF-8")}&pageSize=200"
+        val (code, body) = getJson(url)
+        if (code !in 200..299) return@withContext AVAILABLE_MODELS
+        val arr = JSONObject(body).optJSONArray("models") ?: return@withContext AVAILABLE_MODELS
+        val out = mutableListOf<String>()
+        for (i in 0 until arr.length()) {
+            val m = arr.getJSONObject(i)
+            val methods = m.optJSONArray("supportedGenerationMethods")
+            val supportsGen = methods != null && (0 until methods.length())
+                .any { methods.optString(it) == "generateContent" }
+            if (!supportsGen) continue
+            val raw = m.optString("name") // "models/gemini-2.5-flash"
+            val name = raw.removePrefix("models/")
+            // Skip embeddings / vision-only / non-chat suffixes.
+            if (name.contains("embedding") || name.contains("aqa")) continue
+            out += name
+        }
+        // Prefer Gemini chat models, sort newest-looking first.
+        out.distinct().sortedWith(compareByDescending<String> {
+            when {
+                it.startsWith("gemini-3") -> 4
+                it.startsWith("gemini-2.5") -> 3
+                it.startsWith("gemini-2.0") -> 2
+                it.startsWith("gemini-1.5") -> 1
+                else -> 0
+            }
+        }.thenBy { it })
+    }
 
     override suspend fun setProjectFolder(uri: String): GeminiResult = runCatching {
         workspace.setTreeUri(Uri.parse(uri))
@@ -309,6 +363,24 @@ class RestGeminiCore(
         return msg
     }
 
+    private fun getJson(url: String): Pair<Int, String> {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.requestMethod = "GET"
+        conn.setRequestProperty("Accept", "application/json")
+        conn.connectTimeout = 15_000
+        conn.readTimeout = 30_000
+        return try {
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else (conn.errorStream ?: conn.inputStream)
+            val text = stream.use {
+                BufferedReader(InputStreamReader(it, Charsets.UTF_8)).use { r -> r.readText() }
+            }
+            code to text
+        } finally {
+            conn.disconnect()
+        }
+    }
+
     private fun postJson(url: String, body: String): Pair<Int, String> {
         val conn = URL(url).openConnection() as HttpURLConnection
         conn.requestMethod = "POST"
@@ -375,9 +447,9 @@ class RestGeminiCore(
     companion object {
         private const val TAG = "RestGeminiCore"
         const val DEFAULT_MODEL = "gemini-2.5-flash"
+        // Used as a static fallback before the API model-discovery call lands.
+        // The real model list is fetched live from /v1beta/models.
         val AVAILABLE_MODELS = listOf(
-            "gemini-3-pro",
-            "gemini-3-flash",
             "gemini-2.5-pro",
             "gemini-2.5-flash",
             "gemini-2.0-flash",

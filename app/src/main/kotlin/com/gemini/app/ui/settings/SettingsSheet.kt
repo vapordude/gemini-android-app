@@ -54,11 +54,17 @@ import com.gemini.app.ui.chat.ChatViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsSheet(viewModel: ChatViewModel, onDismiss: () -> Unit) {
+fun SettingsSheet(
+    viewModel: ChatViewModel,
+    onDismiss: () -> Unit,
+    themeMode: ThemeMode = ThemeMode.SYSTEM,
+    onThemeChange: (ThemeMode) -> Unit = {}
+) {
     val context = LocalContext.current
     val currentModel by viewModel.model.collectAsState()
     val autoApprove by viewModel.autoApprove.collectAsState()
     val workspaceLabel by viewModel.workspaceLabel.collectAsState()
+    val models by viewModel.availableModels.collectAsState()
 
     var customModel by remember { mutableStateOf("") }
 
@@ -104,8 +110,19 @@ fun SettingsSheet(viewModel: ChatViewModel, onDismiss: () -> Unit) {
 
             Divider(Modifier.padding(vertical = 12.dp))
 
-            SectionTitle("Model")
-            viewModel.availableModels.forEach { name ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SectionTitle("Model")
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { viewModel.refreshModels() }) {
+                    Text("Refresh")
+                }
+            }
+            Text(
+                "Detected from your API key (${models.size} model${if (models.size == 1) "" else "s"})",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            models.forEach { name ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -184,6 +201,24 @@ fun SettingsSheet(viewModel: ChatViewModel, onDismiss: () -> Unit) {
 
             Divider(Modifier.padding(vertical = 12.dp))
 
+            SectionTitle("Theme")
+            ThemeMode.values().forEach { mode ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = mode == themeMode,
+                        onClick = { onThemeChange(mode) }
+                    )
+                    Text(mode.label, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+
+            Divider(Modifier.padding(vertical = 12.dp))
+
             SectionTitle("Tools available")
             viewModel.availableTools.forEach { tool ->
                 Row(
@@ -216,9 +251,26 @@ fun SettingsSheet(viewModel: ChatViewModel, onDismiss: () -> Unit) {
             Divider(Modifier.padding(vertical = 12.dp))
 
             TermuxSection(viewModel)
+
+            Divider(Modifier.padding(vertical = 12.dp))
+
+            SectionTitle("Account")
+            OutlinedButton(
+                onClick = {
+                    viewModel.signOut()
+                    onDismiss()
+                },
+                modifier = Modifier.padding(top = 4.dp)
+            ) { Text("Sign out / change API key") }
             Spacer(Modifier.height(24.dp))
         }
     }
+}
+
+enum class ThemeMode(val label: String) {
+    SYSTEM("Follow system"),
+    LIGHT("Light"),
+    DARK("Dark")
 }
 
 @Composable
