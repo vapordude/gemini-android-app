@@ -38,8 +38,10 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.NoteAdd
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Terminal
@@ -50,6 +52,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -78,6 +81,7 @@ private val actions = listOf(
     QuickAction("compress", "Compress", Icons.Default.Compress, "/compress"),
     QuickAction("memory", "Memory", Icons.Default.Memory, "/memory"),
     QuickAction("init", "Init", Icons.Default.NoteAdd, "/init GEMINI.md"),
+    QuickAction("chats", "Chats", Icons.Default.Save, "/chat save|resume"),
     QuickAction("history", "History", Icons.Default.History, "Recent prompts"),
     QuickAction("reset", "Reset", Icons.Default.Refresh, "/clear"),
     QuickAction("clearui", "Clear UI", Icons.Default.Delete, "wipe UI only"),
@@ -103,6 +107,7 @@ fun QuickActionsSheet(
 ) {
     val context = LocalContext.current
     var dialog by remember { mutableStateOf<DialogContent?>(null) }
+    var showChats by remember { mutableStateOf(false) }
 
     val folderLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -160,6 +165,7 @@ fun QuickActionsSheet(
                                 )
                                 onDismiss()
                             }
+                            "chats" -> showChats = true
                             "history" -> dialog = historyDialog(viewModel)
                             "init" -> {
                                 viewModel.sendMessage(
@@ -218,6 +224,100 @@ fun QuickActionsSheet(
             }
         )
     }
+
+    if (showChats) {
+        ChatsDialog(
+            viewModel = viewModel,
+            onDismiss = { showChats = false },
+            onResumed = {
+                showChats = false
+                onDismiss()
+            }
+        )
+    }
+}
+
+@Composable
+private fun ChatsDialog(
+    viewModel: ChatViewModel,
+    onDismiss: () -> Unit,
+    onResumed: () -> Unit
+) {
+    val context = LocalContext.current
+    var name by remember { mutableStateOf("") }
+    var entries by remember { mutableStateOf(viewModel.listSavedChats()) }
+    val fmt = remember { java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        title = { Text("Saved chats") },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        placeholder = { Text("Name (e.g. bug-hunt)") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    TextButton(
+                        enabled = name.isNotBlank(),
+                        onClick = {
+                            viewModel.saveChat(name.trim())
+                            entries = viewModel.listSavedChats()
+                            name = ""
+                            toast(context, "Saved")
+                        }
+                    ) { Text("Save") }
+                }
+                Spacer(Modifier.height(12.dp))
+                if (entries.isEmpty()) {
+                    Text(
+                        "No saved chats yet.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Column(
+                        modifier = Modifier.heightIn(max = 360.dp)
+                    ) {
+                        entries.forEach { entry ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(entry.name, style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        "${entry.messageCount} msgs · ${fmt.format(java.util.Date(entry.updatedAt))}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                TextButton(onClick = {
+                                    viewModel.resumeChat(entry.name)
+                                    onResumed()
+                                }) {
+                                    Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.size(2.dp))
+                                    Text("Resume")
+                                }
+                                TextButton(onClick = {
+                                    viewModel.deleteChat(entry.name)
+                                    entries = viewModel.listSavedChats()
+                                }) {
+                                    Icon(Icons.Default.Delete, null, modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    )
 }
 
 @Composable

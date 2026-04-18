@@ -14,6 +14,8 @@ import com.gemini.bridge.tools.RunShellCommandTool
 import com.gemini.bridge.tools.Tool
 import com.gemini.bridge.tools.ToolRegistry
 import com.gemini.bridge.tools.WriteFileTool
+import com.gemini.bridge.storage.ChatStore
+import com.gemini.bridge.storage.SecurePrefs
 import com.gemini.bridge.workspace.Workspace
 import com.gemini.domain.GeminiCore
 import com.gemini.domain.GeminiEvent
@@ -52,6 +54,8 @@ class RestGeminiCore(
     appContext: Context,
     val workspace: Workspace = Workspace(appContext),
     val termux: TermuxBridge = TermuxBridge(appContext),
+    private val prefs: SecurePrefs = SecurePrefs(appContext),
+    private val chatStore: ChatStore = ChatStore(appContext),
     private val defaultModel: String = DEFAULT_MODEL
 ) : GeminiCore {
 
@@ -78,6 +82,18 @@ class RestGeminiCore(
 
     @Volatile private var discoveredModels: List<String> = AVAILABLE_MODELS
 
+    init {
+        // Restore non-sensitive prefs eagerly; the API key is injected via init().
+        prefs.model?.let { if (it.isNotBlank()) model = it }
+        autoApproveDestructive = prefs.autoApprove
+        prefs.workspaceUri?.let { uri ->
+            runCatching { workspace.setTreeUri(Uri.parse(uri)) }
+        }
+    }
+
+    fun persistedApiKey(): String? = prefs.apiKey
+    fun hasPersistedSession(): Boolean = !prefs.apiKey.isNullOrBlank()
+
     private val _events = MutableSharedFlow<GeminiEvent>(
         replay = 0,
         extraBufferCapacity = 64,
@@ -88,8 +104,10 @@ class RestGeminiCore(
     override fun availableTools(): List<ToolSpec> = registry.specs()
 
     override suspend fun init(config: Map<String, Any>): GeminiResult {
+        val rememberKey = (config["remember"] as? Boolean) ?: true
         apiKey = (config["api_key"] ?: config["apiKey"] ?: "").toString().trim()
-        model = (config["model"] as? String)?.ifBlank { defaultModel } ?: defaultModel
+        val requestedModel = (config["model"] as? String)?.ifBlank { null }
+        if (requestedModel != null) model = requestedModel
         if (apiKey.isBlank()) return GeminiResult.Error("API key is required")
         // Best-effort live model fetch; if it fails we keep the static fallback.
         runCatching { discoveredModels = fetchAvailableModels() }
@@ -97,16 +115,24 @@ class RestGeminiCore(
         if (model !in discoveredModels && discoveredModels.isNotEmpty()) {
             model = discoveredModels.firstOrNull { it.contains("flash") } ?: discoveredModels.first()
         }
+        if (rememberKey) prefs.apiKey = apiKey
+        prefs.model = model
         return GeminiResult.Success("Ready")
     }
 
-    fun setModel(newModel: String) { model = newModel.ifBlank { defaultModel } }
+    fun setModel(newModel: String) {
+        model = newModel.ifBlank { defaultModel }
+        prefs.model = model
+    }
     fun currentModel(): String = model
     fun listModels(): List<String> = discoveredModels
     suspend fun refreshModels(): List<String> = runCatching { fetchAvailableModels() }
         .onSuccess { discoveredModels = it }
         .getOrDefault(discoveredModels)
-    fun setAutoApprove(enabled: Boolean) { autoApproveDestructive = enabled }
+    fun setAutoApprove(enabled: Boolean) {
+        autoApproveDestructive = enabled
+        prefs.autoApprove = enabled
+    }
     fun isAutoApprove(): Boolean = autoApproveDestructive
 
     fun signOut() {
@@ -117,6 +143,26 @@ class RestGeminiCore(
         pending.clear()
         discoveredModels = AVAILABLE_MODELS
         model = defaultModel
+        prefs.clearAll()
+    }
+
+    // --- chat persistence ---
+    fun listChats(): List<ChatStore.Entry> = chatStore.list()
+    fun saveChat(name: String) {
+        chatStore.save(name, ChatStore.Snapshot(turns.toList(), uiMessages.toList()))
+    }
+    fun deleteChat(name: String): Boolean = chatStore.delete(name)
+    suspend fun resumeChat(name: String): Boolean {
+        val snap = chatStore.load(name) ?: return false
+        turns.clear()
+        turns.addAll(snap.turns)
+        uiMessages.clear()
+        uiMessages.addAll(snap.messages)
+        pending.values.forEach { it.cancel() }
+        pending.clear()
+        // Replay messages to the UI.
+        snap.messages.forEach { _events.tryEmit(GeminiEvent.MessageAdded(it)) }
+        return true
     }
 
     private suspend fun fetchAvailableModels(): List<String> = withContext(Dispatchers.IO) {
@@ -153,6 +199,7 @@ class RestGeminiCore(
 
     override suspend fun setProjectFolder(uri: String): GeminiResult = runCatching {
         workspace.setTreeUri(Uri.parse(uri))
+        prefs.workspaceUri = uri
         GeminiResult.Success("Project folder set to ${workspace.rootLabel()}")
     }.getOrElse { GeminiResult.Error(it.message ?: "Invalid folder URI") }
 

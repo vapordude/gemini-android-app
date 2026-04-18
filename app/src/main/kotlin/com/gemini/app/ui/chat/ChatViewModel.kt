@@ -94,6 +94,26 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
         }
     }
 
+    fun hasPersistedSession(): Boolean = core.hasPersistedSession()
+
+    fun tryAutoLogin() {
+        val saved = core.persistedApiKey() ?: return
+        if (saved.isBlank()) return
+        initCore(mapOf("api_key" to saved, "remember" to true))
+    }
+
+    // --- chat persistence ---
+    fun listSavedChats(): List<com.gemini.bridge.storage.ChatStore.Entry> = core.listChats()
+    fun saveChat(name: String) { core.saveChat(name) }
+    fun deleteChat(name: String) { core.deleteChat(name) }
+    fun resumeChat(name: String) {
+        viewModelScope.launch {
+            _messages.clear()
+            val ok = core.resumeChat(name)
+            if (!ok) _error.value = "Could not resume \"$name\""
+        }
+    }
+
     fun sendMessage(text: String) {
         if (text.isBlank()) return
         viewModelScope.launch {
@@ -108,6 +128,7 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
 
     fun approve(callId: String, always: Boolean) {
         val decision = if (always) ToolDecision.AlwaysApprove else ToolDecision.Approve
+        _pendingCall.value = null
         viewModelScope.launch {
             core.resolveToolDecision(callId, decision)
             if (always) _autoApprove.value = true
@@ -115,6 +136,7 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
     }
 
     fun reject(callId: String, reason: String = "user declined") {
+        _pendingCall.value = null
         viewModelScope.launch {
             core.resolveToolDecision(callId, ToolDecision.Reject(reason))
         }
