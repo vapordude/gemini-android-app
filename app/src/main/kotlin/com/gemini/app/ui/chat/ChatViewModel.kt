@@ -7,6 +7,7 @@ import com.gemini.bridge.RestGeminiCore
 import com.gemini.domain.GeminiEvent
 import com.gemini.domain.GeminiMessage
 import com.gemini.domain.GeminiResult
+import com.gemini.domain.MessageRole
 import com.gemini.domain.ToolCall
 import com.gemini.domain.ToolDecision
 import com.gemini.domain.ToolSpec
@@ -129,4 +130,43 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
     }
 
     fun clearError() { _error.value = null }
+
+    fun lastAssistantText(): String? =
+        _messages.lastOrNull { it.role == MessageRole.MODEL && !it.text.isBlank() }?.text
+
+    fun stats(): ChatStats {
+        val userCount = _messages.count { it.role == MessageRole.USER }
+        val modelCount = _messages.count { it.role == MessageRole.MODEL }
+        val toolCount = _messages.count { it.role == MessageRole.TOOL }
+        val chars = _messages.sumOf { it.text.length }
+        return ChatStats(userCount, modelCount, toolCount, chars)
+    }
+
+    fun compressSession() {
+        viewModelScope.launch {
+            val snapshot = _messages.toList()
+            if (snapshot.isEmpty()) return@launch
+            val prompt = buildString {
+                append("Summarise the following conversation. ")
+                append("Keep the key decisions, open questions, and file changes. Output 10 bullets max.\n\n")
+                snapshot.forEach { msg ->
+                    when (msg.role) {
+                        MessageRole.USER -> append("[user] ").append(msg.text).append('\n')
+                        MessageRole.MODEL -> append("[assistant] ").append(msg.text).append('\n')
+                        else -> Unit
+                    }
+                }
+            }
+            core.resetSession()
+            _messages.clear()
+            sendMessage(prompt)
+        }
+    }
 }
+
+data class ChatStats(
+    val userMessages: Int,
+    val modelMessages: Int,
+    val toolEvents: Int,
+    val totalChars: Int
+)

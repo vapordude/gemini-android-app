@@ -25,12 +25,14 @@ import com.gemini.domain.ToolCallResult
 import com.gemini.domain.ToolDecision
 import com.gemini.domain.ToolSpec
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -231,7 +233,7 @@ class RestGeminiCore(
 
     // --- HTTP + parsing ---
 
-    private fun callOnce(): Pair<String?, List<ToolCall>> {
+    private suspend fun callOnce(): Pair<String?, List<ToolCall>> = withContext(Dispatchers.IO) {
         val body = buildRequestBody()
         val url = "https://generativelanguage.googleapis.com/v1beta/models/" +
             "$model:generateContent?key=${URLEncoder.encode(apiKey, "UTF-8")}"
@@ -240,7 +242,7 @@ class RestGeminiCore(
             val msg = tryExtractError(rawBody) ?: "HTTP $code"
             throw RuntimeException(msg)
         }
-        return parseResponse(rawBody)
+        parseResponse(rawBody)
     }
 
     private fun buildRequestBody(): String {
@@ -372,10 +374,13 @@ class RestGeminiCore(
 
     companion object {
         private const val TAG = "RestGeminiCore"
-        const val DEFAULT_MODEL = "gemini-1.5-flash-latest"
+        const val DEFAULT_MODEL = "gemini-2.5-flash"
         val AVAILABLE_MODELS = listOf(
+            "gemini-3-pro",
+            "gemini-3-flash",
             "gemini-2.5-pro",
             "gemini-2.5-flash",
+            "gemini-2.0-flash",
             "gemini-1.5-pro-latest",
             "gemini-1.5-flash-latest"
         )
