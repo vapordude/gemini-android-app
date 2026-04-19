@@ -230,7 +230,7 @@ class RestGeminiCore(
         var lastText = ""
         try {
             while (true) {
-                emitThinking("Réflexion…")
+                emitThinking("Thinking…")
                 val (textPart, calls) = streamOnce()
                 if (!textPart.isNullOrBlank()) lastText = textPart
                 if (calls.isEmpty()) {
@@ -240,7 +240,7 @@ class RestGeminiCore(
 
                 val responseParts = JSONArray()
                 for (call in calls) {
-                    emitThinking("Exécution de ${call.name}…")
+                    emitThinking("Running ${call.name}…")
                     val result = runSingleCall(call)
                     responseParts.put(
                         JSONObject().put(

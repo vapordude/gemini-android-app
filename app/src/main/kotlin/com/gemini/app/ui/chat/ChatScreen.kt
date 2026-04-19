@@ -254,7 +254,7 @@ fun ChatScreen(
                             .padding(bottom = 12.dp),
                         containerColor = MaterialTheme.colorScheme.surfaceVariant
                     ) {
-                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Dernières réponses")
+                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Jump to latest")
                     }
                 }
 
@@ -311,10 +311,10 @@ fun ChatScreen(
 }
 
 private val STARTER_CHIPS = listOf(
-    "Liste les fichiers à la racine du workspace" to "📁",
-    "Crée un README.md qui décrit ce projet" to "📝",
-    "Cherche les TODO dans le code" to "🔎",
-    "Lance `uname -a` dans Termux" to "💻"
+    "List the files at the workspace root" to "📁",
+    "Create a README.md describing this project" to "📝",
+    "Find TODOs in the code" to "🔎",
+    "Run `uname -a` in Termux" to "💻"
 )
 
 @Composable
@@ -331,14 +331,14 @@ private fun EmptyState(onSuggestion: (String) -> Unit) {
             )
             Spacer(Modifier.size(8.dp))
             Text(
-                "Prêt quand tu l'es",
+                "Ready when you are",
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.primary
             )
             Spacer(Modifier.size(8.dp))
             Text(
-                "Gemini peut lire, écrire, chercher ou lancer des commandes shell. " +
-                    "Choisis un point de départ ou tape ton message.",
+                "Gemini can read, write, search or run shell commands. " +
+                    "Pick a starter or type your own message.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -367,7 +367,7 @@ private fun ChatList(
     onRetry: () -> Unit,
     onDismissError: () -> Unit
 ) {
-    val grouped = remember(messages) { groupMessages(messages) }
+    val grouped = groupMessages(messages)
     LazyColumn(
         state = listState,
         modifier = Modifier
@@ -487,17 +487,17 @@ fun MessageBubble(
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     DropdownMenuItem(
                         leadingIcon = { Icon(Icons.Default.ContentCopy, null) },
-                        text = { Text("Copier") },
+                        text = { Text("Copy") },
                         onClick = { onCopy(message.text); menuOpen = false }
                     )
                     if (onRegenerate != null) DropdownMenuItem(
                         leadingIcon = { Icon(Icons.Default.Autorenew, null) },
-                        text = { Text("Régénérer") },
+                        text = { Text("Regenerate") },
                         onClick = { onRegenerate(); menuOpen = false }
                     )
                     if (onResend != null) DropdownMenuItem(
                         leadingIcon = { Icon(Icons.Default.Refresh, null) },
-                        text = { Text("Renvoyer") },
+                        text = { Text("Resend") },
                         onClick = { onResend(); menuOpen = false }
                     )
                 }
@@ -567,7 +567,7 @@ fun ToolBubble(
                 Spacer(Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = if (pending) "$name — en cours…" else name,
+                        text = if (pending) "$name — running…" else name,
                         style = MaterialTheme.typography.labelMedium,
                         color = accent
                     )
@@ -582,7 +582,7 @@ fun ToolBubble(
                 }
                 Icon(
                     if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = if (expanded) "Replier" else "Déplier",
+                    contentDescription = if (expanded) "Collapse" else "Expand",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -684,7 +684,7 @@ private fun ErrorBubble(message: String, onRetry: () -> Unit, onDismiss: () -> U
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        "Échec de la requête",
+                        "Request failed",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.error
                     )
@@ -700,9 +700,9 @@ private fun ErrorBubble(message: String, onRetry: () -> Unit, onDismiss: () -> U
                     Button(onClick = onRetry) {
                         Icon(Icons.Default.Refresh, null)
                         Spacer(Modifier.width(4.dp))
-                        Text("Réessayer")
+                        Text("Retry")
                     }
-                    TextButton(onClick = onDismiss) { Text("Fermer") }
+                    TextButton(onClick = onDismiss) { Text("Dismiss") }
                 }
             }
         }
@@ -713,7 +713,7 @@ private fun copyText(context: android.content.Context, text: String) {
     val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
         as android.content.ClipboardManager
     cm.setPrimaryClip(android.content.ClipData.newPlainText("chat", text))
-    android.widget.Toast.makeText(context, "Copié", android.widget.Toast.LENGTH_SHORT).show()
+    android.widget.Toast.makeText(context, "Copied", android.widget.Toast.LENGTH_SHORT).show()
 }
 
 @Composable
@@ -807,14 +807,14 @@ fun BottomChatBar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onAddClick, enabled = !isLoading) {
-                Icon(Icons.Default.Add, contentDescription = "Actions rapides")
+                Icon(Icons.Default.Add, contentDescription = "Quick actions")
             }
             TextField(
                 value = text,
                 onValueChange = onTextChange,
                 modifier = Modifier.weight(1f),
                 enabled = enabled,
-                placeholder = { Text("Message à Gemini…") },
+                placeholder = { Text("Message Gemini…") },
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = MaterialTheme.colorScheme.surface,
                     unfocusedContainerColor = MaterialTheme.colorScheme.surface
@@ -829,7 +829,7 @@ fun BottomChatBar(
                 ) {
                     Icon(
                         Icons.Default.Stop,
-                        contentDescription = "Arrêter",
+                        contentDescription = "Stop",
                         tint = MaterialTheme.colorScheme.onError
                     )
                 }
@@ -841,7 +841,7 @@ fun BottomChatBar(
                 ) {
                     Icon(
                         Icons.Default.Send,
-                        contentDescription = "Envoyer",
+                        contentDescription = "Send",
                         tint = MaterialTheme.colorScheme.onPrimary
                     )
                 }
