@@ -313,13 +313,12 @@ fun ToolBubble(message: GeminiMessage) {
     val name = message.toolCall?.name ?: result?.callId ?: "tool"
     val preview = when {
         isCall -> message.text.lineSequence().firstOrNull().orEmpty().take(80)
-        ok -> {
-            val stdoutLine = message.text.lineSequence()
-                .firstOrNull { it.isNotBlank() && !it.startsWith("---") && !it.startsWith("exit=") }
+        else -> {
+            val first = message.text.lineSequence()
+                .firstOrNull { it.isNotBlank() && !it.startsWith("---") }
                 .orEmpty().take(80)
-            if (stdoutLine.isNotBlank()) stdoutLine else "exit=0"
+            if (first.isNotBlank()) first else if (ok) "ok" else "failed"
         }
-        else -> "exit=${result?.exitCode ?: "?"}"
     }
     var expanded by remember(message.id) { mutableStateOf(false) }
 
