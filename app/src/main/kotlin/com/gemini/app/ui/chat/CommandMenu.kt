@@ -105,7 +105,7 @@ fun QuickActionsSheet(
     val context = LocalContext.current
     var dialog by remember { mutableStateOf<DialogContent?>(null) }
     var showChats by remember { mutableStateOf(false) }
-    val expanded = remember { mutableStateOf(setOf("Reply", "Session")) }
+    val expanded = remember { mutableStateOf(emptySet<String>()) }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(

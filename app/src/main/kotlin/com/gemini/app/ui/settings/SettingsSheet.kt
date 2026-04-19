@@ -5,11 +5,14 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -76,7 +79,7 @@ fun SettingsSheet(
     val models by viewModel.availableModels.collectAsState()
 
     var customModel by remember { mutableStateOf("") }
-    var expanded by remember { mutableStateOf(setOf("Account", "Model")) }
+    var expanded by remember { mutableStateOf(emptySet<String>()) }
 
     val folderLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -352,6 +355,12 @@ private fun SettingsAccordion(
     }
 }
 
+private const val RUN_COMMAND_PERMISSION = "com.termux.permission.RUN_COMMAND"
+
+private fun hasRunCommandPermission(context: Context): Boolean =
+    ContextCompat.checkSelfPermission(context, RUN_COMMAND_PERMISSION) ==
+        PackageManager.PERMISSION_GRANTED
+
 @Composable
 private fun TermuxBody(viewModel: ChatViewModel) {
     val context = LocalContext.current
@@ -360,11 +369,12 @@ private fun TermuxBody(viewModel: ChatViewModel) {
     if (!installed) {
         Text(
             "Termux is not installed. It powers real shell commands " +
-                "(git, gradle, curl…). Install from F-Droid (the Play Store build is outdated).",
+                "(git, gradle, curl…). Install from F-Droid — the Play Store " +
+                "build is outdated and does NOT accept external commands.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { openUrl(context, "https://f-droid.org/packages/com.termux/") }) {
                 Icon(Icons.Default.OpenInNew, contentDescription = null)
@@ -378,43 +388,176 @@ private fun TermuxBody(viewModel: ChatViewModel) {
         return
     }
 
+    var permissionGranted by remember { mutableStateOf(hasRunCommandPermission(context)) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        permissionGranted = granted
+        if (!granted) {
+            Toast.makeText(
+                context,
+                "Permission not granted. Open app settings → Permissions → Termux RUN_COMMAND.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
     Text(
-        "Termux is installed. Run these once inside Termux, then return:",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-    Spacer(Modifier.height(6.dp))
-    TermuxCommandRow(
-        step = "1.",
-        command = "mkdir -p ~/.termux && echo 'allow-external-apps=true' >> ~/.termux/termux.properties",
-        context = context
-    )
-    TermuxCommandRow(
-        step = "2.",
-        command = "termux-reload-settings",
-        context = context
-    )
-    Spacer(Modifier.height(6.dp))
-    Text(
-        "Then in Android Settings → Apps → Gemini, grant the RUN_COMMAND permission " +
-            "(Permissions → Additional permissions → Termux RUN_COMMAND).",
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
+        "Three things must all be true for shell commands to work:",
+        style = MaterialTheme.typography.bodyMedium
     )
     Spacer(Modifier.height(8.dp))
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(onClick = { openTermux(context) }) {
-            Icon(Icons.Default.Terminal, contentDescription = null)
-            Spacer(Modifier.width(6.dp))
-            Text("Open Termux")
+
+    TermuxStep(
+        number = "1",
+        title = "Termux installed from F-Droid",
+        ok = true,
+        body = {
+            Text(
+                "Detected. (Play Store Termux will silently ignore our commands.)",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
-        OutlinedButton(onClick = {
+    )
+
+    TermuxStep(
+        number = "2",
+        title = "Termux allows external apps",
+        ok = null,
+        body = {
+            Text(
+                "Open Termux and paste these two commands once (tap to copy):",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(6.dp))
+            TermuxCommandRow(
+                step = "a.",
+                command = "mkdir -p ~/.termux && echo 'allow-external-apps=true' >> ~/.termux/termux.properties",
+                context = context
+            )
+            TermuxCommandRow(
+                step = "b.",
+                command = "termux-reload-settings",
+                context = context
+            )
+            Spacer(Modifier.height(6.dp))
+            OutlinedButton(onClick = { openTermux(context) }) {
+                Icon(Icons.Default.Terminal, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("Open Termux")
+            }
+        }
+    )
+
+    TermuxStep(
+        number = "3",
+        title = "Android RUN_COMMAND permission",
+        ok = permissionGranted,
+        body = {
+            Text(
+                if (permissionGranted)
+                    "Granted. You should be able to run shell commands now."
+                else
+                    "This is the step most people miss. Android treats " +
+                        "com.termux.permission.RUN_COMMAND as a dangerous permission — " +
+                        "it must be granted explicitly, the same way as Camera or Location.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (!permissionGranted) {
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { permissionLauncher.launch(RUN_COMMAND_PERMISSION) }) {
+                        Icon(Icons.Default.Security, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Request permission")
+                    }
+                    OutlinedButton(onClick = { openAppSettings(context) }) {
+                        Text("Open app settings")
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "If the request pops up nothing, use \"Open app settings\" → " +
+                        "Permissions → Additional permissions → Termux RUN_COMMAND → Allow.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    )
+
+    Spacer(Modifier.height(10.dp))
+    Button(
+        enabled = permissionGranted,
+        onClick = {
             viewModel.sendMessage("Use run_shell_command to execute: echo hello from termux")
-        }) {
-            Icon(Icons.Default.PlayArrow, contentDescription = null)
-            Spacer(Modifier.width(6.dp))
-            Text("Test shell")
         }
+    ) {
+        Icon(Icons.Default.PlayArrow, contentDescription = null)
+        Spacer(Modifier.width(6.dp))
+        Text("Test shell now")
+    }
+}
+
+@Composable
+private fun TermuxStep(
+    number: String,
+    title: String,
+    ok: Boolean?,
+    body: @Composable () -> Unit
+) {
+    val accent = when (ok) {
+        true -> MaterialTheme.colorScheme.primary
+        false -> MaterialTheme.colorScheme.error
+        null -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    color = accent.copy(alpha = 0.15f),
+                    shape = MaterialTheme.shapes.extraSmall
+                ) {
+                    Text(
+                        number,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = accent,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f)
+                )
+                val badge = when (ok) { true -> "OK"; false -> "missing"; null -> "check" }
+                Text(
+                    badge,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = accent
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            body()
+        }
+    }
+}
+
+private fun openAppSettings(context: Context) {
+    runCatching {
+        context.startActivity(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(Uri.fromParts("package", context.packageName, null))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
     }
 }
 
