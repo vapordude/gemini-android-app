@@ -2,6 +2,11 @@ package com.gemini.app.ui.chat
 
 import androidx.compose.foundation.Image
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
@@ -415,10 +420,11 @@ private fun groupMessages(messages: List<GeminiMessage>): List<ChatItem> {
         val m = messages[i]
         when {
             m.role == MessageRole.TOOL && m.toolCall != null -> {
+                val call = m.toolCall!!
                 val next = messages.getOrNull(i + 1)
                 val pairedResult = if (next != null
                     && next.role == MessageRole.TOOL
-                    && next.toolResult?.callId == m.toolCall.id
+                    && next.toolResult?.callId == call.id
                 ) next else null
                 out += ChatItem.Tool(m, pairedResult)
                 i += if (pairedResult != null) 2 else 1
@@ -623,18 +629,19 @@ private fun ThinkingBubble(label: String) {
 
 @Composable
 private fun PulsingDots() {
-    val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "dots")
+    val transition = rememberInfiniteTransition(label = "dots")
     val phase by transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
-        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-            animation = androidx.compose.animation.core.tween(900, easing = androidx.compose.animation.core.LinearEasing)
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = LinearEasing)
         ),
         label = "phase"
     )
     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         repeat(3) { i ->
-            val t = ((phase - i * 0.2f) % 1f + 1f) % 1f
+            val offset = i.toFloat() * 0.2f
+            val t = ((phase - offset) % 1f + 1f) % 1f
             val alpha = 0.25f + 0.75f * kotlin.math.abs(1f - 2f * t)
             Box(
                 modifier = Modifier
