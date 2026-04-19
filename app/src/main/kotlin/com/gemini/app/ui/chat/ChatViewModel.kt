@@ -11,6 +11,8 @@ import com.gemini.domain.MessageRole
 import com.gemini.domain.ToolCall
 import com.gemini.domain.ToolDecision
 import com.gemini.domain.ToolSpec
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,6 +47,12 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
     private val _availableModels = MutableStateFlow(core.listModels())
     val availableModels: StateFlow<List<String>> = _availableModels.asStateFlow()
 
+    private val _thinking = MutableStateFlow<String?>(null)
+    val thinking: StateFlow<String?> = _thinking.asStateFlow()
+
+    private var sendJob: Job? = null
+    private var lastUserPrompt: String? = null
+
     val availableTools: List<ToolSpec> get() = core.availableTools()
     val termuxInstalled: Boolean get() = core.termux.isInstalled()
 
@@ -65,10 +73,15 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
             core.events.collect { ev ->
                 when (ev) {
                     is GeminiEvent.MessageAdded -> _messages.add(ev.message)
+                    is GeminiEvent.MessageUpdated -> {
+                        val idx = _messages.indexOfLast { it.id == ev.message.id }
+                        if (idx >= 0) _messages[idx] = ev.message else _messages.add(ev.message)
+                    }
                     is GeminiEvent.ToolCallPending -> _pendingCall.value = ev.call
                     is GeminiEvent.ToolCallCompleted -> {
                         if (_pendingCall.value?.id == ev.result.callId) _pendingCall.value = null
                     }
+                    is GeminiEvent.Thinking -> _thinking.value = ev.label
                     is GeminiEvent.Notice -> _error.value = ev.message
                 }
             }
@@ -128,14 +141,44 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
 
     fun sendMessage(text: String) {
         if (text.isBlank()) return
-        viewModelScope.launch {
+        if (sendJob?.isActive == true) return
+        lastUserPrompt = text
+        sendJob = viewModelScope.launch {
             _isLoading.value = true
-            when (val r = core.sendMessage(text)) {
-                is GeminiResult.Success -> {}
-                is GeminiResult.Error -> _error.value = r.message
+            try {
+                when (val r = core.sendMessage(text)) {
+                    is GeminiResult.Success -> {}
+                    is GeminiResult.Error -> _error.value = r.message
+                }
+            } catch (_: CancellationException) {
+                // Cancelled by user — silent.
+            } finally {
+                _isLoading.value = false
+                _thinking.value = null
+                sendJob = null
             }
-            _isLoading.value = false
         }
+    }
+
+    fun cancelSend() {
+        sendJob?.cancel()
+        sendJob = null
+        _isLoading.value = false
+        _thinking.value = null
+        _pendingCall.value = null
+    }
+
+    fun regenerateLast() {
+        val prompt = lastUserPrompt ?: return
+        if (sendJob?.isActive == true) return
+        // Drop the last model/tool bubbles so the re-run looks fresh.
+        while (_messages.isNotEmpty() && _messages.last().role != MessageRole.USER) {
+            _messages.removeAt(_messages.size - 1)
+        }
+        if (_messages.isNotEmpty() && _messages.last().role == MessageRole.USER) {
+            _messages.removeAt(_messages.size - 1)
+        }
+        sendMessage(prompt)
     }
 
     fun approve(callId: String, always: Boolean) {

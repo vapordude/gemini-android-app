@@ -4,7 +4,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,35 +20,44 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBarDefaults
@@ -57,6 +66,7 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -64,6 +74,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -100,6 +111,7 @@ fun ChatScreen(
     var showChats by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
     var showTermuxGuide by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     LaunchedEffect(Unit) {
         if (!viewModel.isTermuxGuideShown()) {
@@ -117,20 +129,23 @@ fun ChatScreen(
     val pendingCall by viewModel.pendingCall.collectAsState()
     val model by viewModel.model.collectAsState()
     val workspaceLabel by viewModel.workspaceLabel.collectAsState()
+    val thinking by viewModel.thinking.collectAsState()
 
     val listState = rememberLazyListState()
-    val snackbarHostState = remember { SnackbarHostState() }
-
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
+    val isNearBottom by remember(listState) {
+        derivedStateOf {
+            val layout = listState.layoutInfo
+            val last = layout.visibleItemsInfo.lastOrNull()
+            last == null || last.index >= layout.totalItemsCount - 2
+        }
     }
 
-    LaunchedEffect(error) {
-        error?.let {
-            scope.launch {
-                snackbarHostState.showSnackbar(it)
-                viewModel.clearError()
-            }
+    // Only auto-scroll when the user is already near the bottom — otherwise
+    // they get yanked out of whatever they were reading.
+    LaunchedEffect(messages.size, thinking, error) {
+        if (isNearBottom) {
+            val target = messages.size - 1 + extraTail(thinking, error)
+            if (target >= 0) listState.animateScrollToItem(target)
         }
     }
 
@@ -186,6 +201,7 @@ fun ChatScreen(
                 BottomChatBar(
                     text = textState,
                     enabled = !isLoading && pendingCall == null,
+                    isLoading = isLoading,
                     onTextChange = { textState = it },
                     onAddClick = { showActions = true },
                     onSend = {
@@ -193,31 +209,46 @@ fun ChatScreen(
                             viewModel.sendMessage(textState)
                             textState = ""
                         }
-                    }
+                    },
+                    onStop = { viewModel.cancelSend() }
                 )
-            },
-            snackbarHost = { SnackbarHost(snackbarHostState) }
+            }
         ) { paddingValues ->
             Box(modifier = Modifier.padding(paddingValues).background(MaterialTheme.colorScheme.background)) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    if (isLoading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                    if (messages.isEmpty()) {
-                        EmptyState()
-                    } else {
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            items(messages, key = { it.id }) { message ->
-                                when (message.role) {
-                                    MessageRole.TOOL -> ToolBubble(message)
-                                    else -> MessageBubble(message)
-                                }
-                            }
-                        }
+                if (messages.isEmpty()) {
+                    EmptyState(onSuggestion = { suggestion ->
+                        viewModel.sendMessage(suggestion)
+                    })
+                } else {
+                    ChatList(
+                        messages = messages,
+                        thinking = thinking,
+                        error = error,
+                        listState = listState,
+                        onCopy = { text -> copyText(context, text) },
+                        onRegenerate = { viewModel.regenerateLast() },
+                        onResend = { text ->
+                            textState = text
+                        },
+                        onRetry = {
+                            viewModel.clearError()
+                            viewModel.regenerateLast()
+                        },
+                        onDismissError = { viewModel.clearError() }
+                    )
+                }
+
+                if (!isNearBottom && messages.size > 1) {
+                    SmallFloatingActionButton(
+                        onClick = {
+                            scope.launch { listState.animateScrollToItem(messages.size - 1) }
+                        },
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 12.dp),
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    ) {
+                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Dernières réponses")
                     }
                 }
 
@@ -273,12 +304,19 @@ fun ChatScreen(
     }
 }
 
+private val STARTER_CHIPS = listOf(
+    "Liste les fichiers à la racine du workspace" to "📁",
+    "Crée un README.md qui décrit ce projet" to "📝",
+    "Cherche les TODO dans le code" to "🔎",
+    "Lance `uname -a` dans Termux" to "💻"
+)
+
 @Composable
-private fun EmptyState() {
+private fun EmptyState(onSuggestion: (String) -> Unit) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(32.dp)
+            modifier = Modifier.padding(24.dp)
         ) {
             Image(
                 painter = painterResource(id = R.mipmap.ic_launcher_foreground),
@@ -287,69 +325,207 @@ private fun EmptyState() {
             )
             Spacer(Modifier.size(8.dp))
             Text(
-                "Ready when you are",
+                "Prêt quand tu l'es",
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.primary
             )
             Spacer(Modifier.size(8.dp))
             Text(
-                "Ask Gemini to read, write, search or run shell commands. " +
-                    "Tap + for quick actions and ☰ for navigation and settings.",
+                "Gemini peut lire, écrire, chercher ou lancer des commandes shell. " +
+                    "Choisis un point de départ ou tape ton message.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Spacer(Modifier.size(16.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                STARTER_CHIPS.forEach { (label, emoji) ->
+                    SuggestionChip(
+                        onClick = { onSuggestion(label) },
+                        label = { Text("$emoji  $label") }
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-fun MessageBubble(message: GeminiMessage) {
+private fun ChatList(
+    messages: List<GeminiMessage>,
+    thinking: String?,
+    error: String?,
+    listState: LazyListState,
+    onCopy: (String) -> Unit,
+    onRegenerate: () -> Unit,
+    onResend: (String) -> Unit,
+    onRetry: () -> Unit,
+    onDismissError: () -> Unit
+) {
+    val grouped = remember(messages) { groupMessages(messages) }
+    LazyColumn(
+        state = listState,
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items(grouped, key = { it.key }) { item ->
+            when (item) {
+                is ChatItem.User -> MessageBubble(
+                    message = item.message,
+                    onCopy = onCopy,
+                    onResend = { onResend(item.message.text) }
+                )
+                is ChatItem.Model -> MessageBubble(
+                    message = item.message,
+                    onCopy = onCopy,
+                    onRegenerate = onRegenerate
+                )
+                is ChatItem.Tool -> ToolBubble(
+                    call = item.call,
+                    result = item.result,
+                    onCopy = onCopy
+                )
+            }
+        }
+        if (thinking != null) item("thinking") { ThinkingBubble(thinking) }
+        if (error != null) item("error") {
+            ErrorBubble(error, onRetry = onRetry, onDismiss = onDismissError)
+        }
+    }
+}
+
+private sealed class ChatItem {
+    abstract val key: String
+    data class User(val message: GeminiMessage) : ChatItem() {
+        override val key = "u-${message.id}"
+    }
+    data class Model(val message: GeminiMessage) : ChatItem() {
+        override val key = "m-${message.id}"
+    }
+    data class Tool(val call: GeminiMessage, val result: GeminiMessage?) : ChatItem() {
+        override val key = "t-${call.id}"
+    }
+}
+
+private fun groupMessages(messages: List<GeminiMessage>): List<ChatItem> {
+    val out = mutableListOf<ChatItem>()
+    var i = 0
+    while (i < messages.size) {
+        val m = messages[i]
+        when {
+            m.role == MessageRole.TOOL && m.toolCall != null -> {
+                val next = messages.getOrNull(i + 1)
+                val pairedResult = if (next != null
+                    && next.role == MessageRole.TOOL
+                    && next.toolResult?.callId == m.toolCall.id
+                ) next else null
+                out += ChatItem.Tool(m, pairedResult)
+                i += if (pairedResult != null) 2 else 1
+            }
+            m.role == MessageRole.TOOL && m.toolResult != null -> {
+                out += ChatItem.Tool(m, m)
+                i++
+            }
+            m.isUser || m.role == MessageRole.USER -> {
+                out += ChatItem.User(m); i++
+            }
+            else -> { out += ChatItem.Model(m); i++ }
+        }
+    }
+    return out
+}
+
+private fun extraTail(thinking: String?, error: String?): Int {
+    var n = 0
+    if (thinking != null) n++
+    if (error != null) n++
+    return n
+}
+
+@Composable
+fun MessageBubble(
+    message: GeminiMessage,
+    onCopy: (String) -> Unit = {},
+    onRegenerate: (() -> Unit)? = null,
+    onResend: (() -> Unit)? = null
+) {
     val alignment = if (message.isUser) Alignment.CenterEnd else Alignment.CenterStart
     val container = if (message.isUser) MaterialTheme.colorScheme.primary
         else MaterialTheme.colorScheme.surfaceVariant
     val content = if (message.isUser) MaterialTheme.colorScheme.onPrimary
         else MaterialTheme.colorScheme.onSurface
+    var menuOpen by remember(message.id) { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = alignment) {
         Surface(
             color = container,
             shape = MaterialTheme.shapes.medium,
-            modifier = if (message.isUser) Modifier else Modifier.border(
+            modifier = (if (message.isUser) Modifier else Modifier.border(
                 width = 1.dp,
                 color = MaterialTheme.colorScheme.outlineVariant,
                 shape = MaterialTheme.shapes.medium
+            )).combinedClickable(
+                onClick = {},
+                onLongClick = { menuOpen = true }
             )
         ) {
-            Text(
-                text = message.text,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                color = content
-            )
+            Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                if (message.isUser) {
+                    Text(message.text, color = content)
+                } else {
+                    MarkdownText(text = message.text, color = content)
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        leadingIcon = { Icon(Icons.Default.ContentCopy, null) },
+                        text = { Text("Copier") },
+                        onClick = { onCopy(message.text); menuOpen = false }
+                    )
+                    if (onRegenerate != null) DropdownMenuItem(
+                        leadingIcon = { Icon(Icons.Default.Autorenew, null) },
+                        text = { Text("Régénérer") },
+                        onClick = { onRegenerate(); menuOpen = false }
+                    )
+                    if (onResend != null) DropdownMenuItem(
+                        leadingIcon = { Icon(Icons.Default.Refresh, null) },
+                        text = { Text("Renvoyer") },
+                        onClick = { onResend(); menuOpen = false }
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-fun ToolBubble(message: GeminiMessage) {
-    val result = message.toolResult
-    val isCall = result == null
-    val ok = result?.ok ?: true
+fun ToolBubble(
+    call: GeminiMessage,
+    result: GeminiMessage?,
+    onCopy: (String) -> Unit = {}
+) {
+    val res = result?.toolResult
+    val pending = res == null
+    val ok = res?.ok ?: true
     val accent = when {
-        isCall -> MaterialTheme.colorScheme.primary
+        pending -> MaterialTheme.colorScheme.primary
         ok -> MaterialTheme.colorScheme.tertiary
         else -> MaterialTheme.colorScheme.error
     }
-    val name = message.toolCall?.name ?: result?.callId ?: "tool"
+    val name = call.toolCall?.name ?: res?.callId ?: "tool"
+    val rawBody = result?.text ?: call.text
+    val (headLine, diffBody) = remember(rawBody) { extractDiff(rawBody) }
     val preview = when {
-        isCall -> message.text.lineSequence().firstOrNull().orEmpty().take(80)
+        pending -> call.text.lineSequence().firstOrNull().orEmpty().take(80)
+        diffBody != null -> headLine.lineSequence().firstOrNull().orEmpty().take(80)
         else -> {
-            val first = message.text.lineSequence()
+            val first = headLine.lineSequence()
                 .firstOrNull { it.isNotBlank() && !it.startsWith("---") }
                 .orEmpty().take(80)
             if (first.isNotBlank()) first else if (ok) "ok" else "failed"
         }
     }
-    var expanded by remember(message.id) { mutableStateOf(false) }
+    var expanded by remember(call.id) { mutableStateOf(false) }
 
     Surface(
         color = MaterialTheme.colorScheme.surface,
@@ -366,7 +542,10 @@ fun ToolBubble(message: GeminiMessage) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { expanded = !expanded }
+                    .combinedClickable(
+                        onClick = { expanded = !expanded },
+                        onLongClick = { onCopy(rawBody) }
+                    )
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -379,7 +558,7 @@ fun ToolBubble(message: GeminiMessage) {
                 Spacer(Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = if (isCall) "$name — calling…" else name,
+                        text = if (pending) "$name — en cours…" else name,
                         style = MaterialTheme.typography.labelMedium,
                         color = accent
                     )
@@ -394,25 +573,137 @@ fun ToolBubble(message: GeminiMessage) {
                 }
                 Icon(
                     if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    contentDescription = if (expanded) "Replier" else "Déplier",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             AnimatedVisibility(visible = expanded) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Text(
-                        text = message.text,
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    if (headLine.isNotBlank()) {
+                        Text(
+                            text = headLine,
+                            style = MaterialTheme.typography.bodySmall
+                                .copy(fontFamily = FontFamily.Monospace),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                    }
+                    if (diffBody != null) {
+                        DiffView(diffBody)
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun ThinkingBubble(label: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.medium)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            PulsingDots()
+            Spacer(Modifier.width(10.dp))
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun PulsingDots() {
+    val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "dots")
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = androidx.compose.animation.core.tween(900, easing = androidx.compose.animation.core.LinearEasing)
+        ),
+        label = "phase"
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        repeat(3) { i ->
+            val t = ((phase - i * 0.2f) % 1f + 1f) % 1f
+            val alpha = 0.25f + 0.75f * kotlin.math.abs(1f - 2f * t)
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = alpha),
+                        shape = MaterialTheme.shapes.small
+                    )
+            )
+        }
+    }
+}
+
+@Composable
+private fun ErrorBubble(message: String, onRetry: () -> Unit, onDismiss: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f),
+                MaterialTheme.shapes.medium)
+    ) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .fillMaxHeight()
+                    .background(MaterialTheme.colorScheme.error)
+            )
+            Column(modifier = Modifier.padding(14.dp).weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.ErrorOutline, contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Échec de la requête",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onRetry) {
+                        Icon(Icons.Default.Refresh, null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Réessayer")
+                    }
+                    TextButton(onClick = onDismiss) { Text("Fermer") }
+                }
+            }
+        }
+    }
+}
+
+private fun copyText(context: android.content.Context, text: String) {
+    val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+        as android.content.ClipboardManager
+    cm.setPrimaryClip(android.content.ClipData.newPlainText("chat", text))
+    android.widget.Toast.makeText(context, "Copié", android.widget.Toast.LENGTH_SHORT).show()
 }
 
 @Composable
@@ -489,9 +780,11 @@ private fun ToolApprovalCard(
 fun BottomChatBar(
     text: String,
     enabled: Boolean,
+    isLoading: Boolean,
     onTextChange: (String) -> Unit,
     onAddClick: () -> Unit,
-    onSend: () -> Unit
+    onSend: () -> Unit,
+    onStop: () -> Unit
 ) {
     Surface(color = MaterialTheme.colorScheme.surface) {
         Row(
@@ -503,27 +796,45 @@ fun BottomChatBar(
                 .imePadding(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onAddClick) {
-                Icon(Icons.Default.Add, contentDescription = "Quick actions")
+            IconButton(onClick = onAddClick, enabled = !isLoading) {
+                Icon(Icons.Default.Add, contentDescription = "Actions rapides")
             }
             TextField(
                 value = text,
                 onValueChange = onTextChange,
                 modifier = Modifier.weight(1f),
                 enabled = enabled,
-                placeholder = { Text("Message Gemini…") },
+                placeholder = { Text("Message à Gemini…") },
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = MaterialTheme.colorScheme.surface,
                     unfocusedContainerColor = MaterialTheme.colorScheme.surface
                 )
             )
             Spacer(modifier = Modifier.width(8.dp))
-            FloatingActionButton(
-                onClick = onSend,
-                containerColor = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(Icons.Default.Send, contentDescription = "Send", tint = MaterialTheme.colorScheme.onPrimary)
+            if (isLoading) {
+                FloatingActionButton(
+                    onClick = onStop,
+                    containerColor = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Stop,
+                        contentDescription = "Arrêter",
+                        tint = MaterialTheme.colorScheme.onError
+                    )
+                }
+            } else {
+                FloatingActionButton(
+                    onClick = onSend,
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Send,
+                        contentDescription = "Envoyer",
+                        tint = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
             }
         }
     }

@@ -37,7 +37,10 @@ sealed class ToolDecision {
 
 sealed class GeminiEvent {
     data class MessageAdded(val message: GeminiMessage) : GeminiEvent()
+    data class MessageUpdated(val message: GeminiMessage) : GeminiEvent()
     data class ToolCallPending(val call: ToolCall) : GeminiEvent()
     data class ToolCallCompleted(val result: ToolCallResult) : GeminiEvent()
+    /** High-level status for the UI — null label means clear. */
+    data class Thinking(val label: String?) : GeminiEvent()
     data class Notice(val message: String) : GeminiEvent()
 }

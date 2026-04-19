@@ -37,8 +37,12 @@ class WriteFileTool(private val ws: Workspace) : Tool {
     override suspend fun execute(call: ToolCall): ToolCallResult = runCatching {
         val path = call.arguments["path"] as? String ?: error("path is required")
         val content = call.arguments["content"] as? String ?: error("content is required")
+        val before = runCatching { ws.read(path) }.getOrNull()
         val entry = ws.write(path, content)
-        ToolOutput.clamp("Wrote ${entry.size} bytes to ${entry.path}", call.id)
+        val diff = Diff.of(before.orEmpty(), content, entry.path)
+        val header = if (before == null) "Created ${entry.path} (${entry.size} B)"
+                     else "Updated ${entry.path} (${entry.size} B)"
+        ToolOutput.clamp("$header\n$diff", call.id)
     }.getOrElse { ToolOutput.error(call.id, it.message ?: "write failed") }
 }
 
@@ -70,7 +74,8 @@ class EditFileTool(private val ws: Workspace) : Tool {
         val updated = if (replaceAll) current.replace(old, new)
             else current.replaceFirst(Regex.escape(old).toRegex(), Regex.escapeReplacement(new))
         ws.write(path, updated)
-        ToolOutput.clamp("Replaced $count occurrence(s) in $path", call.id)
+        val diff = Diff.of(current, updated, path)
+        ToolOutput.clamp("Replaced $count occurrence(s) in $path\n$diff", call.id)
     }.getOrElse { ToolOutput.error(call.id, it.message ?: "edit failed") }
 }
 

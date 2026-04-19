@@ -29,6 +29,8 @@ import com.gemini.domain.ToolSpec
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -228,23 +230,17 @@ class RestGeminiCore(
         var lastText = ""
         try {
             while (true) {
-                val (textPart, calls) = callOnce()
-                if (!textPart.isNullOrBlank()) {
-                    lastText = textPart
-                    addUiMessage(
-                        GeminiMessage(
-                            id = nextId(),
-                            text = textPart,
-                            isUser = false,
-                            timestamp = System.currentTimeMillis(),
-                            role = MessageRole.MODEL
-                        )
-                    )
+                emitThinking("Réflexion…")
+                val (textPart, calls) = streamOnce()
+                if (!textPart.isNullOrBlank()) lastText = textPart
+                if (calls.isEmpty()) {
+                    emitThinking(null)
+                    return GeminiResult.Success(lastText)
                 }
-                if (calls.isEmpty()) return GeminiResult.Success(lastText)
 
                 val responseParts = JSONArray()
                 for (call in calls) {
+                    emitThinking("Exécution de ${call.name}…")
                     val result = runSingleCall(call)
                     responseParts.put(
                         JSONObject().put(
@@ -265,10 +261,18 @@ class RestGeminiCore(
             @Suppress("UNREACHABLE_CODE")
             GeminiResult.Success(lastText)
         } catch (t: Throwable) {
+            emitThinking(null)
+            if (t is kotlinx.coroutines.CancellationException) throw t
             Log.e(TAG, "sendMessage failed", t)
             while (turns.size > preTurnSize) turns.removeAt(turns.size - 1)
             GeminiResult.Error(t.message ?: "Network error")
+        } finally {
+            emitThinking(null)
         }
+    }
+
+    private fun emitThinking(label: String?) {
+        _events.tryEmit(GeminiEvent.Thinking(label))
     }
 
     override suspend fun resetSession(): GeminiResult {
@@ -337,16 +341,85 @@ class RestGeminiCore(
 
     // --- HTTP + parsing ---
 
-    private suspend fun callOnce(): Pair<String?, List<ToolCall>> = withContext(Dispatchers.IO) {
+    private suspend fun streamOnce(): Pair<String?, List<ToolCall>> = withContext(Dispatchers.IO) {
         val body = buildRequestBody()
         val url = "https://generativelanguage.googleapis.com/v1beta/models/" +
-            "$model:generateContent?key=${URLEncoder.encode(apiKey, "UTF-8")}"
-        val (code, rawBody) = postJson(url, body)
-        if (code !in 200..299) {
-            val msg = tryExtractError(rawBody) ?: "HTTP $code"
-            throw RuntimeException(msg)
+            "$model:streamGenerateContent?alt=sse&key=${URLEncoder.encode(apiKey, "UTF-8")}"
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.requestMethod = "POST"
+        conn.doOutput = true
+        conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+        conn.setRequestProperty("Accept", "text/event-stream")
+        conn.connectTimeout = 20_000
+        conn.readTimeout = 120_000
+
+        val accumulated = StringBuilder()
+        val parts = JSONArray()
+        val calls = mutableListOf<ToolCall>()
+        var liveMessage: GeminiMessage? = null
+        try {
+            conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            val code = conn.responseCode
+            if (code !in 200..299) {
+                val err = (conn.errorStream ?: conn.inputStream)
+                    ?.use { BufferedReader(InputStreamReader(it, Charsets.UTF_8)).readText() }
+                    .orEmpty()
+                throw RuntimeException(tryExtractError(err) ?: "HTTP $code")
+            }
+            BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8)).use { reader ->
+                while (true) {
+                    currentCoroutineContext().ensureActive()
+                    val line = reader.readLine() ?: break
+                    if (!line.startsWith("data:")) continue
+                    val data = line.removePrefix("data:").trim()
+                    if (data.isEmpty() || data == "[DONE]") continue
+                    val json = runCatching { JSONObject(data) }.getOrNull() ?: continue
+                    val content = json.optJSONArray("candidates")
+                        ?.optJSONObject(0)
+                        ?.optJSONObject("content")
+                        ?: continue
+                    val chunkParts = content.optJSONArray("parts") ?: continue
+                    for (i in 0 until chunkParts.length()) {
+                        val part = chunkParts.getJSONObject(i)
+                        parts.put(part)
+                        when {
+                            part.has("text") -> {
+                                val t = part.optString("text")
+                                if (t.isEmpty()) continue
+                                accumulated.append(t)
+                                if (liveMessage == null) {
+                                    liveMessage = GeminiMessage(
+                                        id = nextId(),
+                                        text = accumulated.toString(),
+                                        isUser = false,
+                                        timestamp = System.currentTimeMillis(),
+                                        role = MessageRole.MODEL
+                                    )
+                                    addUiMessage(liveMessage!!)
+                                } else {
+                                    liveMessage = liveMessage!!.copy(text = accumulated.toString())
+                                    replaceUiMessage(liveMessage!!)
+                                }
+                            }
+                            part.has("functionCall") -> {
+                                val fc = part.getJSONObject("functionCall")
+                                val name = fc.optString("name")
+                                val args = fc.optJSONObject("args") ?: JSONObject()
+                                val id = "$name-${System.nanoTime()}-${calls.size}"
+                                calls.add(ToolCall(id, name, jsonToMap(args)))
+                            }
+                        }
+                    }
+                }
+            }
+        } finally {
+            runCatching { conn.disconnect() }
         }
-        parseResponse(rawBody)
+        if (parts.length() > 0) {
+            turns.add(JSONObject().put("role", "model").put("parts", parts))
+        }
+        val textPart = accumulated.toString().takeIf { it.isNotBlank() }
+        textPart to calls
     }
 
     private fun buildRequestBody(): String {
@@ -408,34 +481,6 @@ class RestGeminiCore(
         return JSONArray().put(JSONObject().put("functionDeclarations", decls))
     }
 
-    private fun parseResponse(body: String): Pair<String?, List<ToolCall>> {
-        val json = JSONObject(body)
-        val candidates = json.optJSONArray("candidates") ?: return null to emptyList()
-        if (candidates.length() == 0) return null to emptyList()
-        val content = candidates.getJSONObject(0).optJSONObject("content") ?: return null to emptyList()
-        val parts = content.optJSONArray("parts") ?: return null to emptyList()
-
-        val textBuf = StringBuilder()
-        val calls = mutableListOf<ToolCall>()
-        for (i in 0 until parts.length()) {
-            val part = parts.getJSONObject(i)
-            when {
-                part.has("text") -> textBuf.append(part.optString("text"))
-                part.has("functionCall") -> {
-                    val fc = part.getJSONObject("functionCall")
-                    val name = fc.optString("name")
-                    val args = fc.optJSONObject("args") ?: JSONObject()
-                    val id = "$name-${System.nanoTime()}-$i"
-                    calls.add(ToolCall(id, name, jsonToMap(args)))
-                }
-            }
-        }
-
-        // Persist the model turn verbatim so follow-up requests have context.
-        turns.add(JSONObject().put("role", "model").put("parts", parts))
-        return textBuf.toString().takeIf { it.isNotBlank() } to calls
-    }
-
     private fun appendUserTurn(text: String) {
         turns.add(
             JSONObject().put("role", "user").put(
@@ -450,6 +495,12 @@ class RestGeminiCore(
         return msg
     }
 
+    private fun replaceUiMessage(msg: GeminiMessage) {
+        val idx = uiMessages.indexOfLast { it.id == msg.id }
+        if (idx >= 0) uiMessages[idx] = msg
+        _events.tryEmit(GeminiEvent.MessageUpdated(msg))
+    }
+
     private fun getJson(url: String): Pair<Int, String> {
         val conn = URL(url).openConnection() as HttpURLConnection
         conn.requestMethod = "GET"
@@ -457,27 +508,6 @@ class RestGeminiCore(
         conn.connectTimeout = 15_000
         conn.readTimeout = 30_000
         return try {
-            val code = conn.responseCode
-            val stream = if (code in 200..299) conn.inputStream else (conn.errorStream ?: conn.inputStream)
-            val text = stream.use {
-                BufferedReader(InputStreamReader(it, Charsets.UTF_8)).use { r -> r.readText() }
-            }
-            code to text
-        } finally {
-            conn.disconnect()
-        }
-    }
-
-    private fun postJson(url: String, body: String): Pair<Int, String> {
-        val conn = URL(url).openConnection() as HttpURLConnection
-        conn.requestMethod = "POST"
-        conn.doOutput = true
-        conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-        conn.setRequestProperty("Accept", "application/json")
-        conn.connectTimeout = 20_000
-        conn.readTimeout = 60_000
-        return try {
-            conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
             val code = conn.responseCode
             val stream = if (code in 200..299) conn.inputStream else (conn.errorStream ?: conn.inputStream)
             val text = stream.use {
