@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -361,6 +362,37 @@ private fun hasRunCommandPermission(context: Context): Boolean =
     ContextCompat.checkSelfPermission(context, RUN_COMMAND_PERMISSION) ==
         PackageManager.PERMISSION_GRANTED
 
+private enum class TermuxSource(val label: String, val isPlayStore: Boolean) {
+    PLAY_STORE("Play Store (outdated, won't work)", true),
+    F_DROID("F-Droid", false),
+    GITHUB("GitHub / sideload", false),
+    OTHER_STORE("Other store", false),
+    UNKNOWN("Unknown source", false),
+}
+
+private fun detectTermuxSource(context: Context): TermuxSource {
+    val pm = context.packageManager
+    val installer = runCatching {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            pm.getInstallSourceInfo("com.termux").installingPackageName
+        } else {
+            @Suppress("DEPRECATION") pm.getInstallerPackageName("com.termux")
+        }
+    }.getOrNull()
+    return when (installer) {
+        "com.android.vending" -> TermuxSource.PLAY_STORE
+        "org.fdroid.fdroid", "org.fdroid.basic", "com.aurora.store" -> TermuxSource.F_DROID
+        null, "com.google.android.packageinstaller",
+        "com.android.packageinstaller", "com.github.android" -> TermuxSource.GITHUB
+        else -> TermuxSource.OTHER_STORE
+    }
+}
+
+private fun termuxDeclaresRunCommand(context: Context): Boolean = runCatching {
+    context.packageManager.getPermissionInfo(RUN_COMMAND_PERMISSION, 0)
+    true
+}.getOrDefault(false)
+
 @Composable
 private fun TermuxBody(viewModel: ChatViewModel) {
     val context = LocalContext.current
@@ -388,6 +420,8 @@ private fun TermuxBody(viewModel: ChatViewModel) {
         return
     }
 
+    val source = remember { detectTermuxSource(context) }
+    val declaresPermission = remember { termuxDeclaresRunCommand(context) }
     var permissionGranted by remember { mutableStateOf(hasRunCommandPermission(context)) }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -396,7 +430,8 @@ private fun TermuxBody(viewModel: ChatViewModel) {
         if (!granted) {
             Toast.makeText(
                 context,
-                "Permission not granted. Open app settings → Permissions → Termux RUN_COMMAND.",
+                "Permission not granted. If no dialog appeared, your Termux " +
+                    "build does not declare RUN_COMMAND — reinstall from F-Droid.",
                 Toast.LENGTH_LONG
             ).show()
         }
@@ -410,14 +445,47 @@ private fun TermuxBody(viewModel: ChatViewModel) {
 
     TermuxStep(
         number = "1",
-        title = "Termux installed from F-Droid",
-        ok = true,
+        title = "Termux build supports external commands",
+        ok = !source.isPlayStore && declaresPermission,
         body = {
             Text(
-                "Detected. (Play Store Termux will silently ignore our commands.)",
+                "Installed from: ${source.label}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            if (source.isPlayStore || !declaresPermission) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    if (source.isPlayStore)
+                        "The Play Store version of Termux was abandoned in 2020. It " +
+                            "does NOT register the RUN_COMMAND service or permission, " +
+                            "which is why nothing appears under Permissions in Android " +
+                            "Settings. Uninstall it and reinstall the F-Droid build."
+                    else
+                        "The installed Termux does not declare the RUN_COMMAND " +
+                            "permission, so Android can't list it under Permissions. " +
+                            "Reinstall Termux from F-Droid (or termux/termux-app on GitHub).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { openUrl(context, "https://f-droid.org/packages/com.termux/") }) {
+                        Icon(Icons.Default.OpenInNew, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("F-Droid Termux")
+                    }
+                    OutlinedButton(onClick = {
+                        openUrl(context, "https://github.com/termux/termux-app/releases/latest")
+                    }) { Text("GitHub APK") }
+                }
+            } else {
+                Text(
+                    "Good — this build declares com.termux.permission.RUN_COMMAND.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     )
 
@@ -456,42 +524,53 @@ private fun TermuxBody(viewModel: ChatViewModel) {
         title = "Android RUN_COMMAND permission",
         ok = permissionGranted,
         body = {
-            Text(
-                if (permissionGranted)
-                    "Granted. You should be able to run shell commands now."
-                else
-                    "This is the step most people miss. Android treats " +
-                        "com.termux.permission.RUN_COMMAND as a dangerous permission — " +
-                        "it must be granted explicitly, the same way as Camera or Location.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            if (!permissionGranted) {
-                Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { permissionLauncher.launch(RUN_COMMAND_PERMISSION) }) {
-                        Icon(Icons.Default.Security, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Request permission")
-                    }
-                    OutlinedButton(onClick = { openAppSettings(context) }) {
-                        Text("Open app settings")
-                    }
-                }
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "If the request pops up nothing, use \"Open app settings\" → " +
-                        "Permissions → Additional permissions → Termux RUN_COMMAND → Allow.",
-                    style = MaterialTheme.typography.labelSmall,
+            when {
+                permissionGranted -> Text(
+                    "Granted. You should be able to run shell commands now.",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                !declaresPermission -> Text(
+                    "Skipped — fix step 1 first. Android can't grant a permission " +
+                        "that no installed app declares.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                else -> {
+                    Text(
+                        "Android treats com.termux.permission.RUN_COMMAND as a " +
+                            "dangerous permission — it must be granted explicitly. " +
+                            "Tap Request and approve the popup.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { permissionLauncher.launch(RUN_COMMAND_PERMISSION) }) {
+                            Icon(Icons.Default.Security, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Request permission")
+                        }
+                        OutlinedButton(onClick = { openAppSettings(context) }) {
+                            Text("Open app settings")
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "If \"Request\" does nothing, open app settings → Permissions. " +
+                            "On some Android versions the entry is hidden under " +
+                            "\"Unused permissions\" or \"More permissions\".",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     )
 
     Spacer(Modifier.height(10.dp))
     Button(
-        enabled = permissionGranted,
+        enabled = permissionGranted && declaresPermission,
         onClick = {
             viewModel.sendMessage("Use run_shell_command to execute: echo hello from termux")
         }
