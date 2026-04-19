@@ -3,6 +3,7 @@ package com.gemini.bridge.workspace
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.webkit.MimeTypeMap
 import androidx.documentfile.provider.DocumentFile
 import java.io.File
 
@@ -71,7 +72,7 @@ class Workspace(private val context: Context) {
                 ?: throw IllegalStateException("Cannot create directory: $segment")
         }
         val existing = cur.findFile(fileName)
-        val target = existing ?: cur.createFile("text/plain", fileName)
+        val target = existing ?: cur.createFile(mimeFor(fileName), fileName)
             ?: throw IllegalStateException("Cannot create file: $fileName")
 
         context.contentResolver.openOutputStream(target.uri, "wt")?.use {
@@ -125,6 +126,17 @@ class Workspace(private val context: Context) {
                 if (count >= maxEntries) break
             }
         }
+    }
+
+    // SAF's createFile appends the MIME's canonical extension when it doesn't
+    // match the supplied one (so "README.md" + "text/plain" becomes
+    // "README.md.txt"). Picking a MIME that matches the filename's extension
+    // keeps the name intact on every Android provider.
+    private fun mimeFor(fileName: String): String {
+        val ext = fileName.substringAfterLast('.', "").lowercase()
+        if (ext.isEmpty()) return "application/octet-stream"
+        return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+            ?: "application/octet-stream"
     }
 
     private fun sanitize(path: String): List<String>? {

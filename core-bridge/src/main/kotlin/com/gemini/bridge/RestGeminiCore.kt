@@ -353,9 +353,46 @@ class RestGeminiCore(
         val contents = JSONArray()
         turns.forEach { contents.put(it) }
         return JSONObject()
+            .put("systemInstruction", buildSystemInstruction())
             .put("contents", contents)
             .put("tools", buildToolsJson())
             .toString()
+    }
+
+    private fun buildSystemInstruction(): JSONObject {
+        val toolNames = registry.specs().joinToString(", ") { it.name }
+        val termuxLine = if (termux.isInstalled())
+            "The run_shell_command tool dispatches to Termux on the device. " +
+                "It only works if the user installed Termux from F-Droid or GitHub " +
+                "(not the Play Store build) AND granted the RUN_COMMAND permission. " +
+                "Shell commands run in Termux's home directory, not the workspace."
+        else
+            "Termux is not installed, so run_shell_command will fail. " +
+                "Use the file tools for anything file-related."
+        val text = buildString {
+            append("You are Gemini running inside a native Android app.\n\n")
+            append("Workspace: ").append(workspace.rootLabel()).append('\n')
+            append(
+                "You have tools that read, write, search, and run commands on this " +
+                    "device. Available tools: "
+            ).append(toolNames).append(".\n\n")
+            append(
+                "Path rules: always use paths RELATIVE to the workspace root. " +
+                    "Never invent absolute paths or paths with `..`. Use list_directory " +
+                    "or glob_files to discover what's there before reading/writing.\n\n"
+            )
+            append(
+                "When the user asks you to read, create, edit, or delete a file, " +
+                    "call the appropriate tool right away — don't ask for confirmation " +
+                    "in chat. Destructive tools (write_file, edit_file, delete_file, " +
+                    "run_shell_command) prompt the user in the UI; that's enough.\n\n"
+            )
+            append(termuxLine)
+        }
+        return JSONObject().put(
+            "parts",
+            JSONArray().put(JSONObject().put("text", text))
+        )
     }
 
     private fun buildToolsJson(): JSONArray {
