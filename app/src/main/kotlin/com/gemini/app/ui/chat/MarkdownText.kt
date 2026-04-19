@@ -87,7 +87,7 @@ private fun CodeBlock(language: String?, body: String, context: Context) {
                 IconButton(onClick = { copyToClipboard(context, body) }) {
                     Icon(
                         Icons.Default.ContentCopy,
-                        contentDescription = "Copier",
+                        contentDescription = "Copy",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -268,5 +268,5 @@ private fun annotateInline(line: String, baseColor: androidx.compose.ui.graphics
 private fun copyToClipboard(context: Context, text: String) {
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     cm.setPrimaryClip(ClipData.newPlainText("code", text))
-    Toast.makeText(context, "Copié", Toast.LENGTH_SHORT).show()
+    Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
 }
