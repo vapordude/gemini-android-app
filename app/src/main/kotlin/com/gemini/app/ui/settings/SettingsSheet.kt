@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -56,7 +57,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -585,15 +588,49 @@ private fun TermuxBody(viewModel: ChatViewModel) {
     )
 
     Spacer(Modifier.height(10.dp))
+    val scope = rememberCoroutineScope()
+    var testing by remember { mutableStateOf(false) }
+    var testOutput by remember { mutableStateOf<String?>(null) }
+    var testOk by remember { mutableStateOf<Boolean?>(null) }
     Button(
-        enabled = permissionGranted && declaresPermission,
+        enabled = !testing && permissionGranted && declaresPermission,
         onClick = {
-            viewModel.sendMessage("Use run_shell_command to execute: echo hello from termux")
+            testing = true
+            testOutput = null
+            scope.launch {
+                val out = runCatching { viewModel.testTermuxShell() }
+                    .getOrElse { it.message ?: "unknown error" }
+                testOk = !out.startsWith("exit=")
+                testOutput = out
+                testing = false
+            }
         }
     ) {
         Icon(Icons.Default.PlayArrow, contentDescription = null)
         Spacer(Modifier.width(6.dp))
-        Text("Test shell now")
+        Text(if (testing) "Testing…" else "Test shell now")
+    }
+    testOutput?.let { out ->
+        Spacer(Modifier.height(8.dp))
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shape = MaterialTheme.shapes.small,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(10.dp)) {
+                Text(
+                    if (testOk == true) "Shell reachable ✓" else "Shell failed",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (testOk == true) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.error
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    out,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
+                )
+            }
+        }
     }
 }
 
@@ -706,4 +743,54 @@ private fun openTermux(context: Context) {
 private fun copyToClipboard(context: Context, label: String, text: String) {
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     cm.setPrimaryClip(ClipData.newPlainText(label, text))
+}
+
+@Composable
+fun TermuxSetupDialog(
+    viewModel: ChatViewModel,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Got it") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Later") }
+        },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.Terminal,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Enable shell commands")
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .fillMaxWidth()
+            ) {
+                Text(
+                    "Gemini can run real shell commands (git, gradle, curl…) " +
+                        "through Termux. This is optional — skip if you only need " +
+                        "chat and in-app file tools.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(12.dp))
+                TermuxBody(viewModel)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "You can reopen this guide anytime from Settings → Termux shell.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    )
 }

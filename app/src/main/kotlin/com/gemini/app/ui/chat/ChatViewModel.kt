@@ -48,6 +48,18 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
     val availableTools: List<ToolSpec> get() = core.availableTools()
     val termuxInstalled: Boolean get() = core.termux.isInstalled()
 
+    fun isTermuxGuideShown(): Boolean = core.isTermuxGuideShown()
+    fun markTermuxGuideShown() = core.markTermuxGuideShown()
+
+    suspend fun testTermuxShell(): String {
+        val r = core.termux.run("echo hello from termux && uname -a")
+        return if (r.ok) r.stdout.ifBlank { "ok" }
+        else buildString {
+            append("exit=").append(r.exitCode)
+            if (r.stderr.isNotBlank()) append('\n').append(r.stderr)
+        }
+    }
+
     init {
         viewModelScope.launch {
             core.events.collect { ev ->

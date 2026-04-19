@@ -32,7 +32,7 @@ import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationDrawerItem
@@ -101,7 +101,7 @@ fun AppDrawer(
             )
         }
 
-        Divider()
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         SectionLabel("Conversation")
         DrawerItem(Icons.Default.ChatBubble, "Saved chats") {
             onClose(); onOpenChats()
@@ -110,7 +110,7 @@ fun AppDrawer(
             onClose(); folderLauncher.launch(null)
         }
 
-        Divider()
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         SectionLabel("Tools & shell")
         DrawerItem(Icons.Default.Terminal, "Open Termux") {
             onClose(); openTermux(context)
@@ -119,7 +119,7 @@ fun AppDrawer(
             onClose(); openUrl(context, "https://github.com/aciderix/gemini-android-app")
         }
 
-        Divider()
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         SectionLabel("App")
         DrawerItem(Icons.Default.Settings, "Settings") {
             onClose(); onOpenSettings()
@@ -140,7 +140,7 @@ fun AppDrawer(
             onClose(); onOpenAbout()
         }
 
-        Divider()
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         SectionLabel("Account")
         DrawerItem(Icons.Default.Logout, "Sign out / change API key") {
             onClose(); viewModel.signOut()

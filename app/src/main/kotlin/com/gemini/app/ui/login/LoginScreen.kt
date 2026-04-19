@@ -23,8 +23,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.foundation.border
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -47,7 +49,10 @@ import com.gemini.app.R
 private const val AISTUDIO_KEY_URL = "https://aistudio.google.com/app/apikey"
 
 @Composable
-fun LoginScreen(onLoginSuccess: (Map<String, Any>) -> Unit) {
+fun LoginScreen(
+    onLoginSuccess: (Map<String, Any>) -> Unit,
+    isLoading: Boolean = false
+) {
     val context = LocalContext.current
     var apiKey by remember { mutableStateOf("") }
 
@@ -88,9 +93,15 @@ fun LoginScreen(onLoginSuccess: (Map<String, Any>) -> Unit) {
         Spacer(Modifier.height(28.dp))
 
         Surface(
-            shape = MaterialTheme.shapes.large,
-            tonalElevation = 2.dp,
-            modifier = Modifier.fillMaxWidth()
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                    shape = MaterialTheme.shapes.medium
+                )
         ) {
             Column(Modifier.padding(16.dp)) {
                 Text("Step 1 — Get a key", style = MaterialTheme.typography.titleMedium)
@@ -116,9 +127,15 @@ fun LoginScreen(onLoginSuccess: (Map<String, Any>) -> Unit) {
         Spacer(Modifier.height(16.dp))
 
         Surface(
-            shape = MaterialTheme.shapes.large,
-            tonalElevation = 2.dp,
-            modifier = Modifier.fillMaxWidth()
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                    shape = MaterialTheme.shapes.medium
+                )
         ) {
             Column(Modifier.padding(16.dp)) {
                 Text("Step 2 — Paste it here", style = MaterialTheme.typography.titleMedium)
@@ -148,16 +165,26 @@ fun LoginScreen(onLoginSuccess: (Map<String, Any>) -> Unit) {
                     }
                 }
                 Spacer(Modifier.height(12.dp))
-                Button(
-                    onClick = {
-                        if (apiKey.isNotBlank()) onLoginSuccess(mapOf("api_key" to apiKey.trim()))
-                    },
-                    enabled = apiKey.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.Key, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Continue")
+                if (isLoading) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Contacting Gemini…",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Button(
+                        onClick = {
+                            if (apiKey.isNotBlank()) onLoginSuccess(mapOf("api_key" to apiKey.trim()))
+                        },
+                        enabled = apiKey.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Key, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Continue")
+                    }
                 }
             }
         }

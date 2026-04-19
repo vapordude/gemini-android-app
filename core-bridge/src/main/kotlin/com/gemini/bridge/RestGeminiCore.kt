@@ -135,6 +135,9 @@ class RestGeminiCore(
     }
     fun isAutoApprove(): Boolean = autoApproveDestructive
 
+    fun isTermuxGuideShown(): Boolean = prefs.termuxGuideShown
+    fun markTermuxGuideShown() { prefs.termuxGuideShown = true }
+
     fun signOut() {
         apiKey = ""
         turns.clear()

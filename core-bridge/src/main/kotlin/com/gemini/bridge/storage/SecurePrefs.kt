@@ -48,6 +48,10 @@ class SecurePrefs(context: Context) {
         get() = plain.getBoolean(KEY_AUTO_APPROVE, false)
         set(value) = plain.edit().putBoolean(KEY_AUTO_APPROVE, value).apply()
 
+    var termuxGuideShown: Boolean
+        get() = plain.getBoolean(KEY_TERMUX_GUIDE_SHOWN, false)
+        set(value) = plain.edit().putBoolean(KEY_TERMUX_GUIDE_SHOWN, value).apply()
+
     fun clearAll() {
         encrypted.edit().clear().apply()
         plain.edit().clear().apply()
@@ -58,5 +62,6 @@ class SecurePrefs(context: Context) {
         const val KEY_MODEL = "model"
         const val KEY_WORKSPACE = "workspace_uri"
         const val KEY_AUTO_APPROVE = "auto_approve"
+        const val KEY_TERMUX_GUIDE_SHOWN = "termux_guide_shown"
     }
 }

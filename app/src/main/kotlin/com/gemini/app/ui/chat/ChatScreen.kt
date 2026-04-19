@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -68,10 +69,23 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.gemini.app.R
 import com.gemini.app.ui.settings.SettingsSheet
+import com.gemini.app.ui.settings.TermuxSetupDialog
 import com.gemini.app.ui.settings.ThemeMode
 import com.gemini.domain.GeminiMessage
 import com.gemini.domain.MessageRole
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import kotlinx.coroutines.launch
+
+private fun Modifier.drawTopDivider(color: Color): Modifier = drawBehind {
+    drawLine(
+        color = color,
+        start = Offset(0f, 0f),
+        end = Offset(size.width, 0f),
+        strokeWidth = 1f
+    )
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,6 +99,14 @@ fun ChatScreen(
     var showSettings by remember { mutableStateOf(false) }
     var showChats by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
+    var showTermuxGuide by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        if (!viewModel.isTermuxGuideShown()) {
+            showTermuxGuide = true
+            viewModel.markTermuxGuideShown()
+        }
+    }
 
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -187,7 +209,7 @@ fun ChatScreen(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             items(messages, key = { it.id }) { message ->
                                 when (message.role) {
@@ -239,6 +261,13 @@ fun ChatScreen(
                         onDismiss = { showAbout = false }
                     )
                 }
+
+                if (showTermuxGuide) {
+                    TermuxSetupDialog(
+                        viewModel = viewModel,
+                        onDismiss = { showTermuxGuide = false }
+                    )
+                }
             }
         }
     }
@@ -284,11 +313,11 @@ fun MessageBubble(message: GeminiMessage) {
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = alignment) {
         Surface(
             color = container,
-            shape = MaterialTheme.shapes.large,
+            shape = MaterialTheme.shapes.medium,
             modifier = if (message.isUser) Modifier else Modifier.border(
                 width = 1.dp,
                 color = MaterialTheme.colorScheme.outlineVariant,
-                shape = MaterialTheme.shapes.large
+                shape = MaterialTheme.shapes.medium
             )
         ) {
             Text(
@@ -397,49 +426,61 @@ private fun ToolApprovalCard(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp),
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.errorContainer,
-        tonalElevation = 8.dp
+            .padding(16.dp)
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant,
+                shape = MaterialTheme.shapes.medium
+            ),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surface
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                "Gemini wants to run: $name",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onErrorContainer
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .fillMaxHeight()
+                    .background(MaterialTheme.colorScheme.tertiary)
             )
-            Spacer(Modifier.size(6.dp))
-            arguments.forEach { (k, v) ->
-                val str = v?.toString().orEmpty()
-                val rendered = if (str.length > 200) str.substring(0, 200) + "…" else str
+            Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    "$k: $rendered",
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    color = MaterialTheme.colorScheme.onErrorContainer
+                    "Gemini wants to run: $name",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.size(6.dp))
+                arguments.forEach { (k, v) ->
+                    val str = v?.toString().orEmpty()
+                    val rendered = if (str.length > 200) str.substring(0, 200) + "…" else str
+                    Text(
+                        "$k: $rendered",
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(Modifier.size(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onReject,
+                        modifier = Modifier.weight(1f)
+                    ) { Icon(Icons.Default.Close, null); Spacer(Modifier.width(4.dp)); Text("Reject") }
+                    Button(
+                        onClick = onApprove,
+                        modifier = Modifier.weight(1f)
+                    ) { Icon(Icons.Default.Check, null); Spacer(Modifier.width(4.dp)); Text("Approve") }
+                }
+                Spacer(Modifier.size(4.dp))
+                AssistChip(
+                    onClick = onAlwaysApprove,
+                    label = { Text("Always approve this session") },
+                    colors = AssistChipDefaults.assistChipColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
                 )
             }
-            Spacer(Modifier.size(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = onReject,
-                    modifier = Modifier.weight(1f)
-                ) { Icon(Icons.Default.Close, null); Spacer(Modifier.width(4.dp)); Text("Reject") }
-                Button(
-                    onClick = onApprove,
-                    modifier = Modifier.weight(1f)
-                ) { Icon(Icons.Default.Check, null); Spacer(Modifier.width(4.dp)); Text("Approve") }
-            }
-            Spacer(Modifier.size(4.dp))
-            AssistChip(
-                onClick = onAlwaysApprove,
-                label = { Text("Always approve this session") },
-                colors = AssistChipDefaults.assistChipColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
-            )
         }
     }
 }
@@ -452,10 +493,11 @@ fun BottomChatBar(
     onAddClick: () -> Unit,
     onSend: () -> Unit
 ) {
-    Surface(tonalElevation = 8.dp) {
+    Surface(color = MaterialTheme.colorScheme.surface) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .drawTopDivider(MaterialTheme.colorScheme.outlineVariant)
                 .padding(8.dp)
                 .navigationBarsPadding()
                 .imePadding(),

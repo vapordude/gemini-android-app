@@ -48,6 +48,7 @@ class MainActivity : ComponentActivity() {
                     }
                     val vm: ChatViewModel = viewModel(factory = factory)
                     val isReady by vm.isReady.collectAsState()
+                    val isLoading by vm.isLoading.collectAsState()
 
                     androidx.compose.runtime.LaunchedEffect(Unit) {
                         if (!isReady && vm.hasPersistedSession()) vm.tryAutoLogin()
@@ -58,7 +59,10 @@ class MainActivity : ComponentActivity() {
                         themeMode = themeMode,
                         onThemeChange = { themeMode = it }
                     )
-                    else LoginScreen(onLoginSuccess = { config -> vm.initCore(config) })
+                    else LoginScreen(
+                        onLoginSuccess = { config -> vm.initCore(config) },
+                        isLoading = isLoading
+                    )
                 }
             }
         }
