@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- AI Studio inspired palette: vivid blue → magenta gradient on near-black. -->
+    <color name="aistudio_blue">#1F6FEB</color>
+    <color name="aistudio_violet">#7B61FF</color>
+    <color name="aistudio_magenta">#E0307E</color>
+    <color name="aistudio_surface_light">#FFFFFF</color>
+    <color name="aistudio_surface_dark">#0F1115</color>
+    <color name="aistudio_outline">#1F2937</color>
+    <color name="ic_launcher_background">#0F1115</color>
+</resources>
