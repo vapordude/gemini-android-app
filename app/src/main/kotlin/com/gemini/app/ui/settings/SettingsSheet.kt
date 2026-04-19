@@ -525,11 +525,20 @@ private fun TermuxBody(viewModel: ChatViewModel) {
         ok = permissionGranted,
         body = {
             when {
-                permissionGranted -> Text(
-                    "Granted. You should be able to run shell commands now.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                permissionGranted -> {
+                    Text(
+                        "Granted. You should be able to run shell commands now.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "If it was just granted, open Termux and run " +
+                            "`termux-reload-settings` once so the change takes effect.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 !declaresPermission -> Text(
                     "Skipped — fix step 1 first. Android can't grant a permission " +
                         "that no installed app declares.",
@@ -560,6 +569,13 @@ private fun TermuxBody(viewModel: ChatViewModel) {
                         "If \"Request\" does nothing, open app settings → Permissions. " +
                             "On some Android versions the entry is hidden under " +
                             "\"Unused permissions\" or \"More permissions\".",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "After granting: open Termux once and run `termux-reload-settings` " +
+                            "so the permission change is picked up by the running session.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

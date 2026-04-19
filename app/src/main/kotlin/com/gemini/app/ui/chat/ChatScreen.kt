@@ -1,7 +1,10 @@
 package com.gemini.app.ui.chat
 
 import androidx.compose.foundation.Image
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,9 +26,10 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Send
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
@@ -151,11 +155,6 @@ fun ChatScreen(
                             Icon(Icons.Default.Menu, contentDescription = "Menu")
                         }
                     },
-                    actions = {
-                        IconButton(onClick = { showSettings = true }) {
-                            Icon(Icons.Default.Settings, contentDescription = "Settings")
-                        }
-                    },
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                         containerColor = MaterialTheme.colorScheme.surface
                     )
@@ -266,7 +265,7 @@ private fun EmptyState() {
             Spacer(Modifier.size(8.dp))
             Text(
                 "Ask Gemini to read, write, search or run shell commands. " +
-                    "Tap + for quick actions, ☰ for navigation, ⚙ for settings.",
+                    "Tap + for quick actions and ☰ for navigation and settings.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -283,7 +282,15 @@ fun MessageBubble(message: GeminiMessage) {
         else MaterialTheme.colorScheme.onSurface
 
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = alignment) {
-        Surface(color = container, shape = MaterialTheme.shapes.large, tonalElevation = 1.dp) {
+        Surface(
+            color = container,
+            shape = MaterialTheme.shapes.large,
+            modifier = if (message.isUser) Modifier else Modifier.border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant,
+                shape = MaterialTheme.shapes.large
+            )
+        ) {
             Text(
                 text = message.text,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
@@ -295,34 +302,87 @@ fun MessageBubble(message: GeminiMessage) {
 
 @Composable
 fun ToolBubble(message: GeminiMessage) {
-    val ok = message.toolResult?.ok ?: true
-    val accent = if (ok) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error
+    val result = message.toolResult
+    val isCall = result == null
+    val ok = result?.ok ?: true
+    val accent = when {
+        isCall -> MaterialTheme.colorScheme.primary
+        ok -> MaterialTheme.colorScheme.tertiary
+        else -> MaterialTheme.colorScheme.error
+    }
+    val name = message.toolCall?.name ?: result?.callId ?: "tool"
+    val preview = when {
+        isCall -> message.text.lineSequence().firstOrNull().orEmpty().take(80)
+        ok -> {
+            val stdoutLine = message.text.lineSequence()
+                .firstOrNull { it.isNotBlank() && !it.startsWith("---") && !it.startsWith("exit=") }
+                .orEmpty().take(80)
+            if (stdoutLine.isNotBlank()) stdoutLine else "exit=0"
+        }
+        else -> "exit=${result?.exitCode ?: "?"}"
+    }
+    var expanded by remember(message.id) { mutableStateOf(false) }
+
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = MaterialTheme.colorScheme.surface,
         shape = MaterialTheme.shapes.medium,
-        tonalElevation = 1.dp,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant,
+                shape = MaterialTheme.shapes.medium
+            )
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Icon(
                     Icons.Default.Build,
                     contentDescription = null,
                     tint = accent,
                     modifier = Modifier.size(16.dp)
                 )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text = message.toolCall?.name ?: message.toolResult?.callId ?: "tool",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = accent
+                Spacer(Modifier.width(8.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (isCall) "$name — calling…" else name,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = accent
+                    )
+                    if (preview.isNotBlank()) {
+                        Text(
+                            text = preview,
+                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1
+                        )
+                    }
+                }
+                Icon(
+                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Spacer(Modifier.size(4.dp))
-            Text(
-                text = message.text,
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
-            )
+            AnimatedVisibility(visible = expanded) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = message.text,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
         }
     }
 }
