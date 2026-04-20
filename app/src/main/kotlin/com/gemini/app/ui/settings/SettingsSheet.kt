@@ -498,26 +498,45 @@ private fun TermuxBody(viewModel: ChatViewModel) {
         ok = null,
         body = {
             Text(
-                "Open Termux and paste these two commands once (tap to copy):",
+                "One tap: the command is copied to the clipboard and Termux opens. " +
+                    "Long-press in Termux, tap Paste, press Enter — done.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(Modifier.height(6.dp))
-            TermuxCommandRow(
-                step = "a.",
-                command = "mkdir -p ~/.termux && echo 'allow-external-apps=true' >> ~/.termux/termux.properties",
-                context = context
-            )
-            TermuxCommandRow(
-                step = "b.",
-                command = "termux-reload-settings",
-                context = context
-            )
-            Spacer(Modifier.height(6.dp))
-            OutlinedButton(onClick = { openTermux(context) }) {
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = { copyBootstrapAndOpenTermux(context) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 Icon(Icons.Default.Terminal, contentDescription = null)
-                Spacer(Modifier.width(6.dp))
-                Text("Open Termux")
+                Spacer(Modifier.width(8.dp))
+                Text("Copy & open Termux")
+            }
+            Spacer(Modifier.height(10.dp))
+            var showManual by remember { mutableStateOf(false) }
+            TextButton(onClick = { showManual = !showManual }) {
+                Text(
+                    if (showManual) "Hide manual commands" else "Prefer manual? Show the two commands",
+                    style = MaterialTheme.typography.labelSmall
+                )
+            }
+            if (showManual) {
+                TermuxCommandRow(
+                    step = "a.",
+                    command = "mkdir -p ~/.termux && echo 'allow-external-apps=true' >> ~/.termux/termux.properties",
+                    context = context
+                )
+                TermuxCommandRow(
+                    step = "b.",
+                    command = "termux-reload-settings",
+                    context = context
+                )
+                Spacer(Modifier.height(6.dp))
+                OutlinedButton(onClick = { openTermux(context) }) {
+                    Icon(Icons.Default.Terminal, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Open Termux")
+                }
             }
         }
     )
@@ -738,6 +757,24 @@ private fun openTermux(context: Context) {
         }
     }
     openUrl(context, "https://f-droid.org/packages/com.termux/")
+}
+
+// The chicken-and-egg of Termux bootstrap: we can't run commands via
+// RUN_COMMAND until `allow-external-apps=true` is set, but setting it
+// requires running commands. The one-tap path: drop the whole chained
+// command onto the clipboard and foreground Termux — the user just
+// long-presses, pastes, presses Enter once. No per-line toggling.
+private const val TERMUX_BOOTSTRAP_CMD =
+    "mkdir -p ~/.termux && echo 'allow-external-apps=true' >> ~/.termux/termux.properties && termux-reload-settings && echo '✓ Gemini bridge ready'"
+
+private fun copyBootstrapAndOpenTermux(context: Context) {
+    copyToClipboard(context, "termux-bootstrap", TERMUX_BOOTSTRAP_CMD)
+    Toast.makeText(
+        context,
+        "Command copied. Long-press in Termux → Paste → Enter, then come back.",
+        Toast.LENGTH_LONG
+    ).show()
+    openTermux(context)
 }
 
 private fun copyToClipboard(context: Context, label: String, text: String) {

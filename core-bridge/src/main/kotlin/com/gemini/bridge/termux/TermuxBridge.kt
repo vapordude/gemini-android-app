@@ -47,20 +47,21 @@ class TermuxBridge(private val appContext: Context) {
         if (workdir == null || !isWorkdirDenied(first)) return first
 
         // Termux refused the WORKDIR because it lacks shared-storage access.
-        // First denial: fire `termux-setup-storage` once — Termux pops the
-        // Android permission dialog, user taps Allow, and every later command
-        // lands in the workspace. This call runs the current command from
-        // $HOME so the user isn't blocked, and annotates the hint.
+        // First denial: fire `termux-setup-storage` once in the FOREGROUND so
+        // Termux has a visible activity to attach the Android storage
+        // permission dialog to (background dispatches get the permission
+        // request silently dropped on Android 12+). Then run the current
+        // command from $HOME so the user isn't blocked while they tap Allow,
+        // and annotate the output with what just happened.
         if (!autoSetupAttempted) {
             autoSetupAttempted = true
-            // Fire-and-forget: Termux opens the permission dialog on its own
-            // thread; the RUN_COMMAND broadcast returns before the user taps.
-            dispatch("termux-setup-storage", null, timeoutMs)
+            dispatch("termux-setup-storage", null, timeoutMs, foreground = true)
             val fallback = dispatch(command, null, timeoutMs)
-            val hint = "note: Termux couldn't read $workdir yet. A storage " +
-                "permission dialog was just opened in Termux — tap Allow and " +
-                "future commands will land in the workspace. This command ran " +
-                "from Termux's \$HOME in the meantime."
+            val hint = "note: Termux couldn't read $workdir yet. Termux just " +
+                "came to the foreground with a storage permission prompt — tap " +
+                "Allow on it, then come back to this app. Future commands will " +
+                "land in the workspace. This command ran from Termux's \$HOME " +
+                "in the meantime."
             return fallback.copy(stderr = mergeErr(fallback.stderr, hint))
         }
 
@@ -80,7 +81,8 @@ class TermuxBridge(private val appContext: Context) {
     private suspend fun dispatch(
         command: String,
         workdir: String?,
-        timeoutMs: Long
+        timeoutMs: Long,
+        foreground: Boolean = false,
     ): Result {
         val resultAction = ACTION_RESULT_PREFIX + UUID.randomUUID().toString()
 
@@ -111,7 +113,7 @@ class TermuxBridge(private val appContext: Context) {
                     action = "com.termux.RUN_COMMAND"
                     putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
                     putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-lc", command))
-                    putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
+                    putExtra("com.termux.RUN_COMMAND_BACKGROUND", !foreground)
                     putExtra("com.termux.RUN_COMMAND_SESSION_ACTION", "0,1,0,1")
                     putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", pending)
                     if (workdir != null) putExtra("com.termux.RUN_COMMAND_WORKDIR", workdir)
