@@ -41,6 +41,32 @@ class TermuxBridge(private val appContext: Context) {
             false, -1, "",
             "Termux is not installed. Install it from F-Droid then enable RUN_COMMAND."
         )
+        val first = dispatch(command, workdir, timeoutMs)
+        // Termux refuses the WORKDIR when it hasn't been granted shared-storage
+        // access — `termux-setup-storage` hasn't been run inside Termux yet.
+        // Retry from Termux's `$HOME` and surface an actionable hint so the
+        // user knows how to unblock the workdir path for future runs.
+        if (workdir != null && isWorkdirDenied(first)) {
+            val fallback = dispatch(command, null, timeoutMs)
+            val hint = "note: Termux refused to chdir into $workdir " +
+                "(no shared-storage access). Ran from Termux's \$HOME instead. " +
+                "To fix permanently, open Termux once and run:\n" +
+                "  termux-setup-storage\n" +
+                "then re-try. Until then file-oriented work should go through " +
+                "the workspace file tools (read_file/write_file/...) instead of " +
+                "shell commands."
+            val combinedErr = listOfNotNull(fallback.stderr.ifBlank { null }, hint)
+                .joinToString("\n").trimEnd()
+            return fallback.copy(stderr = combinedErr)
+        }
+        return first
+    }
+
+    private suspend fun dispatch(
+        command: String,
+        workdir: String?,
+        timeoutMs: Long
+    ): Result {
         val resultAction = ACTION_RESULT_PREFIX + UUID.randomUUID().toString()
 
         return withTimeoutOrNull(timeoutMs) {
@@ -104,6 +130,19 @@ class TermuxBridge(private val appContext: Context) {
                 "(then run `termux-reload-settings` inside Termux). Open Termux once " +
                 "manually before retrying."
         )
+    }
+
+    // Termux's RunCommandService rejects an unreadable WORKDIR with a
+    // FileUtils error that looks like:
+    //     Error Code: 401
+    //     Error Message (FileUtils Error):
+    //     The working directory file at path "…" is not readable. Permission Denied.
+    private fun isWorkdirDenied(r: Result): Boolean {
+        if (r.ok) return false
+        val blob = (r.stderr + '\n' + r.stdout)
+        return blob.contains("working directory", ignoreCase = true) &&
+            (blob.contains("not readable", ignoreCase = true) ||
+                blob.contains("Permission Denied", ignoreCase = true))
     }
 
     private fun parseResult(extras: Bundle?): Result {
