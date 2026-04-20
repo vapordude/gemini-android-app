@@ -3,6 +3,7 @@ package com.gemini.bridge.workspace
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.webkit.MimeTypeMap
 import androidx.documentfile.provider.DocumentFile
 import java.io.File
@@ -41,6 +42,44 @@ class Workspace(private val context: Context) {
             ?: error("Cannot open folder: $uri")
         root = tree
         label = tree.name ?: uri.toString()
+    }
+
+    /**
+     * Real filesystem path of the workspace root when it can be reached from
+     * outside this app's sandbox (typically Termux). Returns null when the
+     * root is a SAF URI that isn't backed by a path Termux can see — in that
+     * case, shell commands keep running in Termux's $HOME and files have to
+     * travel through the workspace tools.
+     */
+    fun absolutePath(): String? {
+        val uri = root?.uri ?: return null
+        if (uri.scheme == "file") {
+            val raw = uri.path ?: return null
+            // Only report paths Termux can read after `termux-setup-storage`.
+            // App-private /Android/data/... is a sandbox peer, not reachable.
+            return when {
+                raw.startsWith("/storage/emulated/0/Android/") -> null
+                raw.startsWith("/sdcard/Android/") -> null
+                raw.startsWith("/storage/") -> raw
+                raw.startsWith("/sdcard") -> raw
+                else -> null
+            }
+        }
+        if (uri.authority == "com.android.externalstorage.documents") {
+            val id = runCatching { DocumentsContract.getTreeDocumentId(uri) }.getOrNull() ?: return null
+            val parts = id.split(':', limit = 2)
+            val volume = parts.getOrNull(0).orEmpty()
+            val sub = parts.getOrNull(1).orEmpty()
+            val base = when {
+                volume.equals("primary", ignoreCase = true) -> "/storage/emulated/0"
+                volume.isNotBlank() -> "/storage/$volume"
+                else -> return null
+            }
+            val candidate = if (sub.isBlank()) base else "$base/$sub"
+            // Same sandbox-peer guard as above.
+            return if (candidate.startsWith("/storage/emulated/0/Android/")) null else candidate
+        }
+        return null
     }
 
     fun resolve(path: String): DocumentFile? {

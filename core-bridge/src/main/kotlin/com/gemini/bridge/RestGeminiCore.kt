@@ -69,7 +69,7 @@ class RestGeminiCore(
         register(DeleteFileTool(workspace))
         register(GlobTool(workspace))
         register(GrepTool(workspace))
-        register(RunShellCommandTool(termux))
+        register(RunShellCommandTool(termux, workspace))
     }
 
     private var apiKey: String = ""
@@ -434,25 +434,49 @@ class RestGeminiCore(
 
     private fun buildSystemInstruction(): JSONObject {
         val toolNames = registry.specs().joinToString(", ") { it.name }
-        val termuxLine = if (termux.isInstalled())
-            "The run_shell_command tool dispatches to Termux on the device. " +
-                "It only works if the user installed Termux from F-Droid or GitHub " +
-                "(not the Play Store build) AND granted the RUN_COMMAND permission. " +
-                "Shell commands run in Termux's home directory, not the workspace."
-        else
-            "Termux is not installed, so run_shell_command will fail. " +
-                "Use the file tools for anything file-related."
+        val reachable = workspace.absolutePath()
+        val termuxLine = when {
+            !termux.isInstalled() ->
+                "Termux is not installed, so run_shell_command will fail. " +
+                    "Use the file tools for anything file-related."
+            reachable != null ->
+                "The run_shell_command tool dispatches to Termux. It changes " +
+                    "directory to the workspace (`$reachable`) before running, so " +
+                    "`python foo.py` resolves to files the write_file tool just " +
+                    "created. Termux must have been granted storage access " +
+                    "(`termux-setup-storage`) for this to work. Requires Termux from " +
+                    "F-Droid or GitHub (not the Play Store build) with the " +
+                    "RUN_COMMAND permission."
+            else ->
+                "The run_shell_command tool dispatches to Termux, but the current " +
+                    "workspace is NOT reachable from Termux's filesystem view " +
+                    "(it's a SAF URI or an app-private path). Shell commands run " +
+                    "in Termux's `\$HOME` with no access to workspace files. For " +
+                    "anything file-oriented, use the file tools (read_file, " +
+                    "write_file, edit_file, list_directory, glob_files, grep) " +
+                    "instead of `cat`, `ls`, `grep`, or invoking interpreters on " +
+                    "workspace files. To regain shell access to workspace files, " +
+                    "ask the user to pick a folder under /storage/emulated/0/ " +
+                    "(e.g. Documents/) rather than the app-private default."
+        }
         val text = buildString {
             append("You are Gemini running inside a native Android app.\n\n")
             append("Workspace: ").append(workspace.rootLabel()).append('\n')
+            if (reachable != null) {
+                append("Workspace device path (Termux-visible): ").append(reachable).append('\n')
+            } else {
+                append("Workspace device path: not reachable from Termux.\n")
+            }
+            append('\n')
             append(
                 "You have tools that read, write, search, and run commands on this " +
                     "device. Available tools: "
             ).append(toolNames).append(".\n\n")
             append(
-                "Path rules: always use paths RELATIVE to the workspace root. " +
-                    "Never invent absolute paths or paths with `..`. Use list_directory " +
-                    "or glob_files to discover what's there before reading/writing.\n\n"
+                "Path rules: always use paths RELATIVE to the workspace root when " +
+                    "calling file tools. Never invent absolute paths or paths with " +
+                    "`..`. Use list_directory or glob_files to discover what's there " +
+                    "before reading/writing.\n\n"
             )
             append(
                 "When the user asks you to read, create, edit, or delete a file, " +
