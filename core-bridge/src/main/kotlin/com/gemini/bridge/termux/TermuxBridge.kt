@@ -27,6 +27,8 @@ class TermuxBridge(private val appContext: Context) {
 
     data class Result(val ok: Boolean, val exitCode: Int, val stdout: String, val stderr: String)
 
+    @Volatile private var autoSetupAttempted = false
+
     fun isInstalled(): Boolean = runCatching {
         appContext.packageManager.getPackageInfo(TERMUX_PKG, 0)
         true
@@ -41,6 +43,45 @@ class TermuxBridge(private val appContext: Context) {
             false, -1, "",
             "Termux is not installed. Install it from F-Droid then enable RUN_COMMAND."
         )
+        val first = dispatch(command, workdir, timeoutMs)
+        if (workdir == null || !isWorkdirDenied(first)) return first
+
+        // Termux refused the WORKDIR because it lacks shared-storage access.
+        // First denial: fire `termux-setup-storage` once — Termux pops the
+        // Android permission dialog, user taps Allow, and every later command
+        // lands in the workspace. This call runs the current command from
+        // $HOME so the user isn't blocked, and annotates the hint.
+        if (!autoSetupAttempted) {
+            autoSetupAttempted = true
+            // Fire-and-forget: Termux opens the permission dialog on its own
+            // thread; the RUN_COMMAND broadcast returns before the user taps.
+            dispatch("termux-setup-storage", null, timeoutMs)
+            val fallback = dispatch(command, null, timeoutMs)
+            val hint = "note: Termux couldn't read $workdir yet. A storage " +
+                "permission dialog was just opened in Termux — tap Allow and " +
+                "future commands will land in the workspace. This command ran " +
+                "from Termux's \$HOME in the meantime."
+            return fallback.copy(stderr = mergeErr(fallback.stderr, hint))
+        }
+
+        // Already tried auto-setup earlier — user likely declined the dialog.
+        // Keep working by falling back to $HOME and surface the manual fix.
+        val fallback = dispatch(command, null, timeoutMs)
+        val hint = "note: Termux still can't read $workdir. Open Termux and " +
+            "run `termux-setup-storage`, then accept the Android permission " +
+            "dialog. Until then, prefer the workspace file tools over shell " +
+            "commands for file-oriented work."
+        return fallback.copy(stderr = mergeErr(fallback.stderr, hint))
+    }
+
+    private fun mergeErr(existing: String, hint: String): String =
+        listOfNotNull(existing.ifBlank { null }, hint).joinToString("\n").trimEnd()
+
+    private suspend fun dispatch(
+        command: String,
+        workdir: String?,
+        timeoutMs: Long
+    ): Result {
         val resultAction = ACTION_RESULT_PREFIX + UUID.randomUUID().toString()
 
         return withTimeoutOrNull(timeoutMs) {
@@ -104,6 +145,19 @@ class TermuxBridge(private val appContext: Context) {
                 "(then run `termux-reload-settings` inside Termux). Open Termux once " +
                 "manually before retrying."
         )
+    }
+
+    // Termux's RunCommandService rejects an unreadable WORKDIR with a
+    // FileUtils error that looks like:
+    //     Error Code: 401
+    //     Error Message (FileUtils Error):
+    //     The working directory file at path "…" is not readable. Permission Denied.
+    private fun isWorkdirDenied(r: Result): Boolean {
+        if (r.ok) return false
+        val blob = (r.stderr + '\n' + r.stdout)
+        return blob.contains("working directory", ignoreCase = true) &&
+            (blob.contains("not readable", ignoreCase = true) ||
+                blob.contains("Permission Denied", ignoreCase = true))
     }
 
     private fun parseResult(extras: Bundle?): Result {

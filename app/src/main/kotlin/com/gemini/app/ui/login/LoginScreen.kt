@@ -45,6 +45,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.gemini.app.R
+import com.gemini.ui.LocalGeminiColors
 
 private const val AISTUDIO_KEY_URL = "https://aistudio.google.com/app/apikey"
 
@@ -56,10 +57,21 @@ fun LoginScreen(
     val context = LocalContext.current
     var apiKey by remember { mutableStateOf("") }
 
-    Column(
+    val dusk = LocalGeminiColors.current.duskGradient
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(420.dp)
+                .background(dusk)
+        )
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
             .padding(24.dp)
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -198,6 +210,7 @@ fun LoginScreen(
             textAlign = TextAlign.Center
         )
         Spacer(Modifier.height(24.dp))
+    }
     }
 }
 

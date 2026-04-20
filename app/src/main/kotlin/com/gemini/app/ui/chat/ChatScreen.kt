@@ -62,6 +62,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -90,19 +91,9 @@ import com.gemini.app.ui.settings.TermuxSetupDialog
 import com.gemini.app.ui.settings.ThemeMode
 import com.gemini.domain.GeminiMessage
 import com.gemini.domain.MessageRole
+import com.gemini.ui.LocalGeminiColors
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
 import kotlinx.coroutines.launch
-
-private fun Modifier.drawTopDivider(color: Color): Modifier = drawBehind {
-    drawLine(
-        color = color,
-        start = Offset(0f, 0f),
-        end = Offset(size.width, 0f),
-        strokeWidth = 1f
-    )
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -199,7 +190,7 @@ fun ChatScreen(
                         }
                     },
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface
+                        containerColor = MaterialTheme.colorScheme.background
                     )
                 )
             },
@@ -319,7 +310,16 @@ private val STARTER_CHIPS = listOf(
 
 @Composable
 private fun EmptyState(onSuggestion: (String) -> Unit) {
+    val dusk = LocalGeminiColors.current.duskGradient
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        // Ambient halo — the only place (with Login) where gradients are allowed.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(360.dp)
+                .align(Alignment.TopCenter)
+                .background(dusk)
+        )
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.padding(24.dp)
@@ -329,11 +329,11 @@ private fun EmptyState(onSuggestion: (String) -> Unit) {
                 contentDescription = null,
                 modifier = Modifier.size(96.dp)
             )
-            Spacer(Modifier.size(8.dp))
+            Spacer(Modifier.size(12.dp))
             Text(
                 "Ready when you are",
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.primary
+                style = MaterialTheme.typography.headlineMedium,
+                color = LocalGeminiColors.current.textStrong
             )
             Spacer(Modifier.size(8.dp))
             Text(
@@ -342,12 +342,17 @@ private fun EmptyState(onSuggestion: (String) -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(Modifier.size(16.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Spacer(Modifier.size(20.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 STARTER_CHIPS.forEach { (label, emoji) ->
                     SuggestionChip(
                         onClick = { onSuggestion(label) },
-                        label = { Text("$emoji  $label") }
+                        label = { Text("$emoji  $label") },
+                        shape = MaterialTheme.shapes.extraLarge,
+                        colors = SuggestionChipDefaults.suggestionChipColors(
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            labelColor = MaterialTheme.colorScheme.onSurface
+                        )
                     )
                 }
             }
@@ -459,26 +464,31 @@ fun MessageBubble(
     onResend: (() -> Unit)? = null
 ) {
     val alignment = if (message.isUser) Alignment.CenterEnd else Alignment.CenterStart
-    val container = if (message.isUser) MaterialTheme.colorScheme.primary
-        else MaterialTheme.colorScheme.surfaceVariant
-    val content = if (message.isUser) MaterialTheme.colorScheme.onPrimary
-        else MaterialTheme.colorScheme.onSurface
+    // AI Studio convention: user turn = tonal-blue pill, model turn = no fill
+    // (text flows on the canvas), tool result = card (handled elsewhere).
+    val container = if (message.isUser) MaterialTheme.colorScheme.primaryContainer
+        else Color.Transparent
+    val content = if (message.isUser) MaterialTheme.colorScheme.onPrimaryContainer
+        else MaterialTheme.colorScheme.onBackground
+    val shape = if (message.isUser) MaterialTheme.shapes.extraLarge
+        else MaterialTheme.shapes.medium
     var menuOpen by remember(message.id) { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = alignment) {
         Surface(
             color = container,
-            shape = MaterialTheme.shapes.medium,
-            modifier = (if (message.isUser) Modifier else Modifier.border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant,
-                shape = MaterialTheme.shapes.medium
-            )).combinedClickable(
+            shape = shape,
+            modifier = Modifier.combinedClickable(
                 onClick = {},
                 onLongClick = { menuOpen = true }
             )
         ) {
-            Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Box(
+                modifier = Modifier.padding(
+                    horizontal = if (message.isUser) 16.dp else 4.dp,
+                    vertical = if (message.isUser) 10.dp else 4.dp
+                )
+            ) {
                 if (message.isUser) {
                     Text(message.text, color = content)
                 } else {
@@ -796,54 +806,76 @@ fun BottomChatBar(
     onSend: () -> Unit,
     onStop: () -> Unit
 ) {
-    Surface(color = MaterialTheme.colorScheme.surface) {
+    // AI Studio's composer is a single pill: + | text | send, lifted off the
+    // canvas by a surface-hi tone and a thin stroke. No card border.
+    Surface(color = MaterialTheme.colorScheme.background) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .drawTopDivider(MaterialTheme.colorScheme.outlineVariant)
-                .padding(8.dp)
+                .padding(horizontal = 12.dp, vertical = 10.dp)
                 .navigationBarsPadding()
                 .imePadding(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onAddClick, enabled = !isLoading) {
-                Icon(Icons.Default.Add, contentDescription = "Quick actions")
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = MaterialTheme.shapes.extraLarge,
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp, MaterialTheme.colorScheme.outline
+                ),
+                modifier = Modifier.weight(1f)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onAddClick, enabled = !isLoading) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = "Quick actions",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    TextField(
+                        value = text,
+                        onValueChange = onTextChange,
+                        modifier = Modifier.weight(1f),
+                        enabled = enabled,
+                        placeholder = {
+                            Text(
+                                "Message Gemini…",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        },
+                        maxLines = 5,
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            disabledContainerColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent,
+                        )
+                    )
+                }
             }
-            TextField(
-                value = text,
-                onValueChange = onTextChange,
-                modifier = Modifier.weight(1f),
-                enabled = enabled,
-                placeholder = { Text("Message Gemini…") },
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surface,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
-                )
-            )
             Spacer(modifier = Modifier.width(8.dp))
             if (isLoading) {
                 FloatingActionButton(
                     onClick = onStop,
                     containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                    shape = MaterialTheme.shapes.extraLarge,
                     modifier = Modifier.size(48.dp)
                 ) {
-                    Icon(
-                        Icons.Default.Stop,
-                        contentDescription = "Stop",
-                        tint = MaterialTheme.colorScheme.onError
-                    )
+                    Icon(Icons.Default.Stop, contentDescription = "Stop")
                 }
             } else {
                 FloatingActionButton(
                     onClick = onSend,
                     containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    shape = MaterialTheme.shapes.extraLarge,
                     modifier = Modifier.size(48.dp)
                 ) {
-                    Icon(
-                        Icons.Default.Send,
-                        contentDescription = "Send",
-                        tint = MaterialTheme.colorScheme.onPrimary
-                    )
+                    Icon(Icons.Default.Send, contentDescription = "Send")
                 }
             }
         }
