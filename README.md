@@ -6,236 +6,237 @@
 [![Android API 26+](https://img.shields.io/badge/API-26%2B-3DDC84.svg?logo=android&logoColor=white)](https://developer.android.com/)
 [![Status](https://img.shields.io/badge/status-usable-brightgreen.svg)](#)
 
-Un client **Gemini natif pour Android** — chat streaming avec *function calling*,
-outils fichiers intégrés (SAF), pont Termux pour les commandes shell, et
-persistance locale chiffrée. Écrit en Kotlin + Jetpack Compose, sans dépendance
-à une application officielle Google. L'objectif : reproduire l'expérience du
-[Gemini CLI](https://github.com/google-gemini/gemini-cli) dans un APK autonome
-qui tient dans la poche.
+> 🇬🇧 English · [🇫🇷 Version française](fr/README.md)
 
-![Aperçu du chat](docs/screenshots/chat.png)
+A **native Gemini client for Android** — streaming chat with *function
+calling*, built-in file tools (SAF), Termux bridge for shell commands, and
+encrypted local persistence. Written in Kotlin + Jetpack Compose, with no
+dependency on any official Google app. The goal: reproduce the
+[Gemini CLI](https://github.com/google-gemini/gemini-cli) experience in a
+standalone APK that fits in your pocket.
 
-## 📋 Table des matières
+![Chat preview](docs/screenshots/chat.png)
 
-- [Fonctionnalités](#-fonctionnalités)
-- [Prérequis](#-prérequis)
+## 📋 Table of contents
+
+- [Features](#-features)
+- [Prerequisites](#-prerequisites)
 - [Installation](#-installation)
-- [Utilisation](#-utilisation)
+- [Usage](#-usage)
 - [Architecture](#-architecture)
-- [Configuration avancée](#-configuration-avancée)
-- [Compatibilité Gemini](#-compatibilité-gemini)
+- [Advanced configuration](#-advanced-configuration)
+- [Gemini compatibility](#-gemini-compatibility)
 - [Roadmap](#-roadmap)
-- [Contribuer](#-contribuer)
-- [Licence](#-licence)
-- [Crédits](#-crédits)
+- [Contributing](#-contributing)
+- [License](#-license)
+- [Credits](#-credits)
 
-## ✨ Fonctionnalités
+## ✨ Features
 
-- **Chat Gemini streaming** sur `generativelanguage.googleapis.com`, avec clé
-  API stockée en `EncryptedSharedPreferences`.
-- **Outils fichiers natifs** via SAF (`read_file`, `write_file`, `edit_file`,
-  `delete_file`, `list_directory`, `glob_files`, `grep`) — le modèle décide
-  seul quand les appeler.
-- **Pont Termux** pour les commandes shell (`run_shell_command`) avec chemin
-  workspace cohérent : `python foo.py` retrouve le fichier écrit juste avant
-  par `write_file`.
-- **Approbation des outils destructifs** — l'utilisateur valide chaque écriture
-  / suppression / commande shell, ou active « Auto-approve » une bonne fois.
-- **Autosave** de la conversation courante, restaurée au prochain lancement.
-- **Auto-compression** à X % du context window (seuil réglable) — la session
-  est résumée automatiquement avant de saturer.
-- **Découverte dynamique des modèles** via `/v1beta/models` (pas de liste codée
-  en dur).
-- **Rendu Markdown** dans le chat : titres, listes, code (inline + blocs),
-  liens, gras/italique, tableaux GFM, citations, listes à cocher, règles
-  horizontales, pièces jointes images.
-- **Diff viewer** intégré pour visualiser les résultats de `edit_file`.
-- **Export Markdown** de la conversation vers n'importe quelle app (partage
-  système).
+- **Streaming Gemini chat** over `generativelanguage.googleapis.com`, with
+  the API key stored in `EncryptedSharedPreferences`.
+- **Native file tools** via SAF (`read_file`, `write_file`, `edit_file`,
+  `delete_file`, `list_directory`, `glob_files`, `grep`) — the model
+  decides on its own when to call them.
+- **Termux bridge** for shell commands (`run_shell_command`) with a
+  consistent workspace path: `python foo.py` finds the file `write_file`
+  just wrote.
+- **Approval for destructive tools** — you confirm every write / delete /
+  shell command, or flip "Auto-approve" once.
+- **Autosave** of the current conversation, restored on next launch.
+- **Auto-compression** at X % of the context window (configurable
+  threshold) — the session is summarised automatically before it saturates.
+- **Dynamic model discovery** via `/v1beta/models` (no hard-coded list).
+- **Markdown rendering** in chat: headings, lists, code (inline +
+  fenced), links, bold/italic, GFM tables, blockquotes, task lists,
+  horizontal rules, image attachments.
+- **Diff viewer** for `edit_file` results.
+- **Markdown export** of the conversation to any app (system share
+  sheet).
 
-## 🛠 Prérequis
+## 🛠 Prerequisites
 
-Avant de commencer, assurez-vous d'avoir :
+Before you start, make sure you have:
 
-- **Android 8.0+** (API 26+) sur votre appareil.
-- Une **clé API Gemini** (gratuite) :
-  <https://aistudio.google.com/app/apikey>.
-- **Optionnel** — [Termux](https://f-droid.org/packages/com.termux/) depuis
-  F-Droid ou [les releases GitHub](https://github.com/termux/termux-app/releases)
-  (⚠️ **pas** le Play Store, abandonné depuis 2020).
+- **Android 8.0+** (API 26+) on your device.
+- A **Gemini API key** (free): <https://aistudio.google.com/app/apikey>.
+- **Optional** — [Termux](https://f-droid.org/packages/com.termux/) from
+  F-Droid or [the GitHub releases](https://github.com/termux/termux-app/releases)
+  (⚠️ **not** from the Play Store — abandoned since 2020).
 
-Pour compiler depuis les sources :
+To build from source:
 
 - **Android SDK** (API 34 minimum).
-- **JDK 17** dans `JAVA_HOME`.
+- **JDK 17** on `JAVA_HOME`.
 
 ## 🚀 Installation
 
-### Option 1 : APK pré-compilé
+### Option 1: pre-built APK
 
-Télécharger le dernier APK debug depuis la [page Releases](https://github.com/aciderix/gemini-android-app/releases)
-et l'installer. La signature est une clé debug — à remplacer par un keystore
-de release avant distribution publique.
+Download the latest debug APK from the
+[Releases page](https://github.com/aciderix/gemini-android-app/releases)
+and install it. It's debug-signed — replace with a release keystore
+before public distribution.
 
-### Option 2 : Compiler depuis les sources
+### Option 2: build from source
 
-1. Cloner le dépôt :
+1. Clone the repo:
    ```bash
    git clone https://github.com/aciderix/gemini-android-app
    cd gemini-android-app
    ```
 
-2. Lancer le build Gradle :
+2. Run the Gradle build:
    ```bash
    ./gradlew :app:assembleDebug
    ```
 
-3. L'APK est produit dans :
+3. The APK lands in:
    ```
    app/build/outputs/apk/debug/app-debug.apk
    ```
 
-4. L'installer sur l'appareil (USB ou `adb install`) :
+4. Install it on the device (USB or `adb install`):
    ```bash
    adb install app/build/outputs/apk/debug/app-debug.apk
    ```
 
-## 💻 Utilisation
+## 💻 Usage
 
-Au premier lancement :
+On first launch:
 
-1. **Settings → Account** : coller votre clé API Gemini.
-2. **Settings → Workspace → Pick folder** : choisir un dossier sous
-   `/storage/emulated/0/` (évitez `/Android/data/…`, inaccessible à Termux).
-3. **Settings → Termux shell** (facultatif, 3 étapes) : activer le pont shell
-   si vous voulez les commandes `run_shell_command`.
+1. **Settings → Account**: paste your Gemini API key.
+2. **Settings → Workspace → Pick folder**: choose a folder under
+   `/storage/emulated/0/` (avoid `/Android/data/…`, unreachable by Termux).
+3. **Settings → Termux shell** (optional, 3 steps): enable the shell
+   bridge if you want `run_shell_command` to work.
 
-Puis commencer à discuter — le modèle utilisera les outils fichiers et shell
-au besoin.
+Then start chatting — the model will use the file and shell tools as
+needed.
 
-### Exemples
+### Examples
 
-**Lire un fichier du workspace** :
-> *"Ouvre `notes.md` et résume-le."*
+**Read a file from the workspace**:
+> *"Open `notes.md` and summarise it."*
 
-**Écrire + exécuter un script Python** :
-> *"Écris un script `hello.py` qui affiche 'Hello', puis exécute-le."*
+**Write + run a Python script**:
+> *"Write a `hello.py` script that prints 'Hello', then run it."*
 
-L'app lancera `write_file` puis `run_shell_command` via Termux, avec
-approbation avant chaque action destructive (désactivable).
+The app will invoke `write_file` then `run_shell_command` via Termux,
+with approval before each destructive action (toggleable).
 
-**Attacher une image** : taper sur l'icône 🖼️ dans la barre de saisie et
-choisir une image depuis le picker système. L'image est envoyée en `inlineData`
-base64 dans la prochaine requête multimodale.
+**Attach an image**: tap the 🖼️ icon in the composer and pick one from
+the system picker. The image is sent as `inlineData` (base64) in the
+next multimodal request.
 
-**Exporter la conversation** : **Menu burger → Export as Markdown** — ouvre
-le sélecteur de partage système avec la conversation au format Markdown.
+**Export the conversation**: **burger menu → Export as Markdown** —
+opens the system share sheet with the chat in Markdown format.
 
 ## 🧱 Architecture
 
-Projet Gradle multi-modules :
+Multi-module Gradle project:
 
-| Module           | Rôle                                                                  |
+| Module           | Role                                                                  |
 |------------------|-----------------------------------------------------------------------|
-| `:app`           | UI Compose, ViewModels, Activity                                      |
-| `:core-bridge`   | Client REST Gemini, registry d'outils, Termux IPC, SAF, prefs         |
-| `:domain`        | Types purs (`GeminiMessage`, `ToolSpec`, `GeminiEvent`…) — sans Android |
-| `:ui-components` | Tokens de design (theme, couleurs) partagés                           |
+| `:app`           | Compose UI, ViewModels, Activity                                      |
+| `:core-bridge`   | REST Gemini client, tool registry, Termux IPC, SAF, prefs             |
+| `:domain`        | Pure types (`GeminiMessage`, `ToolSpec`, `GeminiEvent`…) — no Android |
+| `:ui-components` | Shared design tokens (theme, colours)                                 |
 
-Tout le réseau passe par `RestGeminiCore` qui émet des `GeminiEvent` consommés
-par `ChatViewModel`. Pas de framework DI, pas de Room : `SharedPreferences` +
-fichiers JSON sous `filesDir`.
+All network traffic flows through `RestGeminiCore`, which emits
+`GeminiEvent`s consumed by `ChatViewModel`. No DI framework, no Room:
+`SharedPreferences` + JSON files under `filesDir`.
 
-## ⚙️ Configuration avancée
+## ⚙️ Advanced configuration
 
 ### Auto-compression
 
-Le modèle renvoie `usageMetadata.totalTokenCount` à chaque réponse. Dès que
-`total / inputTokenLimit` dépasse le seuil (défaut **70 %**), la conversation
-est résumée dans une nouvelle session en arrière-plan — un bandeau
-non-bloquant s'affiche pendant l'opération.
+The model reports `usageMetadata.totalTokenCount` on every response. As
+soon as `total / inputTokenLimit` crosses the threshold (default **70 %**),
+the conversation is summarised into a fresh session in the background —
+a non-blocking banner shows during the operation.
 
-Régler le seuil dans **Settings → Auto-compression** (50 % → 95 %).
+Tune the threshold in **Settings → Auto-compression** (50 % → 95 %).
 
 ### Autosave
 
-Activée par défaut. La session courante est persistée dans
-`filesDir/chat-current.json` après chaque tour, et restaurée à l'ouverture
-(tant qu'aucune autre conversation n'est chargée). Indépendant des chats
-nommés, qu'on sauvegarde manuellement dans la liste.
+On by default. The live session is persisted to
+`filesDir/chat-current.json` after every turn, and restored on launch
+(as long as no other chat is loaded). Independent of named chats, which
+are saved manually from the list.
 
-Toggle dans **Settings → Autosave**.
+Toggle in **Settings → Autosave**.
 
-### Pièces jointes images
+### Image attachments
 
-Icône 🖼️ dans le composer — ouvre le picker photo système, puis l'image est
-encodée en base64 et envoyée en `inlineData` dans le prochain tour utilisateur.
-MIME détecté via `ContentResolver`. Limite de 15 MB par image.
+Via the 🖼️ icon in the composer — the image is encoded to base64 and
+sent as `inlineData` on the next user turn. MIME detected via
+`ContentResolver`. 15 MB cap per image.
 
-## 🧪 Compatibilité Gemini
+## 🧪 Gemini compatibility
 
-Testé avec :
+Tested with:
 
 - `gemini-2.5-pro` / `gemini-2.5-flash`
 - `gemini-2.0-flash`
 - `gemini-1.5-pro` / `gemini-1.5-flash`
 
-Le sélecteur dans **Settings → Model** liste tous les modèles de votre compte
-qui supportent `generateContent`.
+The **Settings → Model** picker lists every model on your account that
+supports `generateContent`.
 
 ## 🗺 Roadmap
 
-Voir [`docs/ROADMAP.md`](docs/ROADMAP.md) pour le détail.
+See [`docs/ROADMAP.md`](docs/ROADMAP.md) for details (in French).
 
-Principaux chantiers ouverts :
+Main open items:
 
-- [ ] Keystore de release + CI signée.
-- [ ] Tests unitaires sur le parser d'outils et sur `Workspace`.
-- [ ] R8 / minification en release.
-- [ ] Switcher rapide multi-conversation.
+- [ ] Release keystore + signed CI.
+- [ ] Unit tests on the tool parser and `Workspace`.
+- [ ] R8 / minification in release.
+- [ ] Fast multi-chat switcher.
 
-## 🤝 Contribuer
+## 🤝 Contributing
 
-Les contributions sont les bienvenues :
+Contributions are welcome:
 
-1. **Forkez** le projet.
-2. Créez une branche :
+1. **Fork** the project.
+2. Create a branch:
    ```bash
-   git checkout -b feature/ma-feature
+   git checkout -b feature/my-feature
    ```
-3. **Commitez** avec un message clair :
+3. **Commit** with a clear message:
    ```bash
-   git commit -m "Ajout de ma feature"
+   git commit -m "Add my feature"
    ```
-4. **Poussez** votre branche :
+4. **Push** your branch:
    ```bash
-   git push origin feature/ma-feature
+   git push origin feature/my-feature
    ```
-5. Ouvrez une **Pull Request**.
+5. Open a **Pull Request**.
 
-### Setup dev
+### Dev setup
 
-- **Langage** : Kotlin 1.9.24, target JDK 17.
-- **UI** : Compose BOM 2024.06.00 + Material 3.
-- **Versions centralisées** dans `gradle/libs.versions.toml`.
+- **Language**: Kotlin 1.9.24, target JDK 17.
+- **UI**: Compose BOM 2024.06.00 + Material 3.
+- **Versions centralised** in `gradle/libs.versions.toml`.
 
-Commandes utiles :
+Useful commands:
 ```bash
-./gradlew :app:assembleDebug        # APK debug
+./gradlew :app:assembleDebug        # debug APK
 ./gradlew :app:lint                 # Android lint
-./gradlew :core-bridge:test         # tests unitaires
+./gradlew :core-bridge:test         # unit tests
 ```
 
-## 📄 Licence
+## 📄 License
 
-Distribué sous la licence **Apache 2.0**. Voir [`LICENSE`](LICENSE) pour les
-détails.
+Distributed under the **Apache 2.0** license. See [`LICENSE`](LICENSE)
+for details.
 
-## 🙏 Crédits
+## 🙏 Credits
 
-- **Inspiration** : [Gemini CLI](https://github.com/google-gemini/gemini-cli) de Google.
-- **Modèle** : [Gemini API](https://ai.google.dev/) de Google.
-- **Pont shell** : [Termux](https://termux.dev/) — merveille open-source.
-- **UI** : [Jetpack Compose](https://developer.android.com/jetpack/compose) + Material 3.
+- **Inspiration**: [Gemini CLI](https://github.com/google-gemini/gemini-cli) by Google.
+- **Model**: [Gemini API](https://ai.google.dev/) by Google.
+- **Shell bridge**: [Termux](https://termux.dev/) — an open-source gem.
+- **UI**: [Jetpack Compose](https://developer.android.com/jetpack/compose) + Material 3.
 
-Lien du projet : <https://github.com/aciderix/gemini-android-app>
+Project link: <https://github.com/aciderix/gemini-android-app>
