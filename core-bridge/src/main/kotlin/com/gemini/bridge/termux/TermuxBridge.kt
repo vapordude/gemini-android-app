@@ -2,15 +2,20 @@ package com.gemini.bridge.termux
 
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CancellableContinuation
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 import kotlin.coroutines.resume
@@ -47,31 +52,53 @@ class TermuxBridge(private val appContext: Context) {
         if (workdir == null || !isWorkdirDenied(first)) return first
 
         // Termux refused the WORKDIR because it lacks shared-storage access.
-        // First denial: fire `termux-setup-storage` once — Termux pops the
-        // Android permission dialog, user taps Allow, and every later command
-        // lands in the workspace. This call runs the current command from
-        // $HOME so the user isn't blocked, and annotates the hint.
+        // The only reliable way to surface the Android storage permission
+        // dialog is to foreground Termux with the setup command on the
+        // clipboard so the user can paste it — RUN_COMMAND in foreground
+        // mode is supposed to do this but its internal broadcast flow
+        // doesn't always trigger the permission request. Fall back to $HOME
+        // so this command still produces output, and hint the user about
+        // the one-tap recovery.
         if (!autoSetupAttempted) {
             autoSetupAttempted = true
-            // Fire-and-forget: Termux opens the permission dialog on its own
-            // thread; the RUN_COMMAND broadcast returns before the user taps.
-            dispatch("termux-setup-storage", null, timeoutMs)
+            triggerStorageBootstrap()
             val fallback = dispatch(command, null, timeoutMs)
-            val hint = "note: Termux couldn't read $workdir yet. A storage " +
-                "permission dialog was just opened in Termux — tap Allow and " +
-                "future commands will land in the workspace. This command ran " +
+            val hint = "note: Termux couldn't read $workdir yet. Termux was " +
+                "just brought to the foreground and `termux-setup-storage` is " +
+                "on your clipboard — long-press in Termux, tap Paste, press " +
+                "Enter, then accept Android's storage permission dialog. Every " +
+                "later command will land in the workspace. This command ran " +
                 "from Termux's \$HOME in the meantime."
             return fallback.copy(stderr = mergeErr(fallback.stderr, hint))
         }
 
-        // Already tried auto-setup earlier — user likely declined the dialog.
-        // Keep working by falling back to $HOME and surface the manual fix.
+        // Already tried auto-setup earlier — user likely skipped it. Keep
+        // working by falling back to $HOME and surface the manual fix.
         val fallback = dispatch(command, null, timeoutMs)
         val hint = "note: Termux still can't read $workdir. Open Termux and " +
             "run `termux-setup-storage`, then accept the Android permission " +
             "dialog. Until then, prefer the workspace file tools over shell " +
             "commands for file-oriented work."
         return fallback.copy(stderr = mergeErr(fallback.stderr, hint))
+    }
+
+    private suspend fun triggerStorageBootstrap() = withContext(Dispatchers.Main) {
+        runCatching {
+            val cm = appContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("termux-setup-storage", "termux-setup-storage"))
+        }
+        runCatching {
+            Toast.makeText(
+                appContext,
+                "Paste in Termux (long-press → Paste → Enter) to grant storage access.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+        runCatching {
+            val launch = appContext.packageManager.getLaunchIntentForPackage(TERMUX_PKG)
+                ?: return@runCatching
+            appContext.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
     }
 
     private fun mergeErr(existing: String, hint: String): String =

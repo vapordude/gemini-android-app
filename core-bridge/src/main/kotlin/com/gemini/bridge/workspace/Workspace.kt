@@ -51,35 +51,84 @@ class Workspace(private val context: Context) {
      * case, shell commands keep running in Termux's $HOME and files have to
      * travel through the workspace tools.
      */
-    fun absolutePath(): String? {
-        val uri = root?.uri ?: return null
-        if (uri.scheme == "file") {
-            val raw = uri.path ?: return null
-            // Only report paths Termux can read after `termux-setup-storage`.
-            // App-private /Android/data/... is a sandbox peer, not reachable.
-            return when {
-                raw.startsWith("/storage/emulated/0/Android/") -> null
-                raw.startsWith("/sdcard/Android/") -> null
-                raw.startsWith("/storage/") -> raw
-                raw.startsWith("/sdcard") -> raw
-                else -> null
-            }
+    fun absolutePath(): String? = resolution().path
+
+    /**
+     * Returns a user-facing explanation of why the workspace can't be reached
+     * from Termux, or null when it is reachable. Use this in UI badges and in
+     * error hints so the user knows whether the fix is Termux-side (grant
+     * storage, bootstrap) or app-side (pick a different folder).
+     */
+    fun unreachableReason(): String? = resolution().reason
+
+    private data class Resolution(val path: String?, val reason: String?)
+
+    private fun resolution(): Resolution {
+        val uri = root?.uri
+            ?: return Resolution(null, "No workspace root set.")
+        if (uri.scheme == "file") return resolveFile(uri.path)
+
+        val authority = uri.authority.orEmpty()
+        if (authority == "com.android.externalstorage.documents") return resolveExternal(uri)
+
+        return Resolution(
+            null,
+            "The workspace is backed by a storage provider Termux can't see " +
+                "($authority). Pick a folder under /storage/emulated/0/ (for " +
+                "example Documents/) via Settings → Workspace → Pick folder."
+        )
+    }
+
+    private fun resolveFile(raw: String?): Resolution {
+        if (raw == null) return Resolution(null, "Workspace URI has no path.")
+        // App-private /Android/data/... is a sandbox peer, not reachable from
+        // Termux no matter how much we `termux-setup-storage`.
+        if (raw.startsWith("/storage/emulated/0/Android/") ||
+            raw.startsWith("/sdcard/Android/")
+        ) {
+            return Resolution(
+                null,
+                "The workspace is in Android app-private storage ($raw), which " +
+                    "Termux can never read. Pick a folder under " +
+                    "/storage/emulated/0/ (for example Documents/ or Download/) " +
+                    "via Settings → Workspace → Pick folder."
+            )
         }
-        if (uri.authority == "com.android.externalstorage.documents") {
-            val id = runCatching { DocumentsContract.getTreeDocumentId(uri) }.getOrNull() ?: return null
-            val parts = id.split(':', limit = 2)
-            val volume = parts.getOrNull(0).orEmpty()
-            val sub = parts.getOrNull(1).orEmpty()
-            val base = when {
-                volume.equals("primary", ignoreCase = true) -> "/storage/emulated/0"
-                volume.isNotBlank() -> "/storage/$volume"
-                else -> return null
-            }
-            val candidate = if (sub.isBlank()) base else "$base/$sub"
-            // Same sandbox-peer guard as above.
-            return if (candidate.startsWith("/storage/emulated/0/Android/")) null else candidate
+        if (raw.startsWith("/storage/") || raw.startsWith("/sdcard")) {
+            return Resolution(raw, null)
         }
-        return null
+        return Resolution(
+            null,
+            "The workspace path ($raw) isn't on shared storage. Pick a folder " +
+                "under /storage/emulated/0/ via Settings → Workspace → Pick folder."
+        )
+    }
+
+    private fun resolveExternal(uri: Uri): Resolution {
+        val id = runCatching { DocumentsContract.getTreeDocumentId(uri) }.getOrNull()
+            ?: return Resolution(null, "Cannot read the workspace document id.")
+        val parts = id.split(':', limit = 2)
+        val volume = parts.getOrNull(0).orEmpty()
+        val sub = parts.getOrNull(1).orEmpty()
+        // Some OEM document providers use a `raw:` prefix with an absolute
+        // filesystem path — honor it when it points into shared storage.
+        if (volume.equals("raw", ignoreCase = true)) return resolveFile(sub)
+        val base = when {
+            volume.equals("primary", ignoreCase = true) -> "/storage/emulated/0"
+            volume.equals("home", ignoreCase = true) -> "/storage/emulated/0/Documents"
+            volume.isNotBlank() -> "/storage/$volume"
+            else -> return Resolution(null, "Unrecognised workspace volume ($id).")
+        }
+        val candidate = if (sub.isBlank()) base else "$base/$sub"
+        if (candidate.startsWith("/storage/emulated/0/Android/")) {
+            return Resolution(
+                null,
+                "The workspace is in Android app-private storage ($candidate), " +
+                    "which Termux can never read. Pick a folder under " +
+                    "/storage/emulated/0/ via Settings → Workspace → Pick folder."
+            )
+        }
+        return Resolution(candidate, null)
     }
 
     fun resolve(path: String): DocumentFile? {

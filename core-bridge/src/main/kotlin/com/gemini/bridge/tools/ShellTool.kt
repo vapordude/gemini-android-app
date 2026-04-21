@@ -37,12 +37,14 @@ class RunShellCommandTool(
     override suspend fun execute(call: ToolCall): ToolCallResult = runCatching {
         val command = call.arguments["command"] as? String ?: error("command is required")
         val workdir = workspace.absolutePath()
+        val reason = workspace.unreachableReason()
         val r = termux.run(command, workdir)
         val body = buildString {
             append("exit=").append(r.exitCode)
             if (workdir != null) append("  cwd=").append(workdir)
             else append("  cwd=~  (workspace not reachable from Termux)")
             append('\n')
+            if (workdir == null && reason != null) append("reason: ").append(reason).append('\n')
             if (r.stdout.isNotBlank()) append("--- stdout ---\n").append(r.stdout).append('\n')
             if (r.stderr.isNotBlank()) append("--- stderr ---\n").append(r.stderr).append('\n')
         }.trimEnd()

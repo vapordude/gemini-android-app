@@ -83,6 +83,8 @@ class RestGeminiCore(
     private val pending = ConcurrentHashMap<String, CompletableDeferred<ToolDecision>>()
 
     @Volatile private var discoveredModels: List<String> = AVAILABLE_MODELS
+    private val tokenLimits = ConcurrentHashMap<String, Int>()
+    @Volatile private var lastTokenUsage: Int = 0
 
     init {
         // Restore non-sensitive prefs eagerly; the API key is injected via init().
@@ -140,6 +142,45 @@ class RestGeminiCore(
     fun isTermuxGuideShown(): Boolean = prefs.termuxGuideShown
     fun markTermuxGuideShown() { prefs.termuxGuideShown = true }
 
+    fun isAutoCompressEnabled(): Boolean = prefs.autoCompressEnabled
+    fun setAutoCompressEnabled(enabled: Boolean) { prefs.autoCompressEnabled = enabled }
+    fun autoCompressThreshold(): Float = prefs.autoCompressThreshold
+    fun setAutoCompressThreshold(fraction: Float) {
+        prefs.autoCompressThreshold = fraction.coerceIn(0.5f, 0.95f)
+    }
+
+    fun isAutoSaveEnabled(): Boolean = prefs.autoSaveEnabled
+    fun setAutoSaveEnabled(enabled: Boolean) {
+        prefs.autoSaveEnabled = enabled
+        if (!enabled) chatStore.clearCurrent()
+        else persistCurrentIfEnabled()
+    }
+
+    /** Snapshot the live session into the auto-save slot (no-op if disabled). */
+    fun persistCurrentIfEnabled() {
+        if (!prefs.autoSaveEnabled) return
+        if (turns.isEmpty() && uiMessages.isEmpty()) {
+            chatStore.clearCurrent(); return
+        }
+        chatStore.saveCurrent(ChatStore.Snapshot(turns.toList(), uiMessages.toList()))
+    }
+
+    /** Restore the auto-save slot into the live session, if one exists. */
+    suspend fun resumeCurrentSession(): Boolean {
+        val snap = chatStore.loadCurrent() ?: return false
+        turns.clear()
+        turns.addAll(snap.turns)
+        uiMessages.clear()
+        uiMessages.addAll(snap.messages)
+        pending.values.forEach { it.cancel() }
+        pending.clear()
+        snap.messages.forEach { _events.tryEmit(GeminiEvent.MessageAdded(it)) }
+        return true
+    }
+
+    /** Last reported (totalTokenCount, inputTokenLimit?) for the current model. */
+    fun currentTokenUsage(): Pair<Int, Int?> = lastTokenUsage to tokenLimits[model]
+
     fun signOut() {
         apiKey = ""
         turns.clear()
@@ -148,6 +189,7 @@ class RestGeminiCore(
         pending.clear()
         discoveredModels = AVAILABLE_MODELS
         model = defaultModel
+        chatStore.clearCurrent()
         prefs.clearAll()
     }
 
@@ -167,6 +209,7 @@ class RestGeminiCore(
         pending.clear()
         // Replay messages to the UI.
         snap.messages.forEach { _events.tryEmit(GeminiEvent.MessageAdded(it)) }
+        persistCurrentIfEnabled()
         return true
     }
 
@@ -188,6 +231,8 @@ class RestGeminiCore(
             val name = raw.removePrefix("models/")
             // Skip embeddings / vision-only / non-chat suffixes.
             if (name.contains("embedding") || name.contains("aqa")) continue
+            val limit = m.optInt("inputTokenLimit", 0)
+            if (limit > 0) tokenLimits[name] = limit
             out += name
         }
         // Prefer Gemini chat models, sort newest-looking first.
@@ -268,6 +313,7 @@ class RestGeminiCore(
             GeminiResult.Error(t.message ?: "Network error")
         } finally {
             emitThinking(null)
+            persistCurrentIfEnabled()
         }
     }
 
@@ -280,6 +326,9 @@ class RestGeminiCore(
         uiMessages.clear()
         pending.values.forEach { it.cancel() }
         pending.clear()
+        lastTokenUsage = 0
+        _events.tryEmit(GeminiEvent.TokenUsage(0, tokenLimits[model]))
+        chatStore.clearCurrent()
         return GeminiResult.Success("Reset")
     }
 
@@ -357,6 +406,7 @@ class RestGeminiCore(
         val parts = JSONArray()
         val calls = mutableListOf<ToolCall>()
         var liveMessage: GeminiMessage? = null
+        var lastTotalTokens = 0
         try {
             conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
             val code = conn.responseCode
@@ -374,6 +424,10 @@ class RestGeminiCore(
                     val data = line.removePrefix("data:").trim()
                     if (data.isEmpty() || data == "[DONE]") continue
                     val json = runCatching { JSONObject(data) }.getOrNull() ?: continue
+                    json.optJSONObject("usageMetadata")
+                        ?.optInt("totalTokenCount", 0)
+                        ?.takeIf { it > 0 }
+                        ?.let { lastTotalTokens = it }
                     val content = json.optJSONArray("candidates")
                         ?.optJSONObject(0)
                         ?.optJSONObject("content")
@@ -418,6 +472,10 @@ class RestGeminiCore(
         if (parts.length() > 0) {
             turns.add(JSONObject().put("role", "model").put("parts", parts))
         }
+        if (lastTotalTokens > 0) {
+            lastTokenUsage = lastTotalTokens
+            _events.tryEmit(GeminiEvent.TokenUsage(lastTotalTokens, tokenLimits[model]))
+        }
         val textPart = accumulated.toString().takeIf { it.isNotBlank() }
         textPart to calls
     }
@@ -435,6 +493,7 @@ class RestGeminiCore(
     private fun buildSystemInstruction(): JSONObject {
         val toolNames = registry.specs().joinToString(", ") { it.name }
         val reachable = workspace.absolutePath()
+        val reason = workspace.unreachableReason()
         val termuxLine = when {
             !termux.isInstalled() ->
                 "Termux is not installed, so run_shell_command will fail. " +
@@ -449,15 +508,16 @@ class RestGeminiCore(
                     "RUN_COMMAND permission."
             else ->
                 "The run_shell_command tool dispatches to Termux, but the current " +
-                    "workspace is NOT reachable from Termux's filesystem view " +
-                    "(it's a SAF URI or an app-private path). Shell commands run " +
-                    "in Termux's `\$HOME` with no access to workspace files. For " +
+                    "workspace is NOT reachable from Termux's filesystem view. " +
+                    "Exact reason: ${reason ?: "unknown"}. Shell commands run in " +
+                    "Termux's `\$HOME` with no access to workspace files. For " +
                     "anything file-oriented, use the file tools (read_file, " +
                     "write_file, edit_file, list_directory, glob_files, grep) " +
                     "instead of `cat`, `ls`, `grep`, or invoking interpreters on " +
-                    "workspace files. To regain shell access to workspace files, " +
-                    "ask the user to pick a folder under /storage/emulated/0/ " +
-                    "(e.g. Documents/) rather than the app-private default."
+                    "workspace files. When the user asks why a shell command " +
+                    "failed with \"No such file or directory\", relay the exact " +
+                    "reason above — the fix is almost always picking a folder " +
+                    "under /storage/emulated/0/ via Settings → Workspace."
         }
         val text = buildString {
             append("You are Gemini running inside a native Android app.\n\n")

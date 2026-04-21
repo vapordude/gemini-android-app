@@ -44,11 +44,34 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
     private val _workspaceLabel = MutableStateFlow(core.workspace.rootLabel())
     val workspaceLabel: StateFlow<String> = _workspaceLabel.asStateFlow()
 
+    private val _workspacePath = MutableStateFlow(core.workspace.absolutePath())
+    val workspacePath: StateFlow<String?> = _workspacePath.asStateFlow()
+
+    private val _workspaceReason = MutableStateFlow(core.workspace.unreachableReason())
+    val workspaceReason: StateFlow<String?> = _workspaceReason.asStateFlow()
+
     private val _availableModels = MutableStateFlow(core.listModels())
     val availableModels: StateFlow<List<String>> = _availableModels.asStateFlow()
 
     private val _thinking = MutableStateFlow<String?>(null)
     val thinking: StateFlow<String?> = _thinking.asStateFlow()
+
+    private val _tokenUsage = MutableStateFlow(
+        TokenUsageState(core.currentTokenUsage().first, core.currentTokenUsage().second)
+    )
+    val tokenUsage: StateFlow<TokenUsageState> = _tokenUsage.asStateFlow()
+
+    private val _autoCompressEnabled = MutableStateFlow(core.isAutoCompressEnabled())
+    val autoCompressEnabled: StateFlow<Boolean> = _autoCompressEnabled.asStateFlow()
+
+    private val _autoCompressThreshold = MutableStateFlow(core.autoCompressThreshold())
+    val autoCompressThreshold: StateFlow<Float> = _autoCompressThreshold.asStateFlow()
+
+    private val _compressing = MutableStateFlow(false)
+    val compressing: StateFlow<Boolean> = _compressing.asStateFlow()
+
+    private val _autoSaveEnabled = MutableStateFlow(core.isAutoSaveEnabled())
+    val autoSaveEnabled: StateFlow<Boolean> = _autoSaveEnabled.asStateFlow()
 
     private var sendJob: Job? = null
     private var lastUserPrompt: String? = null
@@ -83,6 +106,8 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
                     }
                     is GeminiEvent.Thinking -> _thinking.value = ev.label
                     is GeminiEvent.Notice -> _error.value = ev.message
+                    is GeminiEvent.TokenUsage ->
+                        _tokenUsage.value = TokenUsageState(ev.total, ev.limit)
                 }
             }
         }
@@ -96,11 +121,21 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
                     _isReady.value = true
                     _model.value = core.currentModel()
                     _availableModels.value = core.listModels()
+                    // Resume the previous conversation if autosave is on and the
+                    // in-memory session is still empty.
+                    if (core.isAutoSaveEnabled() && _messages.isEmpty()) {
+                        core.resumeCurrentSession()
+                    }
                 }
                 is GeminiResult.Error -> _error.value = result.message
             }
             _isLoading.value = false
         }
+    }
+
+    fun setAutoSaveEnabled(enabled: Boolean) {
+        core.setAutoSaveEnabled(enabled)
+        _autoSaveEnabled.value = enabled
     }
 
     fun refreshModels() {
@@ -156,8 +191,19 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
                 _isLoading.value = false
                 _thinking.value = null
                 sendJob = null
+                maybeAutoCompress()
             }
         }
+    }
+
+    private fun maybeAutoCompress() {
+        if (!_autoCompressEnabled.value) return
+        if (_compressing.value) return
+        val (total, limit) = _tokenUsage.value.let { it.total to it.limit }
+        if (limit == null || limit <= 0 || total <= 0) return
+        val ratio = total.toFloat() / limit.toFloat()
+        if (ratio < _autoCompressThreshold.value) return
+        compressSession(auto = true)
     }
 
     fun cancelSend() {
@@ -220,7 +266,11 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
         viewModelScope.launch {
             when (val r = core.setProjectFolder(uri)) {
                 is GeminiResult.Error -> _error.value = r.message
-                is GeminiResult.Success -> _workspaceLabel.value = core.workspace.rootLabel()
+                is GeminiResult.Success -> {
+                    _workspaceLabel.value = core.workspace.rootLabel()
+                    _workspacePath.value = core.workspace.absolutePath()
+                    _workspaceReason.value = core.workspace.unreachableReason()
+                }
             }
         }
     }
@@ -238,27 +288,58 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
         return ChatStats(userCount, modelCount, toolCount, chars)
     }
 
-    fun compressSession() {
+    fun compressSession(auto: Boolean = false) {
+        if (_compressing.value) return
         viewModelScope.launch {
             val snapshot = _messages.toList()
             if (snapshot.isEmpty()) return@launch
-            val prompt = buildString {
-                append("Summarise the following conversation. ")
-                append("Keep the key decisions, open questions, and file changes. Output 10 bullets max.\n\n")
-                snapshot.forEach { msg ->
-                    when (msg.role) {
-                        MessageRole.USER -> append("[user] ").append(msg.text).append('\n')
-                        MessageRole.MODEL -> append("[assistant] ").append(msg.text).append('\n')
-                        else -> Unit
+            _compressing.value = true
+            try {
+                val prompt = buildString {
+                    append("Summarise the following conversation. ")
+                    append("Keep the key decisions, open questions, and file changes. Output 10 bullets max.\n\n")
+                    snapshot.forEach { msg ->
+                        when (msg.role) {
+                            MessageRole.USER -> append("[user] ").append(msg.text).append('\n')
+                            MessageRole.MODEL -> append("[assistant] ").append(msg.text).append('\n')
+                            else -> Unit
+                        }
                     }
                 }
+                core.resetSession()
+                _messages.clear()
+                // Inline call instead of sendMessage() to avoid re-entering
+                // auto-compress on the summary response.
+                _isLoading.value = true
+                try {
+                    when (val r = core.sendMessage(prompt)) {
+                        is GeminiResult.Success -> {}
+                        is GeminiResult.Error -> _error.value = r.message
+                    }
+                } catch (_: CancellationException) {
+                    // silent
+                } finally {
+                    _isLoading.value = false
+                    _thinking.value = null
+                }
+            } finally {
+                _compressing.value = false
             }
-            core.resetSession()
-            _messages.clear()
-            sendMessage(prompt)
         }
     }
+
+    fun setAutoCompressEnabled(enabled: Boolean) {
+        core.setAutoCompressEnabled(enabled)
+        _autoCompressEnabled.value = enabled
+    }
+
+    fun setAutoCompressThreshold(fraction: Float) {
+        core.setAutoCompressThreshold(fraction)
+        _autoCompressThreshold.value = core.autoCompressThreshold()
+    }
 }
+
+data class TokenUsageState(val total: Int, val limit: Int?)
 
 data class ChatStats(
     val userMessages: Int,

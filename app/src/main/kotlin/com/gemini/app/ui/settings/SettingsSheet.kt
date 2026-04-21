@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -28,10 +29,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.OpenInNew
@@ -41,17 +44,24 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -80,7 +90,13 @@ fun SettingsSheet(
     val currentModel by viewModel.model.collectAsState()
     val autoApprove by viewModel.autoApprove.collectAsState()
     val workspaceLabel by viewModel.workspaceLabel.collectAsState()
+    val workspacePath by viewModel.workspacePath.collectAsState()
+    val workspaceReason by viewModel.workspaceReason.collectAsState()
     val models by viewModel.availableModels.collectAsState()
+    val autoCompress by viewModel.autoCompressEnabled.collectAsState()
+    val compressThreshold by viewModel.autoCompressThreshold.collectAsState()
+    val tokenUsage by viewModel.tokenUsage.collectAsState()
+    val autoSave by viewModel.autoSaveEnabled.collectAsState()
 
     var customModel by remember { mutableStateOf("") }
     var expanded by remember { mutableStateOf(emptySet<String>()) }
@@ -95,14 +111,40 @@ fun SettingsSheet(
         expanded = if (name in expanded) expanded - name else expanded + name
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    fun dismissAnimated() {
+        scope.launch {
+            sheetState.hide()
+            onDismiss()
+        }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.background
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .fillMaxHeight(0.95f)
                 .padding(horizontal = 16.dp, vertical = 8.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            Text("Settings", style = MaterialTheme.typography.titleLarge)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Settings",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = { dismissAnimated() }) {
+                    Icon(Icons.Default.Close, contentDescription = "Close")
+                }
+            }
             Spacer(Modifier.height(12.dp))
 
             SettingsAccordion(
@@ -146,22 +188,52 @@ fun SettingsSheet(
                     )
                     TextButton(onClick = { viewModel.refreshModels() }) { Text("Refresh") }
                 }
-                models.forEach { name ->
-                    Row(
+                Spacer(Modifier.height(4.dp))
+                var dropdownOpen by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = dropdownOpen,
+                    onExpandedChange = { dropdownOpen = it }
+                ) {
+                    OutlinedTextField(
+                        value = currentModel,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Current model") },
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownOpen)
+                        },
+                        colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
                         modifier = Modifier
+                            .menuAnchor()
                             .fillMaxWidth()
-                            .clickable { viewModel.setModel(name) }
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    )
+                    DropdownMenu(
+                        expanded = dropdownOpen,
+                        onDismissRequest = { dropdownOpen = false }
                     ) {
-                        RadioButton(
-                            selected = name == currentModel,
-                            onClick = { viewModel.setModel(name) }
-                        )
-                        Text(name, style = MaterialTheme.typography.bodyMedium)
+                        models.forEach { name ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        name,
+                                        style = if (name == currentModel)
+                                            MaterialTheme.typography.bodyMedium.copy(
+                                                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        else MaterialTheme.typography.bodyMedium
+                                    )
+                                },
+                                onClick = {
+                                    viewModel.setModel(name)
+                                    dropdownOpen = false
+                                    dismissAnimated()
+                                }
+                            )
+                        }
                     }
                 }
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(8.dp))
                 Text(
                     "Or type a custom model ID",
                     style = MaterialTheme.typography.labelSmall,
@@ -181,6 +253,7 @@ fun SettingsSheet(
                             if (customModel.isNotBlank()) {
                                 viewModel.setModel(customModel.trim())
                                 customModel = ""
+                                dismissAnimated()
                             }
                         }
                     ) { Text("Use") }
@@ -197,6 +270,49 @@ fun SettingsSheet(
                     workspaceLabel,
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
                 )
+                Spacer(Modifier.height(6.dp))
+                val path = workspacePath
+                val reason = workspaceReason
+                if (path != null) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = MaterialTheme.shapes.small
+                    ) {
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Text(
+                                "✓ Termux-visible path",
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Text(
+                                path,
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
+                            )
+                        }
+                    }
+                } else {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shape = MaterialTheme.shapes.small
+                    ) {
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Text(
+                                "⚠ Not reachable from Termux",
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Text(
+                                reason ?: "Unknown reason.",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                "Shell commands will run in Termux's \$HOME. Use the " +
+                                    "file tools for workspace files, or pick a folder " +
+                                    "under /storage/emulated/0/ below.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
                 Spacer(Modifier.height(6.dp))
                 OutlinedButton(onClick = { folderLauncher.launch(null) }) {
                     Icon(Icons.Default.Folder, contentDescription = null)
@@ -227,6 +343,86 @@ fun SettingsSheet(
                         checked = autoApprove,
                         onCheckedChange = { viewModel.setAutoApprove(it) }
                     )
+                }
+            }
+
+            SettingsAccordion(
+                title = "Autosave conversation",
+                icon = Icons.Default.History,
+                expanded = "Autosave" in expanded,
+                onToggle = { toggle("Autosave") }
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Keep the current conversation", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Saves the ongoing chat after each turn and restores it " +
+                                "when you reopen the app. Turning this off clears the " +
+                                "saved snapshot.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = autoSave,
+                        onCheckedChange = { viewModel.setAutoSaveEnabled(it) }
+                    )
+                }
+            }
+
+            SettingsAccordion(
+                title = "Auto-compression",
+                icon = Icons.Default.Memory,
+                expanded = "Auto-compression" in expanded,
+                onToggle = { toggle("Auto-compression") }
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Compress automatically", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Summarises the history when the context fills up so the " +
+                                "chat can keep going without hitting the token limit.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = autoCompress,
+                        onCheckedChange = { viewModel.setAutoCompressEnabled(it) }
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Trigger at ${(compressThreshold * 100).toInt()}% of the context window",
+                    style = MaterialTheme.typography.labelMedium
+                )
+                Slider(
+                    value = compressThreshold,
+                    onValueChange = { viewModel.setAutoCompressThreshold(it) },
+                    valueRange = 0.5f..0.95f,
+                    steps = 8,
+                    enabled = autoCompress
+                )
+                val (total, limit) = tokenUsage.total to tokenUsage.limit
+                if (total > 0) {
+                    val pct = if (limit != null && limit > 0)
+                        " (${((total.toFloat() / limit) * 100).toInt()}% used)" else ""
+                    Text(
+                        "Current session: $total tokens" +
+                            (if (limit != null) " / $limit" else "") + pct,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = { viewModel.compressSession() }) {
+                    Text("Compress now")
                 }
             }
 
@@ -494,36 +690,6 @@ private fun TermuxBody(viewModel: ChatViewModel) {
 
     TermuxStep(
         number = "2",
-        title = "Termux allows external apps",
-        ok = null,
-        body = {
-            Text(
-                "Open Termux and paste these two commands once (tap to copy):",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(6.dp))
-            TermuxCommandRow(
-                step = "a.",
-                command = "mkdir -p ~/.termux && echo 'allow-external-apps=true' >> ~/.termux/termux.properties",
-                context = context
-            )
-            TermuxCommandRow(
-                step = "b.",
-                command = "termux-reload-settings",
-                context = context
-            )
-            Spacer(Modifier.height(6.dp))
-            OutlinedButton(onClick = { openTermux(context) }) {
-                Icon(Icons.Default.Terminal, contentDescription = null)
-                Spacer(Modifier.width(6.dp))
-                Text("Open Termux")
-            }
-        }
-    )
-
-    TermuxStep(
-        number = "3",
         title = "Android RUN_COMMAND permission",
         ok = permissionGranted,
         body = {
@@ -557,13 +723,19 @@ private fun TermuxBody(viewModel: ChatViewModel) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { permissionLauncher.launch(RUN_COMMAND_PERMISSION) }) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Button(
+                            onClick = { permissionLauncher.launch(RUN_COMMAND_PERMISSION) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             Icon(Icons.Default.Security, contentDescription = null)
                             Spacer(Modifier.width(6.dp))
                             Text("Request permission")
                         }
-                        OutlinedButton(onClick = { openAppSettings(context) }) {
+                        OutlinedButton(
+                            onClick = { openAppSettings(context) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             Text("Open app settings")
                         }
                     }
@@ -582,6 +754,56 @@ private fun TermuxBody(viewModel: ChatViewModel) {
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+        }
+    )
+
+    TermuxStep(
+        number = "3",
+        title = "Termux allows external apps",
+        ok = null,
+        body = {
+            Text(
+                "With the permission granted, Termux still needs `allow-external-apps=true` " +
+                    "in its config. One tap: the command is copied to the clipboard and " +
+                    "Termux opens. Long-press in Termux, tap Paste, press Enter — done.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = { copyBootstrapAndOpenTermux(context) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Terminal, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Copy & open Termux")
+            }
+            Spacer(Modifier.height(10.dp))
+            var showManual by remember { mutableStateOf(false) }
+            TextButton(onClick = { showManual = !showManual }) {
+                Text(
+                    if (showManual) "Hide manual commands" else "Prefer manual? Show the two commands",
+                    style = MaterialTheme.typography.labelSmall
+                )
+            }
+            if (showManual) {
+                TermuxCommandRow(
+                    step = "a.",
+                    command = "mkdir -p ~/.termux && echo 'allow-external-apps=true' >> ~/.termux/termux.properties",
+                    context = context
+                )
+                TermuxCommandRow(
+                    step = "b.",
+                    command = "termux-reload-settings",
+                    context = context
+                )
+                Spacer(Modifier.height(6.dp))
+                OutlinedButton(onClick = { openTermux(context) }) {
+                    Icon(Icons.Default.Terminal, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Open Termux")
                 }
             }
         }
@@ -738,6 +960,24 @@ private fun openTermux(context: Context) {
         }
     }
     openUrl(context, "https://f-droid.org/packages/com.termux/")
+}
+
+// The chicken-and-egg of Termux bootstrap: we can't run commands via
+// RUN_COMMAND until `allow-external-apps=true` is set, but setting it
+// requires running commands. The one-tap path: drop the whole chained
+// command onto the clipboard and foreground Termux — the user just
+// long-presses, pastes, presses Enter once. No per-line toggling.
+private const val TERMUX_BOOTSTRAP_CMD =
+    "mkdir -p ~/.termux && echo 'allow-external-apps=true' >> ~/.termux/termux.properties && termux-reload-settings && echo '✓ Gemini bridge ready'"
+
+private fun copyBootstrapAndOpenTermux(context: Context) {
+    copyToClipboard(context, "termux-bootstrap", TERMUX_BOOTSTRAP_CMD)
+    Toast.makeText(
+        context,
+        "Command copied. Long-press in Termux → Paste → Enter, then come back.",
+        Toast.LENGTH_LONG
+    ).show()
+    openTermux(context)
 }
 
 private fun copyToClipboard(context: Context, label: String, text: String) {
