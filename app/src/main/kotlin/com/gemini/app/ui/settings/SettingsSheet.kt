@@ -686,13 +686,19 @@ private fun TermuxBody(viewModel: ChatViewModel) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { permissionLauncher.launch(RUN_COMMAND_PERMISSION) }) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Button(
+                            onClick = { permissionLauncher.launch(RUN_COMMAND_PERMISSION) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             Icon(Icons.Default.Security, contentDescription = null)
                             Spacer(Modifier.width(6.dp))
                             Text("Request permission")
                         }
-                        OutlinedButton(onClick = { openAppSettings(context) }) {
+                        OutlinedButton(
+                            onClick = { openAppSettings(context) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             Text("Open app settings")
                         }
                     }
