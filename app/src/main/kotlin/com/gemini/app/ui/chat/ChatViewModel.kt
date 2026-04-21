@@ -1,8 +1,11 @@
 package com.gemini.app.ui.chat
 
+import android.content.Context
+import android.net.Uri
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.gemini.bridge.Attachment
 import com.gemini.bridge.RestGeminiCore
 import com.gemini.domain.GeminiEvent
 import com.gemini.domain.GeminiMessage
@@ -11,6 +14,8 @@ import com.gemini.domain.MessageRole
 import com.gemini.domain.ToolCall
 import com.gemini.domain.ToolDecision
 import com.gemini.domain.ToolSpec
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -72,6 +77,9 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
 
     private val _autoSaveEnabled = MutableStateFlow(core.isAutoSaveEnabled())
     val autoSaveEnabled: StateFlow<Boolean> = _autoSaveEnabled.asStateFlow()
+
+    private val _pendingAttachments = MutableStateFlow<List<PendingAttachment>>(emptyList())
+    val pendingAttachments: StateFlow<List<PendingAttachment>> = _pendingAttachments.asStateFlow()
 
     private var sendJob: Job? = null
     private var lastUserPrompt: String? = null
@@ -148,6 +156,7 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
         viewModelScope.launch {
             core.signOut()
             _messages.clear()
+            _pendingAttachments.value = emptyList()
             _model.value = core.currentModel()
             _availableModels.value = core.listModels()
             _isReady.value = false
@@ -175,15 +184,20 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
     }
 
     fun sendMessage(text: String) {
-        if (text.isBlank()) return
+        val attachments = _pendingAttachments.value
+        if (text.isBlank() && attachments.isEmpty()) return
         if (sendJob?.isActive == true) return
         lastUserPrompt = text
+        val payload = attachments.map { Attachment(it.bytes, it.mimeType) }
+        _pendingAttachments.value = emptyList()
         sendJob = viewModelScope.launch {
             _isLoading.value = true
             try {
-                when (val r = core.sendMessage(text)) {
+                val result = if (payload.isEmpty()) core.sendMessage(text)
+                    else core.sendMessage(text, payload)
+                when (result) {
                     is GeminiResult.Success -> {}
-                    is GeminiResult.Error -> _error.value = r.message
+                    is GeminiResult.Error -> _error.value = result.message
                 }
             } catch (_: CancellationException) {
                 // Cancelled by user — silent.
@@ -194,6 +208,56 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
                 maybeAutoCompress()
             }
         }
+    }
+
+    fun attachImageFromUri(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            val loaded = withContext(Dispatchers.IO) { readAttachment(context, uri) }
+            if (loaded == null) {
+                _error.value = "Could not read the selected image"
+                return@launch
+            }
+            if (loaded.bytes.size > MAX_ATTACHMENT_BYTES) {
+                _error.value = "Image too large (max 15 MB)"
+                return@launch
+            }
+            _pendingAttachments.value = _pendingAttachments.value + loaded
+        }
+    }
+
+    fun removeAttachment(id: String) {
+        _pendingAttachments.value = _pendingAttachments.value.filterNot { it.id == id }
+    }
+
+    fun clearAttachments() { _pendingAttachments.value = emptyList() }
+
+    private fun readAttachment(context: Context, uri: Uri): PendingAttachment? {
+        return runCatching {
+            val mime = context.contentResolver.getType(uri) ?: "image/*"
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                ?: return@runCatching null
+            val displayName = queryDisplayName(context, uri)
+                ?: "image.${mime.substringAfter('/').take(4)}"
+            PendingAttachment(
+                id = "att-${System.nanoTime()}",
+                bytes = bytes,
+                mimeType = mime,
+                displayName = displayName.take(40),
+                sizeBytes = bytes.size
+            )
+        }.getOrNull()
+    }
+
+    private fun queryDisplayName(context: Context, uri: Uri): String? {
+        return runCatching {
+            context.contentResolver.query(
+                uri,
+                arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                null, null, null
+            )?.use { c ->
+                if (c.moveToFirst()) c.getString(0) else null
+            }
+        }.getOrNull()
     }
 
     private fun maybeAutoCompress() {
@@ -339,7 +403,56 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
     }
 }
 
+private const val MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024
+
+data class PendingAttachment(
+    val id: String,
+    val bytes: ByteArray,
+    val mimeType: String,
+    val displayName: String,
+    val sizeBytes: Int
+) {
+    override fun equals(other: Any?) = other is PendingAttachment && id == other.id
+    override fun hashCode() = id.hashCode()
+}
+
 data class TokenUsageState(val total: Int, val limit: Int?)
+
+fun ChatViewModel.exportAsMarkdown(): String {
+    val ts = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US)
+        .format(java.util.Date())
+    val sb = StringBuilder()
+    sb.append("# Gemini conversation\n\n")
+    sb.append("_Model: ").append(model.value).append("_  \n")
+    sb.append("_Exported: ").append(ts).append("_\n\n")
+    messages.forEach { msg ->
+        when (msg.role) {
+            MessageRole.USER -> {
+                sb.append("## User\n\n").append(msg.text.trim()).append("\n\n")
+            }
+            MessageRole.MODEL -> {
+                sb.append("## Gemini\n\n").append(msg.text.trim()).append("\n\n")
+            }
+            MessageRole.TOOL -> {
+                msg.toolCall?.let { call ->
+                    sb.append("### Tool · ").append(call.name).append("\n\n")
+                    call.arguments.forEach { (k, v) ->
+                        val s = v?.toString().orEmpty().take(400)
+                        sb.append("- **").append(k).append("**: `")
+                            .append(s.replace("`", "\\`")).append("`\n")
+                    }
+                    sb.append('\n')
+                }
+                msg.toolResult?.let { res ->
+                    val status = if (res.ok) "✅" else "❌"
+                    sb.append("**Result** ").append(status).append("\n\n")
+                    sb.append("```\n").append(res.output.trim()).append("\n```\n\n")
+                }
+            }
+        }
+    }
+    return sb.toString()
+}
 
 data class ChatStats(
     val userMessages: Int,

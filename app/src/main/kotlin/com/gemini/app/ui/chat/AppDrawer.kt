@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.HelpOutline
@@ -105,6 +106,9 @@ fun AppDrawer(
         SectionLabel("Conversation")
         DrawerItem(Icons.Default.ChatBubble, "Saved chats") {
             onClose(); onOpenChats()
+        }
+        DrawerItem(Icons.Default.FileDownload, "Export as Markdown") {
+            onClose(); shareMarkdown(context, viewModel.exportAsMarkdown())
         }
         DrawerItem(Icons.Default.Folder, "Pick project folder") {
             onClose(); folderLauncher.launch(null)
@@ -214,6 +218,19 @@ private fun openUrl(context: Context, url: String) {
     runCatching {
         context.startActivity(
             Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    }
+}
+
+private fun shareMarkdown(context: Context, markdown: String) {
+    val intent = Intent(Intent.ACTION_SEND)
+        .setType("text/markdown")
+        .putExtra(Intent.EXTRA_TEXT, markdown)
+        .putExtra(Intent.EXTRA_SUBJECT, "Gemini conversation")
+    runCatching {
+        context.startActivity(
+            Intent.createChooser(intent, "Export conversation")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         )
     }

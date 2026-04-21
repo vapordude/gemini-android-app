@@ -2,6 +2,7 @@ package com.gemini.bridge
 
 import android.content.Context
 import android.net.Uri
+import android.util.Base64
 import android.util.Log
 import com.gemini.bridge.termux.TermuxBridge
 import com.gemini.bridge.tools.DeleteFileTool
@@ -45,6 +46,16 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
+
+/**
+ * Raw attachment bytes + MIME type for a multimodal user turn. Gemini accepts
+ * inlineData parts of up to ~20 MB per request.
+ */
+data class Attachment(val bytes: ByteArray, val mimeType: String) {
+    override fun equals(other: Any?) = other is Attachment &&
+        mimeType == other.mimeType && bytes.contentEquals(other.bytes)
+    override fun hashCode() = 31 * mimeType.hashCode() + bytes.contentHashCode()
+}
 
 /**
  * Gemini client with native function calling. The model declares what it
@@ -257,15 +268,25 @@ class RestGeminiCore(
         pending.remove(callId)?.complete(decision)
     }
 
-    override suspend fun sendMessage(text: String): GeminiResult = sendLock.withLock {
+    override suspend fun sendMessage(text: String): GeminiResult = sendMessage(text, emptyList())
+
+    suspend fun sendMessage(text: String, attachments: List<Attachment>): GeminiResult = sendLock.withLock {
         if (apiKey.isBlank()) return GeminiResult.Error("API key not configured")
 
         val preTurnSize = turns.size
-        appendUserTurn(text)
+        appendUserTurn(text, attachments)
+        val bubbleText = buildString {
+            if (attachments.isNotEmpty()) {
+                append("📎 ")
+                append(attachments.joinToString(", ") { describeAttachment(it) })
+                if (text.isNotBlank()) append('\n')
+            }
+            append(text)
+        }
         addUiMessage(
             GeminiMessage(
                 id = nextId(),
-                text = text,
+                text = bubbleText,
                 isUser = true,
                 timestamp = System.currentTimeMillis(),
                 role = MessageRole.USER
@@ -565,12 +586,28 @@ class RestGeminiCore(
         return JSONArray().put(JSONObject().put("functionDeclarations", decls))
     }
 
-    private fun appendUserTurn(text: String) {
-        turns.add(
-            JSONObject().put("role", "user").put(
-                "parts", JSONArray().put(JSONObject().put("text", text))
+    private fun describeAttachment(att: Attachment): String {
+        val shortMime = att.mimeType.substringAfter('/').take(8)
+        val kb = (att.bytes.size + 1023) / 1024
+        return "image ($shortMime, ${kb}KB)"
+    }
+
+    private fun appendUserTurn(text: String, attachments: List<Attachment> = emptyList()) {
+        val parts = JSONArray()
+        attachments.forEach { att ->
+            parts.put(
+                JSONObject().put(
+                    "inlineData",
+                    JSONObject()
+                        .put("mimeType", att.mimeType)
+                        .put("data", Base64.encodeToString(att.bytes, Base64.NO_WRAP))
+                )
             )
-        )
+        }
+        if (text.isNotEmpty() || attachments.isEmpty()) {
+            parts.put(JSONObject().put("text", text))
+        }
+        turns.add(JSONObject().put("role", "user").put("parts", parts))
     }
 
     private fun addUiMessage(msg: GeminiMessage): GeminiMessage {

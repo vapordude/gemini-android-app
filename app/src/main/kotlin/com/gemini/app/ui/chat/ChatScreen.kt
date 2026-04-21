@@ -1,5 +1,8 @@
 package com.gemini.app.ui.chat
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
@@ -39,6 +42,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
@@ -128,6 +132,13 @@ fun ChatScreen(
     val thinking by viewModel.thinking.collectAsState()
     val tokenUsage by viewModel.tokenUsage.collectAsState()
     val compressing by viewModel.compressing.collectAsState()
+    val pendingAttachments by viewModel.pendingAttachments.collectAsState()
+
+    val imagePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) viewModel.attachImageFromUri(context, uri)
+    }
 
     val listState = rememberLazyListState()
     val isNearBottom by remember(listState) {
@@ -217,10 +228,19 @@ fun ChatScreen(
                     text = textState,
                     enabled = !isLoading && pendingCall == null,
                     isLoading = isLoading,
+                    attachments = pendingAttachments,
                     onTextChange = { textState = it },
                     onAddClick = { showActions = true },
+                    onAttachImage = {
+                        imagePicker.launch(
+                            PickVisualMediaRequest(
+                                ActivityResultContracts.PickVisualMedia.ImageOnly
+                            )
+                        )
+                    },
+                    onRemoveAttachment = { id -> viewModel.removeAttachment(id) },
                     onSend = {
-                        if (textState.isNotBlank()) {
+                        if (textState.isNotBlank() || pendingAttachments.isNotEmpty()) {
                             viewModel.sendMessage(textState)
                             textState = ""
                         }
@@ -864,8 +884,11 @@ fun BottomChatBar(
     text: String,
     enabled: Boolean,
     isLoading: Boolean,
+    attachments: List<PendingAttachment>,
     onTextChange: (String) -> Unit,
     onAddClick: () -> Unit,
+    onAttachImage: () -> Unit,
+    onRemoveAttachment: (String) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit
 ) {
@@ -873,86 +896,169 @@ fun BottomChatBar(
     // small circular send/stop button nested on the right — no separate FAB.
     // The pill sits on the canvas with a subtle outlineVariant stroke.
     val hasText = text.isNotBlank()
+    val canSubmit = hasText || attachments.isNotEmpty()
     Surface(color = MaterialTheme.colorScheme.background) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 10.dp)
                 .navigationBarsPadding()
-                .imePadding(),
-            verticalAlignment = Alignment.Bottom
+                .imePadding()
         ) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = MaterialTheme.shapes.extraLarge,
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp, MaterialTheme.colorScheme.outlineVariant
-                ),
-                modifier = Modifier.weight(1f)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(start = 4.dp, end = 6.dp, top = 4.dp, bottom = 4.dp)
+            if (attachments.isNotEmpty()) {
+                AttachmentStrip(
+                    attachments = attachments,
+                    onRemove = onRemoveAttachment,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+            }
+            Row(verticalAlignment = Alignment.Bottom) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = MaterialTheme.shapes.extraLarge,
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp, MaterialTheme.colorScheme.outlineVariant
+                    ),
+                    modifier = Modifier.weight(1f)
                 ) {
-                    IconButton(onClick = onAddClick, enabled = !isLoading) {
-                        Icon(
-                            Icons.Default.Add,
-                            contentDescription = "Quick actions",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    TextField(
-                        value = text,
-                        onValueChange = onTextChange,
-                        modifier = Modifier.weight(1f),
-                        enabled = enabled,
-                        placeholder = {
-                            Text(
-                                "Message Gemini…",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        },
-                        maxLines = 6,
-                        textStyle = MaterialTheme.typography.bodyLarge,
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = Color.Transparent,
-                            unfocusedContainerColor = Color.Transparent,
-                            disabledContainerColor = Color.Transparent,
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent,
-                            disabledIndicatorColor = Color.Transparent,
-                        )
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    val canSend = enabled && hasText
-                    val sendBg = when {
-                        isLoading -> MaterialTheme.colorScheme.error
-                        canSend -> MaterialTheme.colorScheme.primary
-                        else -> MaterialTheme.colorScheme.surfaceVariant
-                    }
-                    val sendFg = when {
-                        isLoading -> MaterialTheme.colorScheme.onError
-                        canSend -> MaterialTheme.colorScheme.onPrimary
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                    }
-                    Surface(
-                        color = sendBg,
-                        shape = MaterialTheme.shapes.extraLarge,
-                        modifier = Modifier.size(40.dp)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(start = 4.dp, end = 6.dp, top = 4.dp, bottom = 4.dp)
                     ) {
-                        IconButton(
-                            onClick = if (isLoading) onStop else onSend,
-                            enabled = isLoading || canSend
-                        ) {
+                        IconButton(onClick = onAddClick, enabled = !isLoading) {
                             Icon(
-                                imageVector = if (isLoading) Icons.Default.Stop else Icons.Default.Send,
-                                contentDescription = if (isLoading) "Stop" else "Send",
-                                tint = sendFg
+                                Icons.Default.Add,
+                                contentDescription = "Quick actions",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                        }
+                        IconButton(onClick = onAttachImage, enabled = !isLoading) {
+                            Icon(
+                                Icons.Default.Image,
+                                contentDescription = "Attach image",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        TextField(
+                            value = text,
+                            onValueChange = onTextChange,
+                            modifier = Modifier.weight(1f),
+                            enabled = enabled,
+                            placeholder = {
+                                Text(
+                                    "Message Gemini…",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            },
+                            maxLines = 6,
+                            textStyle = MaterialTheme.typography.bodyLarge,
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                disabledContainerColor = Color.Transparent,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                disabledIndicatorColor = Color.Transparent,
+                            )
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        val canSend = enabled && canSubmit
+                        val sendBg = when {
+                            isLoading -> MaterialTheme.colorScheme.error
+                            canSend -> MaterialTheme.colorScheme.primary
+                            else -> MaterialTheme.colorScheme.surfaceVariant
+                        }
+                        val sendFg = when {
+                            isLoading -> MaterialTheme.colorScheme.onError
+                            canSend -> MaterialTheme.colorScheme.onPrimary
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        }
+                        Surface(
+                            color = sendBg,
+                            shape = MaterialTheme.shapes.extraLarge,
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            IconButton(
+                                onClick = if (isLoading) onStop else onSend,
+                                enabled = isLoading || canSend
+                            ) {
+                                Icon(
+                                    imageVector = if (isLoading) Icons.Default.Stop else Icons.Default.Send,
+                                    contentDescription = if (isLoading) "Stop" else "Send",
+                                    tint = sendFg
+                                )
+                            }
                         }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun AttachmentStrip(
+    attachments: List<PendingAttachment>,
+    onRemove: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    androidx.compose.foundation.lazy.LazyRow(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp)
+    ) {
+        items(attachments, key = { it.id }) { att ->
+            AttachmentChip(attachment = att, onRemove = { onRemove(att.id) })
+        }
+    }
+}
+
+@Composable
+private fun AttachmentChip(attachment: PendingAttachment, onRemove: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = MaterialTheme.shapes.medium,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp, MaterialTheme.colorScheme.outlineVariant
+        )
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)
+        ) {
+            Icon(
+                Icons.Default.Image,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(6.dp))
+            Column {
+                Text(
+                    attachment.displayName,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    formatBytes(attachment.sizeBytes),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "Remove",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+    }
+}
+
+private fun formatBytes(size: Int): String = when {
+    size >= 1_000_000 -> String.format("%.1f MB", size / 1_000_000f)
+    size >= 1_000 -> "${size / 1_000} KB"
+    else -> "$size B"
 }

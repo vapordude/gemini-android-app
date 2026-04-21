@@ -9,8 +9,10 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -117,6 +119,21 @@ private fun renderProse(body: String, baseColor: androidx.compose.ui.graphics.Co
     while (i < lines.size) {
         val raw = lines[i]
         val trimmed = raw.trimStart()
+        // Tables: a header row followed by a separator of dashes (GFM).
+        if (trimmed.startsWith("|") && i + 1 < lines.size) {
+            val sep = lines[i + 1].trimStart()
+            if (isTableSeparator(sep)) {
+                val rows = mutableListOf<List<String>>()
+                rows += parseTableRow(trimmed)
+                i += 2
+                while (i < lines.size && lines[i].trimStart().startsWith("|")) {
+                    rows += parseTableRow(lines[i].trimStart())
+                    i++
+                }
+                MarkdownTable(rows, baseColor)
+                continue
+            }
+        }
         when {
             trimmed.startsWith("### ") -> Text(
                 annotateInline(trimmed.removePrefix("### "), baseColor),
@@ -136,6 +153,35 @@ private fun renderProse(body: String, baseColor: androidx.compose.ui.graphics.Co
                 color = baseColor,
                 modifier = Modifier.padding(top = 6.dp, bottom = 3.dp)
             )
+            trimmed.startsWith("> ") -> Row(modifier = Modifier.fillMaxWidth()) {
+                Surface(
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                    modifier = Modifier.width(3.dp).height(20.dp)
+                ) {}
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    annotateInline(trimmed.removePrefix("> "), baseColor),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+            trimmed.matches(Regex("^(-{3,}|\\*{3,}|_{3,})$")) -> Surface(
+                color = MaterialTheme.colorScheme.outlineVariant,
+                modifier = Modifier.fillMaxWidth().height(1.dp).padding(vertical = 6.dp)
+            ) {}
+            trimmed.startsWith("- [ ] ") || trimmed.startsWith("- [x] ") ||
+                trimmed.startsWith("- [X] ") -> {
+                val checked = trimmed[3] != ' '
+                val label = trimmed.removeRange(0, 6)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (checked) "☑ " else "☐ ", color = baseColor)
+                    Text(
+                        annotateInline(label, baseColor),
+                        color = baseColor,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
             trimmed.startsWith("- ") || trimmed.startsWith("* ") -> Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Start
@@ -171,6 +217,76 @@ private fun renderProse(body: String, baseColor: androidx.compose.ui.graphics.Co
         }
         i++
     }
+}
+
+private fun isTableSeparator(line: String): Boolean {
+    // | --- | :---: | ---: | — dashes with optional colons, pipe-separated.
+    if (!line.startsWith("|")) return false
+    val cells = line.trim().trim('|').split("|").map { it.trim() }
+    if (cells.isEmpty()) return false
+    return cells.all { it.matches(Regex(":?-{2,}:?")) }
+}
+
+private fun parseTableRow(line: String): List<String> =
+    line.trim().trim('|').split("|").map { it.trim() }
+
+@Composable
+private fun MarkdownTable(
+    rows: List<List<String>>,
+    baseColor: androidx.compose.ui.graphics.Color
+) {
+    if (rows.isEmpty()) return
+    val header = rows.first()
+    val body = rows.drop(1)
+    val cols = rows.maxOf { it.size }
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.small)
+    ) {
+        Column {
+            Row(modifier = Modifier.fillMaxWidth()) {
+                header.forEachIndexed { idx, cell ->
+                    TableCell(cell, baseColor, header = true, last = idx == cols - 1)
+                }
+                repeat(cols - header.size) { TableCell("", baseColor, header = true, last = false) }
+            }
+            body.forEach { row ->
+                Surface(
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                    modifier = Modifier.fillMaxWidth().height(1.dp)
+                ) {}
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    row.forEachIndexed { idx, cell ->
+                        TableCell(cell, baseColor, header = false, last = idx == cols - 1)
+                    }
+                    repeat(cols - row.size) {
+                        TableCell("", baseColor, header = false, last = false)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RowScope.TableCell(
+    text: String,
+    baseColor: androidx.compose.ui.graphics.Color,
+    header: Boolean,
+    last: Boolean
+) {
+    Text(
+        annotateInline(text, baseColor),
+        style = if (header) MaterialTheme.typography.labelMedium
+                else MaterialTheme.typography.bodySmall,
+        color = if (header) baseColor else MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier
+            .weight(1f)
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+    )
 }
 
 private sealed interface Segment {
