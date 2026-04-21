@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -28,6 +29,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -41,8 +43,12 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -52,6 +58,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -97,14 +104,40 @@ fun SettingsSheet(
         expanded = if (name in expanded) expanded - name else expanded + name
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    fun dismissAnimated() {
+        scope.launch {
+            sheetState.hide()
+            onDismiss()
+        }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.background
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .fillMaxHeight(0.95f)
                 .padding(horizontal = 16.dp, vertical = 8.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            Text("Settings", style = MaterialTheme.typography.titleLarge)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Settings",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = { dismissAnimated() }) {
+                    Icon(Icons.Default.Close, contentDescription = "Close")
+                }
+            }
             Spacer(Modifier.height(12.dp))
 
             SettingsAccordion(
@@ -148,22 +181,52 @@ fun SettingsSheet(
                     )
                     TextButton(onClick = { viewModel.refreshModels() }) { Text("Refresh") }
                 }
-                models.forEach { name ->
-                    Row(
+                Spacer(Modifier.height(4.dp))
+                var dropdownOpen by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = dropdownOpen,
+                    onExpandedChange = { dropdownOpen = it }
+                ) {
+                    OutlinedTextField(
+                        value = currentModel,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Current model") },
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownOpen)
+                        },
+                        colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
                         modifier = Modifier
+                            .menuAnchor()
                             .fillMaxWidth()
-                            .clickable { viewModel.setModel(name) }
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    )
+                    androidx.compose.material3.ExposedDropdownMenu(
+                        expanded = dropdownOpen,
+                        onDismissRequest = { dropdownOpen = false }
                     ) {
-                        RadioButton(
-                            selected = name == currentModel,
-                            onClick = { viewModel.setModel(name) }
-                        )
-                        Text(name, style = MaterialTheme.typography.bodyMedium)
+                        models.forEach { name ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        name,
+                                        style = if (name == currentModel)
+                                            MaterialTheme.typography.bodyMedium.copy(
+                                                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        else MaterialTheme.typography.bodyMedium
+                                    )
+                                },
+                                onClick = {
+                                    viewModel.setModel(name)
+                                    dropdownOpen = false
+                                    dismissAnimated()
+                                }
+                            )
+                        }
                     }
                 }
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(8.dp))
                 Text(
                     "Or type a custom model ID",
                     style = MaterialTheme.typography.labelSmall,
@@ -183,6 +246,7 @@ fun SettingsSheet(
                             if (customModel.isNotBlank()) {
                                 viewModel.setModel(customModel.trim())
                                 customModel = ""
+                                dismissAnimated()
                             }
                         }
                     ) { Text("Use") }

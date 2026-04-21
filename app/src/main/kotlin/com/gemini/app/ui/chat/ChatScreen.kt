@@ -51,7 +51,6 @@ import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -806,8 +805,10 @@ fun BottomChatBar(
     onSend: () -> Unit,
     onStop: () -> Unit
 ) {
-    // AI Studio's composer is a single pill: + | text | send, lifted off the
-    // canvas by a surface-hi tone and a thin stroke. No card border.
+    // AI Studio composer: one rounded pill, [+] on the left, text, and a
+    // small circular send/stop button nested on the right — no separate FAB.
+    // The pill sits on the canvas with a subtle outlineVariant stroke.
+    val hasText = text.isNotBlank()
     Surface(color = MaterialTheme.colorScheme.background) {
         Row(
             modifier = Modifier
@@ -815,17 +816,20 @@ fun BottomChatBar(
                 .padding(horizontal = 12.dp, vertical = 10.dp)
                 .navigationBarsPadding()
                 .imePadding(),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.Bottom
         ) {
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 shape = MaterialTheme.shapes.extraLarge,
                 border = androidx.compose.foundation.BorderStroke(
-                    1.dp, MaterialTheme.colorScheme.outline
+                    1.dp, MaterialTheme.colorScheme.outlineVariant
                 ),
                 modifier = Modifier.weight(1f)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(start = 4.dp, end = 6.dp, top = 4.dp, bottom = 4.dp)
+                ) {
                     IconButton(onClick = onAddClick, enabled = !isLoading) {
                         Icon(
                             Icons.Default.Add,
@@ -844,7 +848,8 @@ fun BottomChatBar(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         },
-                        maxLines = 5,
+                        maxLines = 6,
+                        textStyle = MaterialTheme.typography.bodyLarge,
                         colors = TextFieldDefaults.colors(
                             focusedContainerColor = Color.Transparent,
                             unfocusedContainerColor = Color.Transparent,
@@ -854,28 +859,34 @@ fun BottomChatBar(
                             disabledIndicatorColor = Color.Transparent,
                         )
                     )
-                }
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            if (isLoading) {
-                FloatingActionButton(
-                    onClick = onStop,
-                    containerColor = MaterialTheme.colorScheme.error,
-                    contentColor = MaterialTheme.colorScheme.onError,
-                    shape = MaterialTheme.shapes.extraLarge,
-                    modifier = Modifier.size(48.dp)
-                ) {
-                    Icon(Icons.Default.Stop, contentDescription = "Stop")
-                }
-            } else {
-                FloatingActionButton(
-                    onClick = onSend,
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    shape = MaterialTheme.shapes.extraLarge,
-                    modifier = Modifier.size(48.dp)
-                ) {
-                    Icon(Icons.Default.Send, contentDescription = "Send")
+                    Spacer(Modifier.width(4.dp))
+                    val canSend = enabled && hasText
+                    val sendBg = when {
+                        isLoading -> MaterialTheme.colorScheme.error
+                        canSend -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.surfaceVariant
+                    }
+                    val sendFg = when {
+                        isLoading -> MaterialTheme.colorScheme.onError
+                        canSend -> MaterialTheme.colorScheme.onPrimary
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    }
+                    Surface(
+                        color = sendBg,
+                        shape = MaterialTheme.shapes.extraLarge,
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        IconButton(
+                            onClick = if (isLoading) onStop else onSend,
+                            enabled = isLoading || canSend
+                        ) {
+                            Icon(
+                                imageVector = if (isLoading) Icons.Default.Stop else Icons.Default.Send,
+                                contentDescription = if (isLoading) "Stop" else "Send",
+                                tint = sendFg
+                            )
+                        }
+                    }
                 }
             }
         }
