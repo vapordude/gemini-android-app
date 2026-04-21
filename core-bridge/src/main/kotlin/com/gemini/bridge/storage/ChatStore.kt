@@ -17,6 +17,9 @@ import java.io.File
 class ChatStore(context: Context) {
 
     private val root: File = File(context.filesDir, "chats").also { it.mkdirs() }
+    // Single slot used by the auto-save feature; kept outside `root` so it
+    // cannot collide with a user-named chat and is not listed in list().
+    private val currentFile: File = File(context.filesDir, "chat-current.json")
 
     data class Snapshot(
         val turns: List<JSONObject>,
@@ -72,6 +75,38 @@ class ChatStore(context: Context) {
     fun delete(name: String): Boolean {
         val safe = slug(name)
         return File(root, "$safe.json").delete()
+    }
+
+    fun saveCurrent(snapshot: Snapshot) {
+        if (snapshot.messages.isEmpty() && snapshot.turns.isEmpty()) {
+            clearCurrent(); return
+        }
+        val turnsJson = JSONArray().apply { snapshot.turns.forEach { put(it) } }
+        val msgsJson = JSONArray().apply {
+            snapshot.messages.forEach { put(messageToJson(it)) }
+        }
+        val root = JSONObject()
+            .put("savedAt", System.currentTimeMillis())
+            .put("turns", turnsJson)
+            .put("messages", msgsJson)
+        runCatching { currentFile.writeText(root.toString()) }
+    }
+
+    fun loadCurrent(): Snapshot? {
+        if (!currentFile.exists()) return null
+        val obj = runCatching { JSONObject(currentFile.readText()) }.getOrNull() ?: return null
+        val turnsArr = obj.optJSONArray("turns") ?: JSONArray()
+        val turns = (0 until turnsArr.length()).map { turnsArr.getJSONObject(it) }
+        val msgsArr = obj.optJSONArray("messages") ?: JSONArray()
+        val messages = (0 until msgsArr.length()).mapNotNull {
+            messageFromJson(msgsArr.getJSONObject(it))
+        }
+        if (turns.isEmpty() && messages.isEmpty()) return null
+        return Snapshot(turns, messages)
+    }
+
+    fun clearCurrent() {
+        runCatching { currentFile.delete() }
     }
 
     private fun messageToJson(m: GeminiMessage): JSONObject {

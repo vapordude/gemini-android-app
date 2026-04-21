@@ -149,6 +149,35 @@ class RestGeminiCore(
         prefs.autoCompressThreshold = fraction.coerceIn(0.5f, 0.95f)
     }
 
+    fun isAutoSaveEnabled(): Boolean = prefs.autoSaveEnabled
+    fun setAutoSaveEnabled(enabled: Boolean) {
+        prefs.autoSaveEnabled = enabled
+        if (!enabled) chatStore.clearCurrent()
+        else persistCurrentIfEnabled()
+    }
+
+    /** Snapshot the live session into the auto-save slot (no-op if disabled). */
+    fun persistCurrentIfEnabled() {
+        if (!prefs.autoSaveEnabled) return
+        if (turns.isEmpty() && uiMessages.isEmpty()) {
+            chatStore.clearCurrent(); return
+        }
+        chatStore.saveCurrent(ChatStore.Snapshot(turns.toList(), uiMessages.toList()))
+    }
+
+    /** Restore the auto-save slot into the live session, if one exists. */
+    suspend fun resumeCurrentSession(): Boolean {
+        val snap = chatStore.loadCurrent() ?: return false
+        turns.clear()
+        turns.addAll(snap.turns)
+        uiMessages.clear()
+        uiMessages.addAll(snap.messages)
+        pending.values.forEach { it.cancel() }
+        pending.clear()
+        snap.messages.forEach { _events.tryEmit(GeminiEvent.MessageAdded(it)) }
+        return true
+    }
+
     /** Last reported (totalTokenCount, inputTokenLimit?) for the current model. */
     fun currentTokenUsage(): Pair<Int, Int?> = lastTokenUsage to tokenLimits[model]
 
@@ -160,6 +189,7 @@ class RestGeminiCore(
         pending.clear()
         discoveredModels = AVAILABLE_MODELS
         model = defaultModel
+        chatStore.clearCurrent()
         prefs.clearAll()
     }
 
@@ -179,6 +209,7 @@ class RestGeminiCore(
         pending.clear()
         // Replay messages to the UI.
         snap.messages.forEach { _events.tryEmit(GeminiEvent.MessageAdded(it)) }
+        persistCurrentIfEnabled()
         return true
     }
 
@@ -282,6 +313,7 @@ class RestGeminiCore(
             GeminiResult.Error(t.message ?: "Network error")
         } finally {
             emitThinking(null)
+            persistCurrentIfEnabled()
         }
     }
 
@@ -296,6 +328,7 @@ class RestGeminiCore(
         pending.clear()
         lastTokenUsage = 0
         _events.tryEmit(GeminiEvent.TokenUsage(0, tokenLimits[model]))
+        chatStore.clearCurrent()
         return GeminiResult.Success("Reset")
     }
 

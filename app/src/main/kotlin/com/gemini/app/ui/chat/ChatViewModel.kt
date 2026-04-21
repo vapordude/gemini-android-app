@@ -70,6 +70,9 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
     private val _compressing = MutableStateFlow(false)
     val compressing: StateFlow<Boolean> = _compressing.asStateFlow()
 
+    private val _autoSaveEnabled = MutableStateFlow(core.isAutoSaveEnabled())
+    val autoSaveEnabled: StateFlow<Boolean> = _autoSaveEnabled.asStateFlow()
+
     private var sendJob: Job? = null
     private var lastUserPrompt: String? = null
 
@@ -118,11 +121,21 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
                     _isReady.value = true
                     _model.value = core.currentModel()
                     _availableModels.value = core.listModels()
+                    // Resume the previous conversation if autosave is on and the
+                    // in-memory session is still empty.
+                    if (core.isAutoSaveEnabled() && _messages.isEmpty()) {
+                        core.resumeCurrentSession()
+                    }
                 }
                 is GeminiResult.Error -> _error.value = result.message
             }
             _isLoading.value = false
         }
+    }
+
+    fun setAutoSaveEnabled(enabled: Boolean) {
+        core.setAutoSaveEnabled(enabled)
+        _autoSaveEnabled.value = enabled
     }
 
     fun refreshModels() {

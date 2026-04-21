@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.OpenInNew
@@ -95,6 +96,7 @@ fun SettingsSheet(
     val autoCompress by viewModel.autoCompressEnabled.collectAsState()
     val compressThreshold by viewModel.autoCompressThreshold.collectAsState()
     val tokenUsage by viewModel.tokenUsage.collectAsState()
+    val autoSave by viewModel.autoSaveEnabled.collectAsState()
 
     var customModel by remember { mutableStateOf("") }
     var expanded by remember { mutableStateOf(emptySet<String>()) }
@@ -340,6 +342,33 @@ fun SettingsSheet(
                     Switch(
                         checked = autoApprove,
                         onCheckedChange = { viewModel.setAutoApprove(it) }
+                    )
+                }
+            }
+
+            SettingsAccordion(
+                title = "Autosave conversation",
+                icon = Icons.Default.History,
+                expanded = "Autosave" in expanded,
+                onToggle = { toggle("Autosave") }
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Keep the current conversation", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Saves the ongoing chat after each turn and restores it " +
+                                "when you reopen the app. Turning this off clears the " +
+                                "saved snapshot.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = autoSave,
+                        onCheckedChange = { viewModel.setAutoSaveEnabled(it) }
                     )
                 }
             }
@@ -661,55 +690,6 @@ private fun TermuxBody(viewModel: ChatViewModel) {
 
     TermuxStep(
         number = "2",
-        title = "Termux allows external apps",
-        ok = null,
-        body = {
-            Text(
-                "One tap: the command is copied to the clipboard and Termux opens. " +
-                    "Long-press in Termux, tap Paste, press Enter — done.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = { copyBootstrapAndOpenTermux(context) },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Default.Terminal, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Copy & open Termux")
-            }
-            Spacer(Modifier.height(10.dp))
-            var showManual by remember { mutableStateOf(false) }
-            TextButton(onClick = { showManual = !showManual }) {
-                Text(
-                    if (showManual) "Hide manual commands" else "Prefer manual? Show the two commands",
-                    style = MaterialTheme.typography.labelSmall
-                )
-            }
-            if (showManual) {
-                TermuxCommandRow(
-                    step = "a.",
-                    command = "mkdir -p ~/.termux && echo 'allow-external-apps=true' >> ~/.termux/termux.properties",
-                    context = context
-                )
-                TermuxCommandRow(
-                    step = "b.",
-                    command = "termux-reload-settings",
-                    context = context
-                )
-                Spacer(Modifier.height(6.dp))
-                OutlinedButton(onClick = { openTermux(context) }) {
-                    Icon(Icons.Default.Terminal, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Open Termux")
-                }
-            }
-        }
-    )
-
-    TermuxStep(
-        number = "3",
         title = "Android RUN_COMMAND permission",
         ok = permissionGranted,
         body = {
@@ -774,6 +754,56 @@ private fun TermuxBody(viewModel: ChatViewModel) {
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+        }
+    )
+
+    TermuxStep(
+        number = "3",
+        title = "Termux allows external apps",
+        ok = null,
+        body = {
+            Text(
+                "With the permission granted, Termux still needs `allow-external-apps=true` " +
+                    "in its config. One tap: the command is copied to the clipboard and " +
+                    "Termux opens. Long-press in Termux, tap Paste, press Enter — done.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = { copyBootstrapAndOpenTermux(context) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Terminal, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Copy & open Termux")
+            }
+            Spacer(Modifier.height(10.dp))
+            var showManual by remember { mutableStateOf(false) }
+            TextButton(onClick = { showManual = !showManual }) {
+                Text(
+                    if (showManual) "Hide manual commands" else "Prefer manual? Show the two commands",
+                    style = MaterialTheme.typography.labelSmall
+                )
+            }
+            if (showManual) {
+                TermuxCommandRow(
+                    step = "a.",
+                    command = "mkdir -p ~/.termux && echo 'allow-external-apps=true' >> ~/.termux/termux.properties",
+                    context = context
+                )
+                TermuxCommandRow(
+                    step = "b.",
+                    command = "termux-reload-settings",
+                    context = context
+                )
+                Spacer(Modifier.height(6.dp))
+                OutlinedButton(onClick = { openTermux(context) }) {
+                    Icon(Icons.Default.Terminal, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Open Termux")
                 }
             }
         }
