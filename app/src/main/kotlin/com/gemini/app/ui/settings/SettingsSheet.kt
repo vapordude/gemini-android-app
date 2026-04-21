@@ -55,6 +55,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -91,6 +92,9 @@ fun SettingsSheet(
     val workspacePath by viewModel.workspacePath.collectAsState()
     val workspaceReason by viewModel.workspaceReason.collectAsState()
     val models by viewModel.availableModels.collectAsState()
+    val autoCompress by viewModel.autoCompressEnabled.collectAsState()
+    val compressThreshold by viewModel.autoCompressThreshold.collectAsState()
+    val tokenUsage by viewModel.tokenUsage.collectAsState()
 
     var customModel by remember { mutableStateOf("") }
     var expanded by remember { mutableStateOf(emptySet<String>()) }
@@ -337,6 +341,59 @@ fun SettingsSheet(
                         checked = autoApprove,
                         onCheckedChange = { viewModel.setAutoApprove(it) }
                     )
+                }
+            }
+
+            SettingsAccordion(
+                title = "Auto-compression",
+                icon = Icons.Default.Memory,
+                expanded = "Auto-compression" in expanded,
+                onToggle = { toggle("Auto-compression") }
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Compress automatically", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Summarises the history when the context fills up so the " +
+                                "chat can keep going without hitting the token limit.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = autoCompress,
+                        onCheckedChange = { viewModel.setAutoCompressEnabled(it) }
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Trigger at ${(compressThreshold * 100).toInt()}% of the context window",
+                    style = MaterialTheme.typography.labelMedium
+                )
+                Slider(
+                    value = compressThreshold,
+                    onValueChange = { viewModel.setAutoCompressThreshold(it) },
+                    valueRange = 0.5f..0.95f,
+                    steps = 8,
+                    enabled = autoCompress
+                )
+                val (total, limit) = tokenUsage.total to tokenUsage.limit
+                if (total > 0) {
+                    val pct = if (limit != null && limit > 0)
+                        " (${((total.toFloat() / limit) * 100).toInt()}% used)" else ""
+                    Text(
+                        "Current session: $total tokens" +
+                            (if (limit != null) " / $limit" else "") + pct,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = { viewModel.compressSession() }) {
+                    Text("Compress now")
                 }
             }
 

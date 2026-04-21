@@ -126,6 +126,8 @@ fun ChatScreen(
     val model by viewModel.model.collectAsState()
     val workspaceLabel by viewModel.workspaceLabel.collectAsState()
     val thinking by viewModel.thinking.collectAsState()
+    val tokenUsage by viewModel.tokenUsage.collectAsState()
+    val compressing by viewModel.compressing.collectAsState()
 
     val listState = rememberLazyListState()
     val isNearBottom by remember(listState) {
@@ -175,11 +177,28 @@ fun ChatScreen(
                                     model,
                                     style = MaterialTheme.typography.labelMedium
                                 )
-                                Text(
-                                    workspaceLabel.substringAfterLast('/'),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        workspaceLabel.substringAfterLast('/'),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    val tokenLabel = formatTokens(tokenUsage.total, tokenUsage.limit)
+                                    if (tokenLabel != null) {
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            "•",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            tokenLabel,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
                             }
                         }
                     },
@@ -211,6 +230,12 @@ fun ChatScreen(
             }
         ) { paddingValues ->
             Box(modifier = Modifier.padding(paddingValues).background(MaterialTheme.colorScheme.background)) {
+                AnimatedVisibility(
+                    visible = compressing,
+                    modifier = Modifier.align(Alignment.TopCenter)
+                ) {
+                    CompressingBanner()
+                }
                 if (messages.isEmpty()) {
                     EmptyState(onSuggestion = { suggestion ->
                         viewModel.sendMessage(suggestion)
@@ -298,6 +323,45 @@ fun ChatScreen(
             }
         }
     }
+}
+
+@Composable
+private fun CompressingBanner() {
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            PulsingDots()
+            Spacer(Modifier.width(10.dp))
+            Text(
+                "Compressing conversation…",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+        }
+    }
+}
+
+private fun formatTokens(total: Int, limit: Int?): String? {
+    if (total <= 0) return null
+    val head = formatTokenNumber(total)
+    return if (limit != null && limit > 0) "$head / ${formatTokenNumber(limit)}" else head
+}
+
+private fun formatTokenNumber(n: Int): String = when {
+    n >= 1_000_000 -> {
+        val m = n / 1_000_000f
+        if (m >= 10f) "${m.toInt()}M" else String.format("%.1fM", m)
+    }
+    n >= 1_000 -> "${n / 1_000}k"
+    else -> n.toString()
 }
 
 private val STARTER_CHIPS = listOf(

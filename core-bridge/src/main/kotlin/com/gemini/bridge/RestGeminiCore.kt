@@ -83,6 +83,8 @@ class RestGeminiCore(
     private val pending = ConcurrentHashMap<String, CompletableDeferred<ToolDecision>>()
 
     @Volatile private var discoveredModels: List<String> = AVAILABLE_MODELS
+    private val tokenLimits = ConcurrentHashMap<String, Int>()
+    @Volatile private var lastTokenUsage: Int = 0
 
     init {
         // Restore non-sensitive prefs eagerly; the API key is injected via init().
@@ -140,6 +142,16 @@ class RestGeminiCore(
     fun isTermuxGuideShown(): Boolean = prefs.termuxGuideShown
     fun markTermuxGuideShown() { prefs.termuxGuideShown = true }
 
+    fun isAutoCompressEnabled(): Boolean = prefs.autoCompressEnabled
+    fun setAutoCompressEnabled(enabled: Boolean) { prefs.autoCompressEnabled = enabled }
+    fun autoCompressThreshold(): Float = prefs.autoCompressThreshold
+    fun setAutoCompressThreshold(fraction: Float) {
+        prefs.autoCompressThreshold = fraction.coerceIn(0.5f, 0.95f)
+    }
+
+    /** Last reported (totalTokenCount, inputTokenLimit?) for the current model. */
+    fun currentTokenUsage(): Pair<Int, Int?> = lastTokenUsage to tokenLimits[model]
+
     fun signOut() {
         apiKey = ""
         turns.clear()
@@ -188,6 +200,8 @@ class RestGeminiCore(
             val name = raw.removePrefix("models/")
             // Skip embeddings / vision-only / non-chat suffixes.
             if (name.contains("embedding") || name.contains("aqa")) continue
+            val limit = m.optInt("inputTokenLimit", 0)
+            if (limit > 0) tokenLimits[name] = limit
             out += name
         }
         // Prefer Gemini chat models, sort newest-looking first.
@@ -280,6 +294,8 @@ class RestGeminiCore(
         uiMessages.clear()
         pending.values.forEach { it.cancel() }
         pending.clear()
+        lastTokenUsage = 0
+        _events.tryEmit(GeminiEvent.TokenUsage(0, tokenLimits[model]))
         return GeminiResult.Success("Reset")
     }
 
@@ -357,6 +373,7 @@ class RestGeminiCore(
         val parts = JSONArray()
         val calls = mutableListOf<ToolCall>()
         var liveMessage: GeminiMessage? = null
+        var lastTotalTokens = 0
         try {
             conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
             val code = conn.responseCode
@@ -374,6 +391,10 @@ class RestGeminiCore(
                     val data = line.removePrefix("data:").trim()
                     if (data.isEmpty() || data == "[DONE]") continue
                     val json = runCatching { JSONObject(data) }.getOrNull() ?: continue
+                    json.optJSONObject("usageMetadata")
+                        ?.optInt("totalTokenCount", 0)
+                        ?.takeIf { it > 0 }
+                        ?.let { lastTotalTokens = it }
                     val content = json.optJSONArray("candidates")
                         ?.optJSONObject(0)
                         ?.optJSONObject("content")
@@ -417,6 +438,10 @@ class RestGeminiCore(
         }
         if (parts.length() > 0) {
             turns.add(JSONObject().put("role", "model").put("parts", parts))
+        }
+        if (lastTotalTokens > 0) {
+            lastTokenUsage = lastTotalTokens
+            _events.tryEmit(GeminiEvent.TokenUsage(lastTotalTokens, tokenLimits[model]))
         }
         val textPart = accumulated.toString().takeIf { it.isNotBlank() }
         textPart to calls

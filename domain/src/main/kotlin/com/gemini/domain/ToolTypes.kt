@@ -43,4 +43,12 @@ sealed class GeminiEvent {
     /** High-level status for the UI — null label means clear. */
     data class Thinking(val label: String?) : GeminiEvent()
     data class Notice(val message: String) : GeminiEvent()
+    /**
+     * Token accounting for the current session, reported by Gemini via
+     * `usageMetadata.totalTokenCount` on each streamed response. `limit` is
+     * the model's `inputTokenLimit` when known. The UI uses the ratio to
+     * render a context-fill indicator and to decide whether to show the
+     * auto-compression banner.
+     */
+    data class TokenUsage(val total: Int, val limit: Int?) : GeminiEvent()
 }

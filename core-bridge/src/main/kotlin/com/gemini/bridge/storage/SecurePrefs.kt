@@ -52,6 +52,15 @@ class SecurePrefs(context: Context) {
         get() = plain.getBoolean(KEY_TERMUX_GUIDE_SHOWN, false)
         set(value) = plain.edit().putBoolean(KEY_TERMUX_GUIDE_SHOWN, value).apply()
 
+    var autoCompressEnabled: Boolean
+        get() = plain.getBoolean(KEY_AUTO_COMPRESS, true)
+        set(value) = plain.edit().putBoolean(KEY_AUTO_COMPRESS, value).apply()
+
+    /** Fraction of the model's input-token limit at which to auto-compress (0.5..0.95). */
+    var autoCompressThreshold: Float
+        get() = plain.getFloat(KEY_AUTO_COMPRESS_THRESHOLD, 0.7f)
+        set(value) = plain.edit().putFloat(KEY_AUTO_COMPRESS_THRESHOLD, value).apply()
+
     fun clearAll() {
         encrypted.edit().clear().apply()
         plain.edit().clear().apply()
@@ -63,5 +72,7 @@ class SecurePrefs(context: Context) {
         const val KEY_WORKSPACE = "workspace_uri"
         const val KEY_AUTO_APPROVE = "auto_approve"
         const val KEY_TERMUX_GUIDE_SHOWN = "termux_guide_shown"
+        const val KEY_AUTO_COMPRESS = "auto_compress_enabled"
+        const val KEY_AUTO_COMPRESS_THRESHOLD = "auto_compress_threshold"
     }
 }
