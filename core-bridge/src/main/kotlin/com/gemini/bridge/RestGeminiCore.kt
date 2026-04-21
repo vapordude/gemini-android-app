@@ -435,6 +435,7 @@ class RestGeminiCore(
     private fun buildSystemInstruction(): JSONObject {
         val toolNames = registry.specs().joinToString(", ") { it.name }
         val reachable = workspace.absolutePath()
+        val reason = workspace.unreachableReason()
         val termuxLine = when {
             !termux.isInstalled() ->
                 "Termux is not installed, so run_shell_command will fail. " +
@@ -449,15 +450,16 @@ class RestGeminiCore(
                     "RUN_COMMAND permission."
             else ->
                 "The run_shell_command tool dispatches to Termux, but the current " +
-                    "workspace is NOT reachable from Termux's filesystem view " +
-                    "(it's a SAF URI or an app-private path). Shell commands run " +
-                    "in Termux's `\$HOME` with no access to workspace files. For " +
+                    "workspace is NOT reachable from Termux's filesystem view. " +
+                    "Exact reason: ${reason ?: "unknown"}. Shell commands run in " +
+                    "Termux's `\$HOME` with no access to workspace files. For " +
                     "anything file-oriented, use the file tools (read_file, " +
                     "write_file, edit_file, list_directory, glob_files, grep) " +
                     "instead of `cat`, `ls`, `grep`, or invoking interpreters on " +
-                    "workspace files. To regain shell access to workspace files, " +
-                    "ask the user to pick a folder under /storage/emulated/0/ " +
-                    "(e.g. Documents/) rather than the app-private default."
+                    "workspace files. When the user asks why a shell command " +
+                    "failed with \"No such file or directory\", relay the exact " +
+                    "reason above — the fix is almost always picking a folder " +
+                    "under /storage/emulated/0/ via Settings → Workspace."
         }
         val text = buildString {
             append("You are Gemini running inside a native Android app.\n\n")

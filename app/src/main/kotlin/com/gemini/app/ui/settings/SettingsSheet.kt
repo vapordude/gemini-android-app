@@ -80,6 +80,8 @@ fun SettingsSheet(
     val currentModel by viewModel.model.collectAsState()
     val autoApprove by viewModel.autoApprove.collectAsState()
     val workspaceLabel by viewModel.workspaceLabel.collectAsState()
+    val workspacePath by viewModel.workspacePath.collectAsState()
+    val workspaceReason by viewModel.workspaceReason.collectAsState()
     val models by viewModel.availableModels.collectAsState()
 
     var customModel by remember { mutableStateOf("") }
@@ -197,6 +199,49 @@ fun SettingsSheet(
                     workspaceLabel,
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
                 )
+                Spacer(Modifier.height(6.dp))
+                val path = workspacePath
+                val reason = workspaceReason
+                if (path != null) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = MaterialTheme.shapes.small
+                    ) {
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Text(
+                                "✓ Termux-visible path",
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Text(
+                                path,
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
+                            )
+                        }
+                    }
+                } else {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shape = MaterialTheme.shapes.small
+                    ) {
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Text(
+                                "⚠ Not reachable from Termux",
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Text(
+                                reason ?: "Unknown reason.",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                "Shell commands will run in Termux's \$HOME. Use the " +
+                                    "file tools for workspace files, or pick a folder " +
+                                    "under /storage/emulated/0/ below.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
                 Spacer(Modifier.height(6.dp))
                 OutlinedButton(onClick = { folderLauncher.launch(null) }) {
                     Icon(Icons.Default.Folder, contentDescription = null)

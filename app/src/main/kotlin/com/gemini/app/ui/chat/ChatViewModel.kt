@@ -44,6 +44,12 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
     private val _workspaceLabel = MutableStateFlow(core.workspace.rootLabel())
     val workspaceLabel: StateFlow<String> = _workspaceLabel.asStateFlow()
 
+    private val _workspacePath = MutableStateFlow(core.workspace.absolutePath())
+    val workspacePath: StateFlow<String?> = _workspacePath.asStateFlow()
+
+    private val _workspaceReason = MutableStateFlow(core.workspace.unreachableReason())
+    val workspaceReason: StateFlow<String?> = _workspaceReason.asStateFlow()
+
     private val _availableModels = MutableStateFlow(core.listModels())
     val availableModels: StateFlow<List<String>> = _availableModels.asStateFlow()
 
@@ -220,7 +226,11 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
         viewModelScope.launch {
             when (val r = core.setProjectFolder(uri)) {
                 is GeminiResult.Error -> _error.value = r.message
-                is GeminiResult.Success -> _workspaceLabel.value = core.workspace.rootLabel()
+                is GeminiResult.Success -> {
+                    _workspaceLabel.value = core.workspace.rootLabel()
+                    _workspacePath.value = core.workspace.absolutePath()
+                    _workspaceReason.value = core.workspace.unreachableReason()
+                }
             }
         }
     }
