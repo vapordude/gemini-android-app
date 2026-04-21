@@ -18,5 +18,4 @@ rootProject.name = "GeminiAndroid"
 include(":app")
 include(":core-bridge")
 include(":domain")
-include(":data")
 include(":ui-components")
