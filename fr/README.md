@@ -1,6 +1,6 @@
 <h1>
   <img src="../docs/logo_gemini.png" alt="" height="32" align="top" />
-  Gemini Android
+  Code sur Android
 </h1>
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](../LICENSE)
