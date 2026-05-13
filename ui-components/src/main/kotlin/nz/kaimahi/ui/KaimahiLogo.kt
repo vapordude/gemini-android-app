@@ -33,10 +33,11 @@ fun KaimahiLogo(
     style: KaimahiLogoStyle = KaimahiLogoStyle.Brand,
     tint: Color? = null,
 ) {
-    val brand = LocalKaimahiColors.current.brand
-    val gradient = LocalKaimahiColors.current.brandGradient
+    val tokens = LocalKaimahiColors.current
+    val brand = tokens.brand
+    val signal = tokens.signal
     val brush: Brush = when (style) {
-        KaimahiLogoStyle.Brand -> gradient
+        KaimahiLogoStyle.Brand -> tokens.brandGradient
         KaimahiLogoStyle.Solid -> androidx.compose.ui.graphics.SolidColor(tint ?: brand)
         KaimahiLogoStyle.Outline -> androidx.compose.ui.graphics.SolidColor(tint ?: brand)
     }
@@ -97,7 +98,7 @@ fun KaimahiLogo(
         // Subtle dot above the bar — kowhai signal accent (only in Brand mode)
         if (style == KaimahiLogoStyle.Brand) {
             drawCircle(
-                color = LocalKaimahiColors.current.signal,
+                color = signal,
                 radius = sw * 0.45f,
                 center = Offset(right + s * 0.02f, mid - s * 0.18f),
             )
