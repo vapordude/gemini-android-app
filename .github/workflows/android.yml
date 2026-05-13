@@ -31,7 +31,34 @@ jobs:
         run: chmod +x gradlew
 
       - name: Assemble debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace
+        run: |
+          set -o pipefail
+          ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee gradle-debug.log
+          status=${PIPESTATUS[0]}
+          exit $status
+
+      - name: Surface gradle error on failure
+        if: failure()
+        run: |
+          if [ -f gradle-debug.log ]; then
+            echo "::group::Last 200 lines of gradle output"
+            tail -n 200 gradle-debug.log
+            echo "::endgroup::"
+            # Promote each meaningful error line to a GitHub annotation
+            grep -E "(e: |error: |FAILURE:|Execution failed|What went wrong|Caused by:|> Task .* FAILED)" gradle-debug.log | head -n 50 | while IFS= read -r line; do
+              # Strip ANSI color codes
+              clean=$(printf '%s' "$line" | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g')
+              echo "::error::${clean}"
+            done
+          fi
+
+      - name: Upload gradle log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-debug-log
+          path: gradle-debug.log
+          if-no-files-found: warn
 
       - name: Assemble release APK
         run: ./gradlew :app:assembleRelease --stacktrace
