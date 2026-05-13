@@ -15,7 +15,11 @@ sealed class AgentEvent {
     data class ToolCallCompleted(val callId: String, val ok: Boolean, val outputLen: Int) : AgentEvent()
     data class Message(val text: String) : AgentEvent()
     object Done : AgentEvent()
-    data class Error(val message: String) : AgentEvent()
+
+    /** Structured failure. Mirrors `agent_core::AgentEvent::Error`.
+     *  See `InferenceBackend.kt` for [AgentError] and `docs/AGENTIC.md`
+     *  for the "failures flow back to the agent" contract. */
+    data class Error(val error: AgentError) : AgentEvent()
 }
 
 interface AgentRuntime {

@@ -165,6 +165,14 @@ impl<I: InferenceBackend, T: ToolDispatcher> Agent<I, T> {
 
             // Decide next state by inspecting which marker was hit.
             let marker = detect_marker(&completion);
+            // D8 — agent state transition. Records marker (or "none")
+            // and current iteration so the diag harness can replay the
+            // loop's decision tree.
+            diagnostics::probe!(diagnostics::Probe::AgentTransition {
+                from: "reasoning",
+                to: marker.unwrap_or("done"),
+                iter,
+            });
             let body = strip_marker(&completion, marker);
             if !body.trim().is_empty() {
                 emit(AgentEvent::Thinking(body.clone()));

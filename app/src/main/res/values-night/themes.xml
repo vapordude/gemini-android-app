@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Dark anchors on AI Studio canvas — status/nav bars fade into it. -->
+    <!-- Dark canvas — status/nav fade into it. -->
     <style name="Theme.KaimahiUI" parent="android:Theme.DeviceDefault.NoActionBar">
-        <item name="android:windowBackground">@color/aistudio_bg_dark</item>
-        <item name="android:statusBarColor">@color/aistudio_bg_dark</item>
-        <item name="android:navigationBarColor">@color/aistudio_bg_dark</item>
+        <item name="android:windowBackground">@color/kaimahi_bg_dark</item>
+        <item name="android:statusBarColor">@color/kaimahi_bg_dark</item>
+        <item name="android:navigationBarColor">@color/kaimahi_bg_dark</item>
     </style>
 </resources>

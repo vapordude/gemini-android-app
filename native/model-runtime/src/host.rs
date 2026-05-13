@@ -19,6 +19,12 @@ pub fn sample_greedy(logits: &[f32]) -> TokenId {
             best = i as u32;
         }
     }
+    // D6 — sampler choice. Records the chosen token + its raw logit
+    // (probability requires a softmax pass we skip here for speed).
+    diagnostics::probe!(diagnostics::Probe::Sampler {
+        token_id: best,
+        prob: best_v,
+    });
     best
 }
 

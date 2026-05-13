@@ -8,7 +8,8 @@ rust-version.workspace = true
 [dependencies]
 tensor-core = { path = "../tensor-core" }
 gguf-loader = { path = "../gguf-loader" }
+diagnostics = { path = "../diagnostics" }
 
 [features]
 default = []
-diag = []
+diag = ["diagnostics/diag"]

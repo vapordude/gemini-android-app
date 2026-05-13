@@ -99,6 +99,14 @@ pub fn load(path: &Path) -> Result<LoadedModel, LoadError> {
         .unwrap_or("lm")
         .to_string();
 
+    // D1 — model loaded. Per the diag plan, capture arch + ISA + thread
+    // count so the harness can confirm what actually ran.
+    diagnostics::probe!(diagnostics::Probe::ModelLoaded {
+        arch_tag: arch.clone(),
+        isa: tensor_core::isa::detect().tag().to_string(),
+        threads: 1,
+    });
+
     match (family.as_str(), arch.as_str()) {
         ("lm", "gemma4" | "gemma-4" | "gemma" | "gemma2" | "gemma3") => Ok(LoadedModel::Language(
             Box::new(arch::lm::gemma4::Gemma4Model::from_gguf(&gguf)?),

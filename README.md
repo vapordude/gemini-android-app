@@ -29,10 +29,6 @@ from-scratch Rust runtime — no third-party inference libraries.
 - API failures (cloud or tool) flow back to the agent as structured
   error events so it can adapt mid-turn.
 
-<p align="center">
-  <img src="docs/screenshot.jpg" alt="Chat in action: function calling + tool approval" width="360" />
-</p>
-
 ## 🎯 What you can actually do with it
 
 - **Ask the model to modify a project, not just describe one.** It opens

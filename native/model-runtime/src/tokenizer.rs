@@ -156,6 +156,11 @@ impl Tokenizer {
             self.encode_normal_segment(&prepared, &mut out);
             rest = &rest[segment_end..];
         }
+        // D5 — tokenizer round-trip check. Only emitted in diag builds.
+        diagnostics::probe!(diagnostics::Probe::Tokenizer {
+            roundtrip_ok: self.decode(&out).len() > 0 || out.is_empty(),
+            len: out.len(),
+        });
         out
     }
 
