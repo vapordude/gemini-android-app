@@ -100,6 +100,80 @@ Don't override colors inside a screen. Tokens live in
 `ui-components/.../Theme.kt`, mirrored by `docs/STYLES.md`. If a color
 needs to change, change the token and every screen follows.
 
+## The API is the schema — canonical renderers
+
+The agent already speaks typed events. The runtime already exposes
+typed info. The user doesn't need a parallel "UI schema" for the agent
+to fill out — the existing canonical shapes ARE the schema:
+
+| Shape | Lives in | Canonical renderer |
+| --- | --- | --- |
+| `AgentEvent` | `domain` | `ui-components/canonical/AgentTranscript.kt` |
+| `RuntimeInfo` + `ModelHandle` | `domain` | `RuntimeInfoPanel.kt` |
+| `TraceEvent` | `domain` | `TraceList.kt` / `TraceEventRow` |
+| `EmdashDiff` | `domain` | `EmdashDiffView.kt` |
+
+Each renderer is exhaustive over its sealed type — adding a new
+variant upstream stops the renderer compiling, which is the feature.
+"AI fills out a form" reduces to "AI emits the typed events it
+already emits". The UI's job is **pure-data → Compose**.
+
+```kotlin
+@Composable
+fun AgentSessionScreen(events: List<AgentEvent>, info: RuntimeInfo) {
+    AppScreen(title = "Agent") {
+        RuntimeInfoPanel(info = info)
+        Spacer(Modifier.height(16.dp))
+        AgentTranscript(events = events)
+    }
+}
+```
+
+Streaming = appending to the list = `AnimatedVisibility` fade-in per
+new card. No parser, no schema drift.
+
+### Agent-driven shaping: `Hint`
+
+The agent can still influence presentation **within** the typed
+surface — it isn't locked into one rendering per event variant.
+Every `AgentEvent` carries an optional `Hint`:
+
+```kotlin
+data class Hint(
+    val tone: Tone = Tone.Default,         // Success | Warn | Info | Learning | Danger
+    val emphasis: Emphasis = Emphasis.Normal, // Subtle | Normal | Strong
+)
+```
+
+Tones map onto existing tokens (`ngahere`, `amber`, `pounamu`,
+`kowhai`, `coral`); emphasis maps onto weight + muting. Adding a new
+visual concept is a `BRAND.md` change first, not a `Hint` extension.
+So the agent gets expressivity, the brand stays bounded.
+
+Example:
+
+```kotlin
+emit(AgentEvent.Message(
+    text = "Deploy succeeded.",
+    hint = Hint(tone = Tone.Success, emphasis = Emphasis.Strong),
+))
+emit(AgentEvent.Thinking(
+    text = "Considering the licence implications…",
+    hint = Hint(emphasis = Emphasis.Subtle),
+))
+```
+
+The renderer reads `event.hint` and picks among existing tokens.
+Defaults are sensible, so old call sites keep working untouched.
+
+### When NOT to add a new canonical type
+
+Don't invent a new section/field/widget type unless the typed event
+stream genuinely can't express what the agent wants to communicate.
+If the agent needs to surface a result the existing events don't
+cover, the right move is to add a variant upstream (in `domain`),
+which forces the renderer update in the same diff.
+
 ## Where to put a new screen
 
 ```
