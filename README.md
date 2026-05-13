@@ -1,22 +1,31 @@
-<h1>
-  <img src="docs/logo_gemini.png" alt="" height="32" align="top" />
-  Code on Android
-</h1>
+# Kaimahi
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9.24-7F52FF.svg?logo=kotlin&logoColor=white)](https://kotlinlang.org/)
+[![Rust](https://img.shields.io/badge/Rust-stable-DEA584.svg?logo=rust&logoColor=white)](https://rust-lang.org/)
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack_Compose-2024.06-4285F4.svg?logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
 [![Android API 26+](https://img.shields.io/badge/API-26%2B-3DDC84.svg?logo=android&logoColor=white)](https://developer.android.com/)
-[![Status](https://img.shields.io/badge/status-usable-brightgreen.svg)](#)
 
 > 🇬🇧 English · [🇫🇷 Version française](fr/README.md)
 
-A **native Gemini coding client for Android** — not a wrapper around the
-official Google app, not a thin webview. A real client that turns your
-phone into a pocket coding workstation: the model reads and writes files,
-runs shell commands (compiles, tests, starts servers), generates images,
-and holds context across hours of conversation. Written in Kotlin +
-Jetpack Compose.
+**Kaimahi** (*Te Reo Māori for "worker"*) is a pocket coding workstation
+for Android. Local on-device LLM + cloud LLM running side by side under
+one agent loop. The agent reads and writes files, runs shell commands,
+generates images, manages remote site deployments (via emdash-rs), and
+persists memory across sessions. Kotlin + Jetpack Compose UI on top of a
+from-scratch Rust runtime — no third-party inference libraries.
+
+- Local agent + cloud agent **at the same time**. Auth both, fan out, or
+  pick per-turn.
+- Persistent agent memory under `filesDir/memory/`. Fold-and-forget so
+  long sessions don't blow context.
+- Local OpenAPI 3.1 surface ([`native/openapi.yaml`](native/openapi.yaml))
+  with OpenAI-compat endpoints — point any existing tool at
+  `OPENAI_BASE_URL=http://127.0.0.1:<port>/v1`.
+- Content-neutral runtime. No allowlist, no fingerprinting, no refusal
+  layer. Architecture is read from GGUF metadata.
+- API failures (cloud or tool) flow back to the agent as structured
+  error events so it can adapt mid-turn.
 
 <p align="center">
   <img src="docs/screenshot.jpg" alt="Chat in action: function calling + tool approval" width="360" />
@@ -257,11 +266,18 @@ Useful commands:
 Distributed under the **Apache 2.0** license. See [`LICENSE`](LICENSE)
 for details.
 
-## 🙏 Credits
+## 🪶 Mihi (acknowledgements)
 
-- **Inspiration**: [Gemini CLI](https://github.com/google-gemini/gemini-cli) by Google.
-- **Model**: [Gemini API](https://ai.google.dev/) by Google.
-- **Shell bridge**: [Termux](https://termux.dev/) — an open-source gem.
-- **UI**: [Jetpack Compose](https://developer.android.com/jetpack/compose) + Material 3.
+Kaimahi stands on shoulders. See [`MIHI.md`](MIHI.md) for the full
+acknowledgement; in short:
 
-Project link: <https://github.com/aciderix/gemini-android-app>
+- **Upstream forks**: the original `gemini-android-app` (aciderix), the
+  Gemini CLI by Google, [DeepAgent](https://github.com/RUC-NLPIR/DeepAgent)
+  for the agent state machine, and the EmDash CMS for the management
+  surface.
+- **Foundations**: [Gemini API](https://ai.google.dev/),
+  [Termux](https://termux.dev/), [Jetpack Compose](https://developer.android.com/jetpack/compose),
+  Material 3, the GGUF file format community, and the broader Rust
+  systems-programming ecosystem we deliberately keep at arm's length.
+
+Project link: <https://github.com/vapordude/gemini-android-app>

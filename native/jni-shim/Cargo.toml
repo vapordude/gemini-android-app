@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
+name = "kaimahi_native"
 crate-type = ["cdylib"]
 
 [dependencies]

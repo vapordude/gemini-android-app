@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.gemini.emdash"
+    namespace = "nz.kaimahi.emdash"
     compileSdk = 34
 
     defaultConfig {

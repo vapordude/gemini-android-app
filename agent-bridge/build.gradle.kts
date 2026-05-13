@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.gemini.agent"
+    namespace = "nz.kaimahi.agent"
     compileSdk = 34
 
     defaultConfig {

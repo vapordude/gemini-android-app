@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Light default — Compose still drives the in-app palette. -->
-    <style name="Theme.GeminiUI" parent="android:Theme.DeviceDefault.NoActionBar">
+    <style name="Theme.KaimahiUI" parent="android:Theme.DeviceDefault.NoActionBar">
         <item name="android:windowBackground">@color/aistudio_bg_light</item>
         <item name="android:statusBarColor">@color/aistudio_bg_light</item>
         <item name="android:navigationBarColor">@color/aistudio_bg_light</item>

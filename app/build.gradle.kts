@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.gemini.app"
+    namespace = "nz.kaimahi.app"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.google.gemini.android"
+        applicationId = "nz.kaimahi.app"
         minSdk = 26
         targetSdk = 34
         versionCode = 1

@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Gemini UI</string>
+    <string name="app_name">Kaimahi</string>
     <string name="cd_send">Send message</string>
     <string name="cd_commands">CLI commands</string>
-    <string name="cd_app_icon">Gemini UI launcher icon</string>
-    <string name="login_title">Welcome to Gemini</string>
-    <string name="login_subtitle">Powered by Gemini CLI Core</string>
+    <string name="cd_app_icon">Kaimahi launcher icon</string>
+    <string name="login_title">Welcome to Kaimahi</string>
+    <string name="login_subtitle">Local agent, cloud agent — your call, both at once.</string>
     <string name="login_tab_google">Google Account</string>
     <string name="login_tab_api">API Key</string>
     <string name="login_sign_in_google">Sign in with Google</string>

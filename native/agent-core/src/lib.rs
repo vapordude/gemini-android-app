@@ -1,6 +1,15 @@
 //! Ported DeepAgent state machine. Marker-driven cycle. Generic over
 //! `InferenceBackend` so the agent can be unit-tested with a mock and so
 //! the same code path serves any future inference engine.
+//!
+//! Failure handling: every tool, inference, network, or validation
+//! failure is folded back into the running transcript as a typed
+//! `AgentError` block before the next turn. The agent literally *sees*
+//! "ERROR: <kind>: <message>" in its next prompt so it can adapt rather
+//! than silently looping or stopping.
+
+pub mod memory;
+pub mod multi;
 
 pub mod markers {
     pub const BEGIN_TOOL_SEARCH: &str = "[BEGIN_TOOL_SEARCH]";
@@ -15,6 +24,49 @@ pub struct ToolDescriptor {
     pub name: String,
     pub description: String,
     pub destructive: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorKind {
+    /// Inference backend failed (rate limit, OOM, model not loaded, ...).
+    Inference,
+    /// Tool call failed (filesystem, shell, HTTP).
+    Tool,
+    /// Network/transport layer.
+    Network,
+    /// Input validation, schema mismatch, bad args.
+    Validation,
+}
+
+impl ErrorKind {
+    pub fn tag(self) -> &'static str {
+        match self {
+            Self::Inference => "inference",
+            Self::Tool => "tool",
+            Self::Network => "network",
+            Self::Validation => "validation",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentError {
+    pub kind: ErrorKind,
+    pub source: String,
+    pub message: String,
+}
+
+impl AgentError {
+    /// Render the structured error into a transcript-injectable block.
+    /// This is what the agent literally sees in its next prompt cycle.
+    pub fn to_transcript_block(&self) -> String {
+        format!(
+            "\nERROR [{}/{}]: {}\n",
+            self.kind.tag(),
+            self.source,
+            self.message
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -32,7 +84,7 @@ pub enum AgentEvent {
     },
     Message(String),
     Done,
-    Error(String),
+    Error(AgentError),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,8 +149,16 @@ impl<I: InferenceBackend, T: ToolDispatcher> Agent<I, T> {
             let completion = match self.inference.complete(&transcript, &stops) {
                 Ok(c) => c,
                 Err(e) => {
-                    emit(AgentEvent::Error(e));
-                    return;
+                    let err = AgentError {
+                        kind: ErrorKind::Inference,
+                        source: "complete".into(),
+                        message: e,
+                    };
+                    // Fold the error into the transcript so the next turn
+                    // can adapt (e.g. switch backend, retry, abandon).
+                    transcript.push_str(&err.to_transcript_block());
+                    emit(AgentEvent::Error(err));
+                    continue;
                 }
             };
 
@@ -132,8 +192,14 @@ impl<I: InferenceBackend, T: ToolDispatcher> Agent<I, T> {
                     let payload = match self.inference.complete(&transcript, &stops) {
                         Ok(p) => p,
                         Err(e) => {
-                            emit(AgentEvent::Error(e));
-                            return;
+                            let err = AgentError {
+                                kind: ErrorKind::Inference,
+                                source: "tool-call-completion".into(),
+                                message: e,
+                            };
+                            transcript.push_str(&err.to_transcript_block());
+                            emit(AgentEvent::Error(err));
+                            continue;
                         }
                     };
                     transcript.push_str(&payload);
@@ -159,14 +225,18 @@ impl<I: InferenceBackend, T: ToolDispatcher> Agent<I, T> {
                             });
                         }
                         Err(e) => {
-                            transcript.push_str("\nERROR: ");
-                            transcript.push_str(&e);
-                            transcript.push('\n');
+                            let err = AgentError {
+                                kind: ErrorKind::Tool,
+                                source: name.clone(),
+                                message: e.clone(),
+                            };
+                            transcript.push_str(&err.to_transcript_block());
                             emit(AgentEvent::ToolCallCompleted {
-                                call_id,
+                                call_id: call_id.clone(),
                                 ok: false,
                                 output_len: e.len(),
                             });
+                            emit(AgentEvent::Error(err));
                         }
                     }
                 }

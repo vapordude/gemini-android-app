@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.gemini.inference"
+    namespace = "nz.kaimahi.inference"
     compileSdk = 34
 
     defaultConfig {

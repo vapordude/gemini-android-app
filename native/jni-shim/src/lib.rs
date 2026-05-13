@@ -2,9 +2,9 @@
 //! desktop for testing.
 //!
 //! Three separate JNI namespaces:
-//!   Java_com_gemini_inference_*
-//!   Java_com_gemini_agent_*
-//!   Java_com_gemini_emdash_*
+//!   Java_nz_kaimahi_inference_*
+//!   Java_nz_kaimahi_agent_*
+//!   Java_nz_kaimahi_emdash_*
 //!
 //! Plus an optional diagnostics namespace when built with `--features diag`.
 //!
@@ -20,7 +20,7 @@ mod android {
     use jni::JNIEnv;
 
     #[no_mangle]
-    pub extern "system" fn Java_com_gemini_inference_NativeInference_nativeVersion<'a>(
+    pub extern "system" fn Java_nz_kaimahi_inference_NativeInference_nativeVersion<'a>(
         env: JNIEnv<'a>,
         _class: JClass<'a>,
     ) -> jstring {
@@ -28,7 +28,7 @@ mod android {
     }
 
     #[no_mangle]
-    pub extern "system" fn Java_com_gemini_inference_NativeInference_nativeLoadModel<'a>(
+    pub extern "system" fn Java_nz_kaimahi_inference_NativeInference_nativeLoadModel<'a>(
         mut env: JNIEnv<'a>,
         _class: JClass<'a>,
         path: JString<'a>,
@@ -49,7 +49,7 @@ mod android {
     }
 
     #[no_mangle]
-    pub extern "system" fn Java_com_gemini_agent_NativeAgent_nativeMaxIterations<'a>(
+    pub extern "system" fn Java_nz_kaimahi_agent_NativeAgent_nativeMaxIterations<'a>(
         _env: JNIEnv<'a>,
         _class: JClass<'a>,
     ) -> jint {
@@ -57,7 +57,7 @@ mod android {
     }
 
     #[no_mangle]
-    pub extern "system" fn Java_com_gemini_emdash_NativeEmdash_nativeClientVersion<'a>(
+    pub extern "system" fn Java_nz_kaimahi_emdash_NativeEmdash_nativeClientVersion<'a>(
         env: JNIEnv<'a>,
         _class: JClass<'a>,
     ) -> jstring {
