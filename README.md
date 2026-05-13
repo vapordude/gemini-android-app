@@ -104,13 +104,13 @@ To build from source:
 ### Option 1: pre-built APK
 
 Download the latest APK from the
-[Releases page](https://github.com/aciderix/gemini-android-app/releases).
+[Releases page](https://github.com/vapordude/gemini-android-app/releases).
 Both debug-signed and release-signed APKs are published on each tag.
 
 ### Option 2: build from source
 
 ```bash
-git clone https://github.com/aciderix/gemini-android-app
+git clone https://github.com/vapordude/gemini-android-app
 cd gemini-android-app
 ./gradlew :app:assembleDebug
 adb install app/build/outputs/apk/debug/app-debug.apk
@@ -263,6 +263,26 @@ Useful commands:
 
 Distributed under the **Apache 2.0** license. See [`LICENSE`](LICENSE)
 for details.
+
+## 📚 Documentation
+
+| File | What's in it |
+| --- | --- |
+| [`PRIVACY.md`](PRIVACY.md) | Four invariants, outbound-traffic table, rules for forkers. |
+| [`SECURITY.md`](SECURITY.md) | Reporting path, scope, coordinated-disclosure window. |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Five load-bearing contracts contributors must respect. |
+| [`MIHI.md`](MIHI.md) | Acknowledgement of upstream forks + foundations. |
+| [`CHANGELOG.md`](CHANGELOG.md) | What's shipped. |
+| [`docs/README.md`](docs/README.md) | Doc index — read-in-order + read-by-task. |
+| [`docs/AGENTIC.md`](docs/AGENTIC.md) | Agent loop, memory (topological + time-aware), training capture. |
+| [`docs/API.md`](docs/API.md) | Unified OpenAPI 3.1 surface — native, OpenAI-compat, health, diag, telemetry, emdash. |
+| [`docs/BRAND.md`](docs/BRAND.md) | Voice, palette (pounamu / kowhai / kauri), brand mark, badges. |
+| [`docs/PORTING.md`](docs/PORTING.md) | New model architecture, vendor NPU/GPU delegate, three upstream projects. |
+| [`docs/SCAFFOLDING.md`](docs/SCAFFOLDING.md) | Six common extension scaffolds for forkers. |
+| [`docs/SCREENS.md`](docs/SCREENS.md) | Canonical `AppScreen` shape. |
+| [`docs/STYLES.md`](docs/STYLES.md) | Per-token technical reference. |
+| [`native/README.md`](native/README.md) | Rust workspace crate map + OpenAPI tags. |
+| [`native/openapi.yaml`](native/openapi.yaml) | Source-of-truth API contract. |
 
 ## 🛡️ Privacy
 

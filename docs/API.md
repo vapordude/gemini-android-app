@@ -83,7 +83,7 @@ The port is kernel-assigned (`bind 127.0.0.1:0`).
   Kotlin callers through `NativeServer.port()` (added in a follow-up
   commit). UI tooling reads it from the bridge directly.
 - **Desktop** — the server writes the port to
-  `$XDG_RUNTIME_DIR/gemini-runtime/port` (or `~/.local/state/gemini-
+  `$XDG_RUNTIME_DIR/kaimahi-runtime/port` (or `~/.local/state/gemini-
   runtime/port` if `XDG_RUNTIME_DIR` is unset) on startup, and deletes
   the file on clean shutdown. CLI clients glob this for the address.
 

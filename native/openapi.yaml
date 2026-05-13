@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: gemini-android-app local runtime API
+  title: Kaimahi local runtime API
   version: 0.2.0
   description: |
     Unified local-only contract for on-device inference, agent loop,
@@ -32,7 +32,7 @@ servers:
         description: |
           Kernel-assigned port. Discover via the JNI bridge on Android
           or via the `PORT` file the server writes to its data dir on
-          desktop (`$XDG_RUNTIME_DIR/gemini-runtime/port`).
+          desktop (`$XDG_RUNTIME_DIR/kaimahi-runtime/port`).
 
 paths:
   # ─── Native surface ────────────────────────────────────────────────

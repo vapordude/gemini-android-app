@@ -120,7 +120,7 @@ fun AppDrawer(
             onClose(); openTermux(context)
         }
         DrawerItem(Icons.Default.Code, "Source code") {
-            onClose(); openUrl(context, "https://github.com/aciderix/gemini-android-app")
+            onClose(); openUrl(context, "https://github.com/vapordude/gemini-android-app")
         }
 
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -135,7 +135,7 @@ fun AppDrawer(
             onClose(); openUrl(context, "https://ai.google.dev/gemini-api/docs")
         }
         DrawerItem(Icons.Default.BugReport, "Report a bug") {
-            onClose(); openUrl(context, "https://github.com/aciderix/gemini-android-app/issues/new")
+            onClose(); openUrl(context, "https://github.com/vapordude/gemini-android-app/issues/new")
         }
         DrawerItem(Icons.Default.PrivacyTip, "Privacy") {
             onClose(); openUrl(context, "https://policies.google.com/privacy")
@@ -205,7 +205,7 @@ fun AboutDialog(viewModel: ChatViewModel, onDismiss: () -> Unit) {
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "github.com/aciderix/gemini-android-app",
+                    "github.com/vapordude/gemini-android-app",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary
                 )

@@ -72,6 +72,7 @@ See `../docs/PORTING.md` for the full porting guide.
 cargo test --workspace --lib
 ```
 
-50 unit tests today across quant codecs, kernels, GGUF parsing,
-tokenizer (incl. Gemma special tokens), agent loop, telemetry, the
-local HTTP server, and diagnostics.
+66 unit tests today across quant codecs, kernels, GGUF parsing,
+tokenizer (incl. Gemma special tokens), agent loop with structured
+errors, topological + time-aware memory, dual-backend policy, training
+capture, telemetry, the local HTTP server, and diagnostics.

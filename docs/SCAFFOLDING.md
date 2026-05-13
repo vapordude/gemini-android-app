@@ -134,7 +134,7 @@ Full design in `docs/AGENTIC.md`.
 Point any OpenAI-compatible tool at the local server:
 
 ```bash
-export OPENAI_BASE_URL=http://127.0.0.1:$(cat $XDG_RUNTIME_DIR/gemini-runtime/port)/v1
+export OPENAI_BASE_URL=http://127.0.0.1:$(cat $XDG_RUNTIME_DIR/kaimahi-runtime/port)/v1
 export OPENAI_API_KEY=ignored
 ```
 
