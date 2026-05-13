@@ -1,29 +1,45 @@
 package com.gemini.app.ui.local
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.gemini.domain.EmdashProfile
+import com.gemini.ui.AppScreen
 
 @Composable
 fun DeploymentConfigsScreen(
     profiles: List<EmdashProfile>,
-    modifier: Modifier = Modifier,
+    navigationIcon: @Composable () -> Unit = {},
+    actions: @Composable RowScope.() -> Unit = {},
 ) {
-    Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
-        Text("Remote emdash instances")
+    AppScreen(
+        title = "Remote emdash instances",
+        navigationIcon = navigationIcon,
+        actions = actions,
+    ) {
         if (profiles.isEmpty()) {
             Text(
                 "No instances configured. Add a profile under Settings → Emdash.",
-                modifier = Modifier.padding(vertical = 8.dp),
+                style = MaterialTheme.typography.bodyMedium,
             )
+            return@AppScreen
         }
         profiles.forEach { p ->
-            Text(text = "${p.env}: ${p.name} (${p.baseUrl})", modifier = Modifier.padding(vertical = 2.dp))
+            Text(
+                text = "${p.env}: ${p.name}",
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text(
+                text = p.baseUrl,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer(Modifier.height(8.dp))
         }
     }
 }
