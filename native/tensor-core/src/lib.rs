@@ -6,6 +6,7 @@
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
+pub mod delegate;
 pub mod half;
 pub mod isa;
 pub mod kernels;

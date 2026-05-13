@@ -1,18 +1,15 @@
 //! Host layer above the model's hot loop: tokenization, sampling,
 //! streaming. This is where probes D5/D6 live — never inside `forward`.
+//!
+//! v0 ships the sampling primitive that's always needed and leaves the
+//! end-to-end streaming wiring to the per-arch `host` glue (each arch
+//! constructs its prompt template differently, especially Gemma 4 with
+//! its `<start_of_turn>` markers).
 
-use crate::{KvCache, Model, TokenId};
+use crate::TokenId;
 
-pub fn tokenize(_text: &str) -> Vec<TokenId> {
-    // TODO: SentencePiece decode/encode. v0 returns empty.
-    Vec::new()
-}
-
-pub fn detokenize(_tokens: &[TokenId]) -> String {
-    // TODO.
-    String::new()
-}
-
+/// Argmax over a logits vector. Used by all arches as the deterministic
+/// baseline; temperature/top-k/top-p variants live alongside.
 pub fn sample_greedy(logits: &[f32]) -> TokenId {
     let mut best = 0u32;
     let mut best_v = f32::NEG_INFINITY;
@@ -25,6 +22,7 @@ pub fn sample_greedy(logits: &[f32]) -> TokenId {
     best
 }
 
+#[derive(Debug, Clone)]
 pub struct StreamConfig {
     pub max_new_tokens: usize,
     pub temperature: f32,
@@ -32,25 +30,13 @@ pub struct StreamConfig {
     pub stop: Vec<String>,
 }
 
-pub fn stream<F: FnMut(TokenId, &str) -> bool>(
-    model: &mut dyn Model,
-    kv: &mut KvCache,
-    prompt: &str,
-    cfg: &StreamConfig,
-    mut on_token: F,
-) {
-    let prompt_tokens = tokenize(prompt);
-    for &t in &prompt_tokens {
-        let _ = model.forward(t, kv);
-    }
-    for _ in 0..cfg.max_new_tokens {
-        // For v0 there are no real logits; bail.
-        let last_token = *prompt_tokens.last().unwrap_or(&0);
-        let logits = model.forward(last_token, kv);
-        let next = sample_greedy(logits);
-        let piece = detokenize(&[next]);
-        if !on_token(next, &piece) {
-            break;
+impl Default for StreamConfig {
+    fn default() -> Self {
+        Self {
+            max_new_tokens: 256,
+            temperature: 0.7,
+            top_p: 0.95,
+            stop: Vec::new(),
         }
     }
 }

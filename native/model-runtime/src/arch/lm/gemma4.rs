@@ -8,7 +8,7 @@
 //! follow-up; this lets the dispatch + KV cache + tokenizer paths get
 //! exercised end-to-end.
 
-use crate::{KvCache, LoadError, Model, RuntimeInfo, TokenId};
+use crate::{KvCache, LanguageModel, LoadError, RuntimeInfo, TokenId};
 use gguf_loader::{GgufFile, MetaValue};
 use tensor_core::{isa, IsaTier};
 
@@ -117,7 +117,7 @@ impl Gemma4Model {
     }
 }
 
-impl Model for Gemma4Model {
+impl LanguageModel for Gemma4Model {
     fn forward(&mut self, _token: TokenId, kv: &mut KvCache) -> &[f32] {
         // TODO: real per-layer forward. Structurally this is:
         //   x = embed(token)

@@ -14,7 +14,7 @@ sealed class AgentEvent {
     data class ToolCallPending(val callId: String, val name: String, val argsJson: String) : AgentEvent()
     data class ToolCallCompleted(val callId: String, val ok: Boolean, val outputLen: Int) : AgentEvent()
     data class Message(val text: String) : AgentEvent()
-    data object Done : AgentEvent()
+    object Done : AgentEvent()
     data class Error(val message: String) : AgentEvent()
 }
 

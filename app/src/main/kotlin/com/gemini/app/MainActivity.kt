@@ -16,16 +16,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.gemini.agent.RustAgentRuntime
 import com.gemini.app.ui.chat.ChatScreen
 import com.gemini.app.ui.chat.ChatViewModel
 import com.gemini.app.ui.login.LoginScreen
 import com.gemini.app.ui.settings.ThemeMode
 import com.gemini.bridge.RestGeminiCore
-import com.gemini.domain.AgentRuntime
-import com.gemini.domain.InferenceEngine
-import com.gemini.emdash.RustEmdashClient
-import com.gemini.inference.RustInferenceEngine
 import com.gemini.ui.GeminiTheme
 
 class MainActivity : ComponentActivity() {
@@ -44,9 +39,6 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     val appContext = LocalContext.current.applicationContext
                     val core = remember { RestGeminiCore(appContext) }
-                    val inferenceEngine: InferenceEngine = remember { RustInferenceEngine(appContext) }
-                    val agentRuntime: AgentRuntime = remember { RustAgentRuntime(inferenceEngine) }
-                    val emdashClient = remember { RustEmdashClient() }
                     val factory = remember {
                         object : ViewModelProvider.Factory {
                             @Suppress("UNCHECKED_CAST")
