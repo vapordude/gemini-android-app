@@ -50,8 +50,9 @@ class MainActivity : ComponentActivity() {
                     val isReady by vm.isReady.collectAsState()
                     val isLoading by vm.isLoading.collectAsState()
 
+                    val context = LocalContext.current
                     androidx.compose.runtime.LaunchedEffect(Unit) {
-                        if (!isReady && vm.hasPersistedSession()) vm.tryAutoLogin()
+                        if (!isReady && vm.hasPersistedSession()) vm.tryAutoLogin(context)
                     }
 
                     if (isReady) ChatScreen(

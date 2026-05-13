@@ -171,10 +171,29 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
 
     fun hasPersistedSession(): Boolean = core.hasPersistedSession()
 
-    fun tryAutoLogin() {
-        val saved = core.persistedApiKey() ?: return
-        if (saved.isBlank()) return
-        initCore(mapOf("api_key" to saved, "remember" to true))
+    fun tryAutoLogin(context: android.content.Context) {
+        val savedApi = core.persistedApiKey()
+        val savedToken = core.persistedAccessToken()
+
+        if (!savedApi.isNullOrBlank()) {
+            initCore(mapOf("api_key" to savedApi, "remember" to true))
+        } else if (!savedToken.isNullOrBlank()) {
+            viewModelScope.launch {
+                val authService = com.gemini.app.ui.login.GoogleAuthService(context)
+                val account = authService.getLastSignedInAccount()
+                if (account != null) {
+                    val freshToken = authService.getAccessToken(account)
+                    if (freshToken != null) {
+                        initCore(mapOf("access_token" to freshToken, "remember" to true))
+                    } else {
+                        // Let it fail or default to UI if token fails
+                        initCore(mapOf("access_token" to savedToken, "remember" to true))
+                    }
+                } else {
+                    initCore(mapOf("access_token" to savedToken, "remember" to true))
+                }
+            }
+        }
     }
 
     // --- chat persistence ---
