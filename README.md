@@ -126,18 +126,42 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 ## 🧱 Architecture
 
-Multi-module Gradle project:
+Multi-module Gradle project. Existing cloud-Gemini path stays untouched;
+new modules add on-device inference, an agent loop, emdash management,
+and a local OpenAPI server.
 
-| Module           | Role                                                                  |
-|------------------|-----------------------------------------------------------------------|
-| `:app`           | Compose UI, ViewModels, Activity                                      |
-| `:core-bridge`   | REST Gemini client, tool registry, Termux IPC, SAF, prefs             |
-| `:domain`        | Pure types (`GeminiMessage`, `ToolSpec`, `GeminiEvent`…) — no Android |
-| `:ui-components` | Shared design tokens (theme, colours)                                 |
+| Module | Role |
+| --- | --- |
+| `:app` | Compose UI, ViewModels, Activity |
+| `:core-bridge` | REST Gemini client, tool registry, Termux IPC, SAF, prefs |
+| `:domain` | Pure types (`GeminiMessage`, `ToolSpec`, `GeminiEvent`, `AgentRuntime`, `InferenceEngine`, `TraceEvent`, `DeploymentConfig`…) — no Android |
+| `:ui-components` | Shared design tokens + `AppScreen` scaffold |
+| `:inference-bridge` | Kotlin facade over the native LM/image runtime |
+| `:agent-bridge` | Kotlin facade over the native agent state machine |
+| `:emdash-bridge` | Typed HTTP client + Compose screens for remote emdash-rs instances |
+| `native/` (Rust) | from-scratch tensor math, GGUF loader, agent loop, telemetry, hand-rolled HTTP/1.1 server. See `native/README.md`. |
 
-All network traffic flows through `RestGeminiCore`, which emits
-`GeminiEvent`s consumed by `ChatViewModel`. No DI framework, no Room:
-`SharedPreferences` + JSON files under `filesDir`.
+The cloud-Gemini path flows through `RestGeminiCore`. The on-device path
+goes through the `inference-bridge` and `agent-bridge` JNI surfaces,
+both implementing the contract in [`native/openapi.yaml`](native/openapi.yaml)
+([API surface guide](docs/API.md)). The same OpenAPI spec is served on
+127.0.0.1 so CLIs, editor plugins, and devops scripts can talk to the
+runtime as a drop-in OpenAI-compatible endpoint.
+
+No DI framework, no Room. `SharedPreferences` + JSON files under
+`filesDir`.
+
+### On-device runtime principles
+
+- **No external libs where possible.** The tensor core is hand-rolled.
+- **Content-neutral.** Weights are opaque; architecture comes from
+  GGUF metadata. No allowlist, no fingerprinting, no refusal layer.
+- **Non-extractive.** Local traces only, typed-enum fields. No
+  analytics, no remote logging.
+- **Architecture-agnostic.** Language models + diffusion models live
+  side by side under `native/model-runtime/src/arch/`. New
+  architectures slot in without core changes. NPU/GPU acceleration
+  plugs in via the `Delegate` trait. See [`docs/PORTING.md`](docs/PORTING.md).
 
 ## ⚙️ Advanced configuration
 
@@ -184,6 +208,26 @@ Tested with:
 **Gemma** models (`gemma-2-*`, `gemma-3-*`) appear in the picker but
 don't support function calling — they'll work for pure chat but the
 tool stack won't be available.
+
+## 🔌 Local API (OpenAPI)
+
+The Rust runtime exposes a single OpenAPI 3.1 contract
+([`native/openapi.yaml`](native/openapi.yaml)) served on `127.0.0.1`:
+
+- **`native`** — canonical NDJSON surface (`/info`, `/models`,
+  `/generate`, `/agent/run`).
+- **`openai-compat`** — drop-in for existing tooling: `/v1/models`,
+  `/v1/chat/completions` (incl. streaming + tools + multimodal),
+  `/v1/completions`, `/v1/embeddings`, `/v1/images/generations`,
+  `/v1/images/edits`, `/v1/videos/generations` (501 until diffusion /
+  video arches ship).
+- **`health`** — `/healthz`, `/readyz`, `/metrics` (Prometheus text).
+- **`diagnostics`** — `/diag/probes`, `/diag/snapshot` (only present
+  in `--features diag` builds).
+- **`telemetry`** — `/traces` (always on, non-extractive).
+- **`emdash`** — local proxy to remote emdash-rs instances.
+
+Full surface guide: [`docs/API.md`](docs/API.md).
 
 ## 🤝 Contributing
 

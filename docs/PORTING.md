@@ -96,6 +96,24 @@ via Vulkan, Adreno via OpenCL, etc.) plug in via the `Delegate` trait in
    `delegate.matmul_f32(...)` first; ops that return `false` fall back
    to the in-tree path.
 
+## Local API contract
+
+All three projects expose the same OpenAPI 3.1 contract via
+`native/openapi.yaml`. The contract is grouped by tag so each
+consumer opts into the shape that fits:
+
+- `native` — NDJSON streams for new clients written against this runtime.
+- `openai-compat` — `/v1/chat/completions` etc. for tools that already
+  speak the OpenAI spec (LangChain, Continue.dev, Cursor, `llm`, etc.).
+  Set `OPENAI_BASE_URL=http://127.0.0.1:<port>/v1`.
+- `health` — `/healthz`, `/readyz`, `/metrics`.
+- `diagnostics` — feature-gated probe inventory + snapshot.
+- `telemetry` — local-only trace tail.
+- `emdash` — proxy to remote emdash-rs instances.
+
+See `docs/API.md` for the full surface walkthrough, port discovery, and
+the "adding a new endpoint" checklist.
+
 ## What stays content-neutral
 
 The runtime never inspects weight content for policy decisions:
