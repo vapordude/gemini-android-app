@@ -32,6 +32,12 @@ class SecurePrefs(context: Context) {
             if (value.isNullOrBlank()) remove(KEY_API) else putString(KEY_API, value)
         }.apply()
 
+    var accessToken: String?
+        get() = encrypted.getString(KEY_ACCESS_TOKEN, null)
+        set(value) = encrypted.edit().apply {
+            if (value.isNullOrBlank()) remove(KEY_ACCESS_TOKEN) else putString(KEY_ACCESS_TOKEN, value)
+        }.apply()
+
     var model: String?
         get() = plain.getString(KEY_MODEL, null)
         set(value) = plain.edit().apply {
@@ -78,6 +84,7 @@ class SecurePrefs(context: Context) {
 
     private companion object {
         const val KEY_API = "api_key"
+        const val KEY_ACCESS_TOKEN = "access_token"
         const val KEY_MODEL = "model"
         const val KEY_IMAGEN_MODEL = "imagen_model"
         const val KEY_WORKSPACE = "workspace_uri"

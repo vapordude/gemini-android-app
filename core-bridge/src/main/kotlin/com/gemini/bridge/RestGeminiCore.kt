@@ -107,6 +107,7 @@ class RestGeminiCore(
     }
 
     private var apiKey: String = ""
+    private var accessToken: String = ""
     private var model: String = defaultModel
     private var autoApproveDestructive = false
     private var idCounter = 0L
@@ -130,7 +131,8 @@ class RestGeminiCore(
     }
 
     fun persistedApiKey(): String? = prefs.apiKey
-    fun hasPersistedSession(): Boolean = !prefs.apiKey.isNullOrBlank()
+    fun persistedAccessToken(): String? = prefs.accessToken
+    fun hasPersistedSession(): Boolean = !prefs.apiKey.isNullOrBlank() || !prefs.accessToken.isNullOrBlank()
 
     private val _events = MutableSharedFlow<GeminiEvent>(
         replay = 0,
@@ -144,16 +146,20 @@ class RestGeminiCore(
     override suspend fun init(config: Map<String, Any>): GeminiResult {
         val rememberKey = (config["remember"] as? Boolean) ?: true
         apiKey = (config["api_key"] ?: config["apiKey"] ?: "").toString().trim()
+        accessToken = (config["access_token"] ?: config["accessToken"] ?: "").toString().trim()
         val requestedModel = (config["model"] as? String)?.ifBlank { null }
         if (requestedModel != null) model = requestedModel
-        if (apiKey.isBlank()) return GeminiResult.Error("API key is required")
+        if (apiKey.isBlank() && accessToken.isBlank()) return GeminiResult.Error("API key or access token is required")
         // Best-effort live model fetch; if it fails we keep the static fallback.
         runCatching { discoveredModels = fetchAvailableModels() }
             .onFailure { Log.w(TAG, "model discovery failed: ${it.message}") }
         if (model !in discoveredModels && discoveredModels.isNotEmpty()) {
             model = discoveredModels.firstOrNull { it.contains("flash") } ?: discoveredModels.first()
         }
-        if (rememberKey) prefs.apiKey = apiKey
+        if (rememberKey) {
+            prefs.apiKey = apiKey
+            prefs.accessToken = accessToken
+        }
         prefs.model = model
         return GeminiResult.Success("Ready")
     }
@@ -243,6 +249,7 @@ class RestGeminiCore(
 
     fun signOut() {
         apiKey = ""
+        accessToken = ""
         turns.clear()
         uiMessages.clear()
         pending.values.forEach { it.cancel() }
@@ -274,9 +281,9 @@ class RestGeminiCore(
     }
 
     private suspend fun fetchAvailableModels(): List<String> = withContext(Dispatchers.IO) {
-        if (apiKey.isBlank()) return@withContext AVAILABLE_MODELS
+        if (apiKey.isBlank() && accessToken.isBlank()) return@withContext AVAILABLE_MODELS
         val url = "https://generativelanguage.googleapis.com/v1beta/models" +
-            "?key=${URLEncoder.encode(apiKey, "UTF-8")}&pageSize=200"
+            (if (apiKey.isNotBlank()) "?key=${URLEncoder.encode(apiKey, "UTF-8")}&pageSize=200" else "?pageSize=200")
         val (code, body) = getJson(url)
         if (code !in 200..299) return@withContext AVAILABLE_MODELS
         val arr = JSONObject(body).optJSONArray("models") ?: return@withContext AVAILABLE_MODELS
@@ -320,7 +327,7 @@ class RestGeminiCore(
     override suspend fun sendMessage(text: String): GeminiResult = sendMessage(text, emptyList())
 
     suspend fun sendMessage(text: String, attachments: List<Attachment>): GeminiResult = sendLock.withLock {
-        if (apiKey.isBlank()) return GeminiResult.Error("API key not configured")
+        if (apiKey.isBlank() && accessToken.isBlank()) return GeminiResult.Error("API key or access token not configured")
 
         val preTurnSize = turns.size
         appendUserTurn(text, attachments)
@@ -465,9 +472,13 @@ class RestGeminiCore(
     private suspend fun streamOnce(): Pair<String?, List<ToolCall>> = withContext(Dispatchers.IO) {
         val body = buildRequestBody()
         val url = "https://generativelanguage.googleapis.com/v1beta/models/" +
-            "$model:streamGenerateContent?alt=sse&key=${URLEncoder.encode(apiKey, "UTF-8")}"
+            "$model:streamGenerateContent?alt=sse" +
+            (if (apiKey.isNotBlank()) "&key=${URLEncoder.encode(apiKey, "UTF-8")}" else "")
         val conn = URL(url).openConnection() as HttpURLConnection
         conn.requestMethod = "POST"
+        if (accessToken.isNotBlank()) {
+            conn.setRequestProperty("Authorization", "Bearer $accessToken")
+        }
         conn.doOutput = true
         conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
         conn.setRequestProperty("Accept", "text/event-stream")
@@ -728,6 +739,9 @@ class RestGeminiCore(
         val conn = URL(url).openConnection() as HttpURLConnection
         conn.requestMethod = "GET"
         conn.setRequestProperty("Accept", "application/json")
+        if (accessToken.isNotBlank()) {
+            conn.setRequestProperty("Authorization", "Bearer $accessToken")
+        }
         conn.connectTimeout = 15_000
         conn.readTimeout = 30_000
         return try {
