@@ -2,16 +2,16 @@
 //! SIMD intrinsics are allowed to live. Public API is safe; intrinsics are
 //! gated by `cfg(target_arch = ...)` and runtime feature detection.
 //!
-//! No third-party dependencies beyond `libm`.
+//! Dependencies: `libm` only.
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
+pub mod half;
 pub mod isa;
 pub mod kernels;
 pub mod quant;
 pub mod sched;
 
-/// CPU ISA tier chosen at runtime. Picked once at init; never re-evaluated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IsaTier {
     Scalar,

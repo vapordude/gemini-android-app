@@ -2,13 +2,14 @@
 //! and a single `load()` entry point. Architecture impls live under `arch/`
 //! and are dispatched by the GGUF `general.architecture` tag.
 //!
-//! The runtime is content-neutral by design: no weight allowlist, no
-//! fingerprinting, no refusal layer. The application layer is responsible
-//! for use-policy enforcement.
+//! Content-neutral: weights are opaque; metadata drives everything.
+
+#![deny(unsafe_op_in_unsafe_fn)]
 
 pub mod arch;
 pub mod host;
 pub mod kv;
+pub mod tokenizer;
 
 use std::path::Path;
 use tensor_core::IsaTier;
@@ -26,7 +27,6 @@ pub struct RuntimeInfo {
 }
 
 pub struct KvCache {
-    // TODO: real layout (per-layer k/v slabs + sliding window state).
     pub seq_len: usize,
 }
 
@@ -43,8 +43,6 @@ impl Default for KvCache {
 }
 
 pub trait Model: Send {
-    /// Forward a single token. Hot loop — no allocations after warmup,
-    /// no I/O, no logging.
     fn forward(&mut self, token: TokenId, kv: &mut KvCache) -> &[f32];
     fn reset(&mut self, kv: &mut KvCache);
     fn info(&self) -> RuntimeInfo;
@@ -54,6 +52,7 @@ pub trait Model: Send {
 pub enum LoadError {
     Gguf(gguf_loader::LoadError),
     UnknownArchitecture(String),
+    MissingMetadata(&'static str),
 }
 
 impl From<gguf_loader::LoadError> for LoadError {
@@ -62,12 +61,18 @@ impl From<gguf_loader::LoadError> for LoadError {
     }
 }
 
-/// Load weights from any GGUF/safetensors file mapped read-only. Architecture
-/// is chosen from the metadata header; weight content is never inspected.
+/// Load weights. Architecture comes from `general.architecture` metadata;
+/// weight content is never inspected. If your future private model
+/// declares its own architecture tag, register it in the match below.
 pub fn load(path: &Path) -> Result<Box<dyn Model>, LoadError> {
-    let header = gguf_loader::read_header(path)?;
-    match header.arch_tag.as_str() {
-        "gemma4" | "gemma-4" => Ok(Box::new(arch::gemma4::Gemma4Model::stub(&header))),
+    let gguf = gguf_loader::read(path)?;
+    let arch = gguf
+        .arch_tag()
+        .ok_or(LoadError::MissingMetadata("general.architecture"))?;
+    match arch {
+        "gemma4" | "gemma-4" | "gemma" | "gemma2" | "gemma3" => {
+            Ok(Box::new(arch::gemma4::Gemma4Model::from_gguf(&gguf)?))
+        }
         other => Err(LoadError::UnknownArchitecture(other.to_string())),
     }
 }

@@ -37,7 +37,13 @@ mod android {
         let arch_tag = std::path::Path::new(&path)
             .file_name()
             .and_then(|s| s.to_str())
-            .map(|s| if s.contains("gemma") { "gemma4" } else { "unknown" })
+            .map(|s| {
+                if s.contains("gemma") {
+                    "gemma4"
+                } else {
+                    "unknown"
+                }
+            })
             .unwrap_or("unknown");
         env.new_string(arch_tag).unwrap().into_raw()
     }
