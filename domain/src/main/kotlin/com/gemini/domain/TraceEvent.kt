@@ -3,7 +3,7 @@ package com.gemini.domain
 /**
  * Local-only structured trace event. Non-extractive: all fields are typed
  * enums or non-PII scalars — never raw prompts or tool payloads. The trace
- * viewer screen tails these from `filesDir/traces/*.jsonl`.
+ * viewer screen tails these from `filesDir/traces` (`.jsonl` files).
  */
 sealed class TraceEvent {
     abstract val timestampMs: Long
