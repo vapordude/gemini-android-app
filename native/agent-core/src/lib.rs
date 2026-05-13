@@ -10,6 +10,7 @@
 
 pub mod memory;
 pub mod multi;
+pub mod training;
 
 pub mod markers {
     pub const BEGIN_TOOL_SEARCH: &str = "[BEGIN_TOOL_SEARCH]";

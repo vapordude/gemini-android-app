@@ -19,188 +19,203 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// ---- AI Studio / Gemini 2025 tokens --------------------------------------
-// One-for-one mirror of styles.md. Keep the two in sync when either moves.
+// ─── Kaimahi tokens ────────────────────────────────────────────────────
+// Mirror of docs/STYLES.md and docs/BRAND.md. Keep all three in sync.
+//
+// Design language: dark-first, grounded, sovereign. Three material
+// references — pounamu (greenstone), kowhai (native flower), kauri
+// (timber). No Google blue. Brand gradient is reserved for hero +
+// learning moments; UI chrome uses neutral grades only.
 
-// Dark surfaces (stacked, no tint shift).
-private val AisBg         = Color(0xFF131314)
-private val AisSurface    = Color(0xFF1E1F20)
-private val AisSurfaceHi  = Color(0xFF282A2C)
-private val AisSurfaceMax = Color(0xFF35373A)
+// Dark surfaces (deep, slightly teal-tinted neutrals — workshop at night).
+private val Bg         = Color(0xFF0E1416)
+private val Surface1   = Color(0xFF1A2226)
+private val Surface2   = Color(0xFF232E33)
+private val Surface3   = Color(0xFF2C383D)
 
 // Lines.
-private val AisLine       = Color(0xFF2F3133)
-private val AisLineStrong = Color(0xFF3C3D3F)
+private val Line       = Color(0xFF243035)
+private val LineStrong = Color(0xFF34434A)
 
 // Text.
-private val AisText       = Color(0xFFE3E3E3)
-private val AisTextStrong = Color(0xFFF5F5F5)
-private val AisSecondary  = Color(0xFFC4C7C5)
-private val AisMuted      = Color(0xFF9AA0A6)
-private val AisDisabled   = Color(0xFF5F6368)
+private val TextStrong = Color(0xFFF2F5F5)
+private val Text       = Color(0xFFDDE5E6)
+private val TextSec    = Color(0xFFA8B5B7)
+private val TextMuted  = Color(0xFF6F7D80)
+private val TextDis    = Color(0xFF4A5559)
 
-// Interactive / chips.
-private val AisChip       = Color(0xFF2A2B2F)
+// Chip / interactive surface.
+private val Chip       = Color(0xFF1F2A2E)
 
-// Accent (Google Blue 300 family).
-private val AccentBlue    = Color(0xFF8AB4F8)
-private val AccentBlueOn  = Color(0xFF062E6F)
-private val AccentMuted   = Color(0xFF1A3A73) // container bg on dark
-private val AccentMutedOn = Color(0xFFD3E3FD)
+// Brand — pounamu (greenstone), the interactive primary.
+private val Pounamu        = Color(0xFF4FA3A3)
+private val PounamuOn      = Color(0xFF042525)
+private val PounamuMuted   = Color(0xFF1A4747)
+private val PounamuMutedOn = Color(0xFFB8E3E3)
 
-// Secondary / tertiary accents (used sparingly).
-private val AccentTeal    = Color(0xFF78D9EC)
-private val AccentViolet  = Color(0xFFC58AF9)
+// Secondary — kowhai (yellow flower), signal / learning.
+private val Kowhai         = Color(0xFFE8C75F)
+private val KowhaiOn       = Color(0xFF2B2407)
+private val KowhaiMuted    = Color(0xFF4A3E1A)
+private val KowhaiMutedOn  = Color(0xFFF4E1A2)
 
-// Semantic states (Google 300 on dark).
-private val StateSuccess  = Color(0xFF81C995)
-private val StateWarn     = Color(0xFFFDD663)
-private val StateDanger   = Color(0xFFF28B82)
+// Tertiary — kauri (warm timber), agent-acting accent.
+private val Kauri          = Color(0xFFBD7B5C)
+private val KauriOn        = Color(0xFF301607)
+private val KauriMuted     = Color(0xFF4A2D1C)
+private val KauriMutedOn   = Color(0xFFE7C2AC)
 
-// Gemini four-color spark — 2025 brand refresh.
-val GeminiSparkBlue   = Color(0xFF4285F4)
-val GeminiSparkRed    = Color(0xFFEA4335)
-val GeminiSparkYellow = Color(0xFFFBBC05)
-val GeminiSparkGreen  = Color(0xFF34A853)
+// Semantic states.
+private val StateSuccess   = Color(0xFF7BC18D) // ngahere — forest
+private val StateWarn      = Color(0xFFE0B25B) // muted kowhai
+private val StateDanger    = Color(0xFFE07A6B) // warm coral, not pure red
 
 /**
- * Official Gemini gradient. Use only for the spark/hero, streaming
- * progress bar, and onboarding halo — never for regular UI chrome.
+ * Kaimahi brand gradient. Pounamu → ngahere → kowhai → kauri. Used for
+ * the hero, the streaming/loading indicator, and the memory-folded
+ * "learning" halo. NEVER as UI chrome.
  */
-val GeminiSparkGradient: Brush = Brush.linearGradient(
-    0.00f to GeminiSparkBlue,
-    0.33f to GeminiSparkGreen,
-    0.66f to GeminiSparkYellow,
-    1.00f to GeminiSparkRed,
+val KaimahiBrandGradient: Brush = Brush.linearGradient(
+    0.00f to Pounamu,
+    0.40f to StateSuccess,
+    0.75f to Kowhai,
+    1.00f to Kauri,
 )
 
-/** Ambient dusk glow used behind the login hero and the empty chat state. */
-val GeminiDuskGradient: Brush = Brush.radialGradient(
-    0.0f to AccentBlue.copy(alpha = 0.18f),
-    0.5f to AccentViolet.copy(alpha = 0.10f),
+/** Ambient "workshop at night" glow — used behind hero + empty states. */
+val KaimahiDuskGradient: Brush = Brush.radialGradient(
+    0.0f to Pounamu.copy(alpha = 0.18f),
+    0.5f to Kauri.copy(alpha = 0.06f),
     1.0f to Color.Transparent,
 )
 
-// Light mirror (same roles, inverted luminance).
-private val AisBgLight         = Color(0xFFFFFFFF)
-private val AisSurfaceLight    = Color(0xFFF8F9FA)
-private val AisSurfaceHiLight  = Color(0xFFF1F3F4)
-private val AisSurfaceMaxLight = Color(0xFFE8EAED)
-private val AisLineLight       = Color(0xFFE8EAED)
-private val AisLineStrongLight = Color(0xFFDADCE0)
-private val AisTextLight       = Color(0xFF1F1F1F)
-private val AisTextStrongLight = Color(0xFF0B0B0B)
-private val AisSecondaryLight  = Color(0xFF444746)
-private val AisMutedLight      = Color(0xFF5F6368)
-private val AccentBlueLight    = Color(0xFF0B57D0)
-private val AccentMutedLight   = Color(0xFFD3E3FD)
-private val AccentMutedOnLight = Color(0xFF041E49)
-private val AisChipLight       = Color(0xFFF1F3F4)
+/** Soft halo behind agentic-memory affordances ("I learned this"). */
+val KaimahiLearningHalo: Brush = Brush.radialGradient(
+    0.0f to Kowhai.copy(alpha = 0.22f),
+    0.6f to Kowhai.copy(alpha = 0.06f),
+    1.0f to Color.Transparent,
+)
+
+// Light mirror — pounamu darkened for contrast, neutrals inverted.
+private val BgLight         = Color(0xFFFAFBFB)
+private val Surface1Light   = Color(0xFFF1F4F4)
+private val Surface2Light   = Color(0xFFE6EBEB)
+private val Surface3Light   = Color(0xFFD8E0E0)
+private val LineLight       = Color(0xFFE0E5E5)
+private val LineStrongLight = Color(0xFFC9D2D2)
+private val TextStrongLight = Color(0xFF0A1213)
+private val TextLight       = Color(0xFF1F2A2B)
+private val TextSecLight    = Color(0xFF3D4A4B)
+private val TextMutedLight  = Color(0xFF6B7878)
+private val ChipLight       = Color(0xFFEAF0F0)
+private val PounamuLight    = Color(0xFF2E7878)
 
 private val DarkColors = darkColorScheme(
-    primary              = AccentBlue,
-    onPrimary            = AccentBlueOn,
-    primaryContainer     = AccentMuted,
-    onPrimaryContainer   = AccentMutedOn,
-    secondary            = AccentTeal,
-    onSecondary          = Color(0xFF003544),
-    secondaryContainer   = AisChip,
-    onSecondaryContainer = AisText,
-    tertiary             = AccentViolet,
-    onTertiary           = Color(0xFF2C1255),
-    tertiaryContainer    = Color(0xFF3A1B6B),
-    onTertiaryContainer  = Color(0xFFEADDFF),
-    background           = AisBg,
-    onBackground         = AisText,
-    surface              = AisSurface,
-    onSurface            = AisText,
-    surfaceVariant       = AisSurfaceHi,
-    onSurfaceVariant     = AisSecondary,
-    surfaceTint          = AccentBlue,
-    inverseSurface       = AisText,
-    inverseOnSurface     = AisBg,
-    outline              = AisLineStrong,
-    outlineVariant       = AisLine,
+    primary              = Pounamu,
+    onPrimary            = PounamuOn,
+    primaryContainer     = PounamuMuted,
+    onPrimaryContainer   = PounamuMutedOn,
+    secondary            = Kowhai,
+    onSecondary          = KowhaiOn,
+    secondaryContainer   = KowhaiMuted,
+    onSecondaryContainer = KowhaiMutedOn,
+    tertiary             = Kauri,
+    onTertiary           = KauriOn,
+    tertiaryContainer    = KauriMuted,
+    onTertiaryContainer  = KauriMutedOn,
+    background           = Bg,
+    onBackground         = Text,
+    surface              = Surface1,
+    onSurface            = Text,
+    surfaceVariant       = Surface2,
+    onSurfaceVariant     = TextSec,
+    surfaceTint          = Pounamu,
+    inverseSurface       = Text,
+    inverseOnSurface     = Bg,
+    outline              = LineStrong,
+    outlineVariant       = Line,
     scrim                = Color.Black,
     error                = StateDanger,
-    onError              = Color(0xFF601410),
-    errorContainer       = Color(0xFF4A1217),
-    onErrorContainer     = Color(0xFFFFDAD6),
+    onError              = Color(0xFF3B0F0A),
+    errorContainer       = Color(0xFF4F1B14),
+    onErrorContainer     = Color(0xFFFFD9D2),
 )
 
 private val LightColors = lightColorScheme(
-    primary              = AccentBlueLight,
+    primary              = PounamuLight,
     onPrimary            = Color.White,
-    primaryContainer     = AccentMutedLight,
-    onPrimaryContainer   = AccentMutedOnLight,
-    secondary            = Color(0xFF0057B7),
+    primaryContainer     = Color(0xFFCBE8E8),
+    onPrimaryContainer   = Color(0xFF052525),
+    secondary            = Color(0xFF8A6A0F),
     onSecondary          = Color.White,
-    secondaryContainer   = AisChipLight,
-    onSecondaryContainer = AisTextLight,
-    tertiary             = Color(0xFF6C4DB8),
+    secondaryContainer   = Color(0xFFFAEAB2),
+    onSecondaryContainer = Color(0xFF2B2407),
+    tertiary             = Color(0xFF8A4D2E),
     onTertiary           = Color.White,
-    background           = AisBgLight,
-    onBackground         = AisTextLight,
-    surface              = AisSurfaceLight,
-    onSurface            = AisTextLight,
-    surfaceVariant       = AisSurfaceHiLight,
-    onSurfaceVariant     = AisSecondaryLight,
-    surfaceTint          = AccentBlueLight,
-    outline              = AisLineStrongLight,
-    outlineVariant       = AisLineLight,
-    error                = Color(0xFFB3261E),
+    tertiaryContainer    = Color(0xFFF6D7C5),
+    onTertiaryContainer  = Color(0xFF3A1B07),
+    background           = BgLight,
+    onBackground         = TextLight,
+    surface              = Surface1Light,
+    onSurface            = TextLight,
+    surfaceVariant       = Surface2Light,
+    onSurfaceVariant     = TextSecLight,
+    surfaceTint          = PounamuLight,
+    outline              = LineStrongLight,
+    outlineVariant       = LineLight,
+    error                = Color(0xFFB4271C),
     onError              = Color.White,
-    errorContainer       = Color(0xFFFCE8E6),
-    onErrorContainer     = Color(0xFF410E0B),
+    errorContainer       = Color(0xFFFCD9D2),
+    onErrorContainer     = Color(0xFF420B07),
 )
 
-// Radii — see styles.md §2. 2xl (28dp) is the pill used for chat input,
-// primary CTAs and large sheets. `extraLarge` on M3 lines up with that role.
-private val GeminiShapes = Shapes(
-    extraSmall  = RoundedCornerShape(6.dp),   // dense chips
-    small       = RoundedCornerShape(12.dp),  // chips, list rows
-    medium      = RoundedCornerShape(16.dp),  // cards, dropdowns
-    large       = RoundedCornerShape(20.dp),  // dialogs, sheets
-    extraLarge  = RoundedCornerShape(28.dp),  // pill buttons, chat input
+// Radii — pill (28) for primary CTAs + chat composer, 16 for cards.
+private val KaimahiShapes = Shapes(
+    extraSmall = RoundedCornerShape(6.dp),
+    small      = RoundedCornerShape(12.dp),
+    medium     = RoundedCornerShape(16.dp),
+    large      = RoundedCornerShape(20.dp),
+    extraLarge = RoundedCornerShape(28.dp),
 )
 
-// Typography — falls back to the system sans until we ship Google Sans
-// Flex/Text as bundled assets. Weights and tracking match AI Studio's CSS.
-private val GeminiTypography = Typography(
+// Typography — system sans for now. Slight negative letter-spacing on
+// headlines for craft / settled feel; positive tracking on labels for
+// clarity at small sizes.
+private val KaimahiTypography = Typography(
     displayLarge = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.Medium,
         fontSize = 48.sp,
-        lineHeight = 48.sp,
-        letterSpacing = (-1.9).sp,
+        lineHeight = 50.sp,
+        letterSpacing = (-1.6).sp,
     ),
     displayMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.Medium,
         fontSize = 40.sp,
         lineHeight = 44.sp,
-        letterSpacing = (-1.4).sp,
+        letterSpacing = (-1.2).sp,
     ),
     headlineLarge = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.Medium,
         fontSize = 32.sp,
         lineHeight = 36.sp,
-        letterSpacing = (-0.8).sp,
+        letterSpacing = (-0.6).sp,
     ),
     headlineMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.Medium,
         fontSize = 24.sp,
         lineHeight = 30.sp,
-        letterSpacing = (-0.4).sp,
+        letterSpacing = (-0.3).sp,
     ),
     titleLarge = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.Medium,
         fontSize = 20.sp,
         lineHeight = 26.sp,
-        letterSpacing = (-0.2).sp,
+        letterSpacing = (-0.15).sp,
     ),
     titleMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
@@ -242,26 +257,26 @@ private val GeminiTypography = Typography(
         fontWeight = FontWeight.Medium,
         fontSize = 14.sp,
         lineHeight = 20.sp,
-        letterSpacing = 0.1.sp,
+        letterSpacing = 0.2.sp,
     ),
     labelMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.Medium,
         fontSize = 13.sp,
         lineHeight = 18.sp,
-        letterSpacing = 0.1.sp,
+        letterSpacing = 0.2.sp,
     ),
     labelSmall = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.Normal,
         fontSize = 12.sp,
         lineHeight = 16.sp,
-        letterSpacing = 0.2.sp,
+        letterSpacing = 0.3.sp,
     ),
 )
 
-/** Extra tokens Material 3 doesn't expose — exposed via CompositionLocal. */
-data class GeminiExtendedColors(
+/** Extra tokens Material 3 doesn't expose — surfaced via CompositionLocal. */
+data class KaimahiExtendedColors(
     val surfaceMax: Color,
     val textStrong: Color,
     val muted: Color,
@@ -269,38 +284,56 @@ data class GeminiExtendedColors(
     val success: Color,
     val warn: Color,
     val danger: Color,
-    val sparkGradient: Brush,
+    /** Pounamu — the brand primary, exposed for direct draw (e.g. logo). */
+    val brand: Color,
+    /** Kowhai — signal accent for learning + memory affordances. */
+    val signal: Color,
+    /** Kauri — agent-acting accent. */
+    val act: Color,
+    /** Linear gradient: hero, streaming, full-bleed onboarding moments. */
+    val brandGradient: Brush,
+    /** Radial glow behind hero + empty states. */
     val duskGradient: Brush,
+    /** Kowhai halo behind "I learned / I remember" affordances. */
+    val learningHalo: Brush,
 )
 
-private val DarkExtended = GeminiExtendedColors(
-    surfaceMax = AisSurfaceMax,
-    textStrong = AisTextStrong,
-    muted = AisMuted,
-    disabled = AisDisabled,
+private val DarkExtended = KaimahiExtendedColors(
+    surfaceMax = Surface3,
+    textStrong = TextStrong,
+    muted = TextMuted,
+    disabled = TextDis,
     success = StateSuccess,
     warn = StateWarn,
     danger = StateDanger,
-    sparkGradient = GeminiSparkGradient,
-    duskGradient = GeminiDuskGradient,
+    brand = Pounamu,
+    signal = Kowhai,
+    act = Kauri,
+    brandGradient = KaimahiBrandGradient,
+    duskGradient = KaimahiDuskGradient,
+    learningHalo = KaimahiLearningHalo,
 )
 
-private val LightExtended = GeminiExtendedColors(
-    surfaceMax = AisSurfaceMaxLight,
-    textStrong = AisTextStrongLight,
-    muted = AisMutedLight,
-    disabled = Color(0xFF9AA0A6),
-    success = Color(0xFF1E8E3E),
-    warn = Color(0xFFB06000),
-    danger = Color(0xFFC5221F),
-    sparkGradient = GeminiSparkGradient,
-    duskGradient = GeminiDuskGradient,
+private val LightExtended = KaimahiExtendedColors(
+    surfaceMax = Surface3Light,
+    textStrong = TextStrongLight,
+    muted = TextMutedLight,
+    disabled = Color(0xFF9AA8A8),
+    success = Color(0xFF2E7D43),
+    warn = Color(0xFF8A6A0F),
+    danger = Color(0xFFB4271C),
+    brand = PounamuLight,
+    signal = Color(0xFF8A6A0F),
+    act = Color(0xFF8A4D2E),
+    brandGradient = KaimahiBrandGradient,
+    duskGradient = KaimahiDuskGradient,
+    learningHalo = KaimahiLearningHalo,
 )
 
 val LocalKaimahiColors = staticCompositionLocalOf { DarkExtended }
 
-object GeminiTokens {
-    val colors: GeminiExtendedColors
+object KaimahiTokens {
+    val colors: KaimahiExtendedColors
         @Composable
         @ReadOnlyComposable
         get() = LocalKaimahiColors.current
@@ -315,8 +348,8 @@ fun KaimahiTheme(
     CompositionLocalProvider(LocalKaimahiColors provides extended) {
         MaterialTheme(
             colorScheme = if (darkTheme) DarkColors else LightColors,
-            typography = GeminiTypography,
-            shapes = GeminiShapes,
+            typography = KaimahiTypography,
+            shapes = KaimahiShapes,
             content = content,
         )
     }
