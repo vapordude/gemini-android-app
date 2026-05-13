@@ -12,6 +12,15 @@ pub mod memory;
 pub mod multi;
 pub mod training;
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
+fn now_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
 pub mod markers {
     pub const BEGIN_TOOL_SEARCH: &str = "[BEGIN_TOOL_SEARCH]";
     pub const END_TOOL_SEARCH: &str = "[END_TOOL_SEARCH]";
@@ -112,6 +121,15 @@ pub struct Agent<I: InferenceBackend, T: ToolDispatcher> {
     pub inference: I,
     pub tools: T,
     pub max_iterations: usize,
+    /// Optional persistent memory. When set, `[FOLD_THOUGHT]` markers
+    /// call `memory.fold(...)` so context survives across runs. When
+    /// `None`, the agent does an in-process tail-keep instead.
+    pub memory: Option<Box<dyn memory::MemoryStore>>,
+    /// Session id passed to the memory store. Each conversation should
+    /// use a stable id so recall across runs lands in the right bucket.
+    pub session: String,
+    /// Monotonic counter for `NoteId` tiebreaks inside a single run.
+    fold_seq: u64,
 }
 
 impl<I: InferenceBackend, T: ToolDispatcher> Agent<I, T> {
@@ -120,7 +138,20 @@ impl<I: InferenceBackend, T: ToolDispatcher> Agent<I, T> {
             inference,
             tools,
             max_iterations: 50,
+            memory: None,
+            session: "default".to_string(),
+            fold_seq: 0,
         }
+    }
+
+    pub fn with_memory(mut self, store: Box<dyn memory::MemoryStore>) -> Self {
+        self.memory = Some(store);
+        self
+    }
+
+    pub fn with_session(mut self, session: impl Into<String>) -> Self {
+        self.session = session.into();
+        self
     }
 
     /// Run the agent loop. Emits events for every state transition,
@@ -250,12 +281,26 @@ impl<I: InferenceBackend, T: ToolDispatcher> Agent<I, T> {
                     }
                 }
                 Some(m) if m == markers::FOLD_THOUGHT => {
-                    // Fold = compress transcript to a summary slot. v0
-                    // collapses the transcript to just the goal + the
-                    // most recent N chars; a real impl persists via sled.
+                    // Compress the transcript: drop everything except
+                    // the goal + the most recent slice, and emit a
+                    // typed Fold note into the MemoryStore (if wired)
+                    // so the next session can recall it.
                     let tail_len = 1024.min(transcript.len());
                     let tail_start = transcript.len() - tail_len;
                     let kept_tail = transcript[tail_start..].to_string();
+                    if let Some(store) = self.memory.as_mut() {
+                        self.fold_seq = self.fold_seq.wrapping_add(1);
+                        let ts = now_ms();
+                        let note = memory::Note::fold(
+                            memory::NoteId::new(ts, self.fold_seq),
+                            self.session.clone(),
+                            // Persist only the kept tail — that's
+                            // already the agent-curated summary it
+                            // chose to keep when emitting FOLD_THOUGHT.
+                            kept_tail.clone(),
+                        );
+                        store.fold(note);
+                    }
                     transcript.clear();
                     transcript.push_str(goal);
                     transcript.push('\n');
@@ -355,6 +400,55 @@ mod tests {
         let (n, a) = parse_tool_call("echo hello world");
         assert_eq!(n, "echo");
         assert_eq!(a, "hello world");
+    }
+
+    #[test]
+    fn fold_thought_calls_memory() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        struct CountingStore {
+            count: Arc<AtomicUsize>,
+            last_session: Arc<std::sync::Mutex<String>>,
+        }
+        impl memory::MemoryStore for CountingStore {
+            fn fold(&mut self, note: memory::Note) {
+                self.count.fetch_add(1, Ordering::Relaxed);
+                *self.last_session.lock().unwrap() = note.session;
+            }
+            fn recall(&self, _session: &str, _max: usize) -> Vec<memory::Note> {
+                Vec::new()
+            }
+        }
+
+        let count = Arc::new(AtomicUsize::new(0));
+        let last_session = Arc::new(std::sync::Mutex::new(String::new()));
+        let store = CountingStore {
+            count: Arc::clone(&count),
+            last_session: Arc::clone(&last_session),
+        };
+
+        let mut events = Vec::new();
+        let mut agent = Agent::new(
+            MockInference {
+                replies: VecDeque::from(vec![
+                    format!("Thinking{}", markers::FOLD_THOUGHT),
+                    "Final.".to_string(),
+                ]),
+            },
+            MockTools,
+        )
+        .with_memory(Box::new(store))
+        .with_session("test-session");
+        agent.run("do the thing", |e| events.push(e));
+
+        assert_eq!(
+            count.load(Ordering::Relaxed),
+            1,
+            "memory.fold() not invoked"
+        );
+        assert_eq!(*last_session.lock().unwrap(), "test-session");
+        assert!(matches!(events.last(), Some(AgentEvent::Done)));
     }
 
     #[test]

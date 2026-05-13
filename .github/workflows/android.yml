@@ -30,6 +30,9 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      - name: Run JVM/Kotlin tests
+        run: ./gradlew :domain:test --stacktrace
+
       - name: Assemble debug APK
         run: |
           set -o pipefail
