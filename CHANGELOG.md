@@ -7,6 +7,16 @@ ratchets independently and is currently `0.2.0`.
 
 ## [Unreleased]
 
+Nothing yet. The bar for `Unreleased` is concrete changes since 0.1.0.
+
+## [0.1.0] — 2026-05-13
+
+Initial consolidated release. Three upstream OSS projects folded into
+one shape: the original `gemini-android-app` (aciderix), DeepAgent,
+and the EmDash CMS port. Brought up under the name **Kaimahi**
+(Te Reo Māori for "worker") with a privacy stance codified in the
+type system and a full visual identity.
+
 ### Added
 - Top-level [`PRIVACY.md`](PRIVACY.md) — four invariants + outbound
   traffic table + rules for forkers.
@@ -104,8 +114,33 @@ ratchets independently and is currently `0.2.0`.
   result; collating streamed events into one completion per turn is
   the operator's stitching call.
 
-## Pre-history
+### Canonical UI surface
+- "The API is the schema." Per-typed-shape Compose renderers under
+  `ui-components/canonical/` — `AgentTranscript`, `RuntimeInfoPanel`,
+  `TraceList`, `EmdashDiffView` — exhaustive over each sealed domain
+  type. No parallel UI schema; the agent's typed events ARE the form
+  it fills out.
+- `domain.Hint(tone, emphasis)` is an optional field on every
+  `AgentEvent` variant. Lets the agent shape presentation among the
+  existing tokens (ngahere / amber / pounamu / kowhai / coral × subtle
+  / normal / strong) without introducing new visuals. Brand stays
+  bounded; agent gets expressivity within it.
 
-Before this changelog began, Kaimahi was an in-flight fork of three
-upstream open-source projects. See [`MIHI.md`](MIHI.md) for full
-attribution.
+### Operator-facing scaffolding
+- `KaimahiAgentDefaults.build(context, cloud, local, ...)` returns
+  the canonical wiring (MultiBackend + memory dir + training dir) as
+  a typed bag. Three lines instead of twenty.
+- `CloudGeminiBackend` adapts the existing Google Gemini REST client
+  into `InferenceBackend` so it composes with the local LM under one
+  `MultiBackend`.
+- `LocalLmBackend` does the symmetric thing for the on-device runtime.
+- `Agent::run` in Rust now calls `MemoryStore::fold()` on
+  `[FOLD_THOUGHT]`. Test asserts the wiring fires.
+
+### Pre-history
+
+Before this release, Kaimahi was an in-flight fork. See
+[`MIHI.md`](MIHI.md) for full attribution.
+
+[Unreleased]: https://github.com/vapordude/gemini-android-app/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/vapordude/gemini-android-app/releases/tag/v0.1.0
