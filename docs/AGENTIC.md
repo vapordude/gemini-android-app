@@ -93,24 +93,74 @@ The `max_iterations` cap (50 by default) still protects against
 runaway retry loops; the structured error path just gives the agent a
 real chance to recover before that cap fires.
 
-## Persistent memory
+## Persistent memory — topological + time-aware
 
 `memory.rs` provides a `MemoryStore` trait. `[FOLD_THOUGHT]` markers
-emitted by the agent trigger a `fold(Note { kind, text, ts })` call.
-Two impls ship:
+emitted by the agent trigger a `fold(Note { ... })` call. Two impls
+ship: `InMemoryStore` (default, session-scoped) and `FileMemoryStore`
+(JSON-lines under `filesDir/memory/<session>.jsonl`, hand-rolled
+encoder/decoder, append-only, survives restarts).
 
-- `InMemoryStore` (default, session-scoped).
-- `FileMemoryStore` (JSON-lines under `filesDir/memory/<session>.jsonl`).
-  Hand-rolled encoder/decoder; append-only; survives app restarts.
+### Note shape
 
-Folded notes are **typed** — never the raw transcript. `NoteKind` =
-`Fold | ToolResult{name, ok} | Error{kind}`. Plus a `text` field for
-the human summary the agent itself wrote.
+```rust
+pub struct Note {
+    pub id: NoteId,                  // sortable: ms-since-epoch + tiebreak seq
+    pub ts_ms: u128,
+    pub session: String,
+    pub kind: NoteKind,              // Fold | ToolResult | Error | Fact | Observation
+    pub text: String,                // agent-authored short summary
+    pub links: Vec<Link>,            // topology: typed edges to other notes
+    pub valid_until_ms: Option<u128>,// time-awareness: optional expiry
+    pub tags: Vec<String>,           // cheap retrieval index
+}
 
-On the agent's next turn for that session, `recall(session, max)`
-returns the most recent N notes, which the prompt template stitches
-back in as a compact "what we did before" block. The full transcript
-isn't replayed — that defeats the purpose of folding.
+pub enum LinkKind {
+    Follows, CausedBy, Contradicts, Supersedes, Refines, References,
+}
+```
+
+Notes form a **per-session DAG**. Each note can point to earlier notes
+via typed edges. "I learned X because of Y" is a `CausedBy` link.
+"Actually X was wrong, use Y instead" is a `Supersedes` link. The
+agent maintains the graph by emitting links when it folds.
+
+### Five orthogonal recall queries
+
+| Method | Use |
+| --- | --- |
+| `recall(session, max)` | Chronological, newest first. Back-compat. |
+| `recall_window(session, since_ms, max)` | Time-windowed ("last 24 h"). |
+| `recall_by_tag(session, tag, max)` | Index lookup ("everything tagged `deploy`"). |
+| `recall_topology(session, root, depth, kinds)` | DAG traversal — "what's downstream of this fact, following only `CausedBy` edges". |
+| `recall_decayed(session, now_ms, half_life_ms, max)` | Recency-weighted: `score = exp(-elapsed × ln 2 / half_life)`. Older notes still appear, just ranked lower. |
+
+`recall_decayed` is the workhorse for prompt construction — older
+context fades smoothly instead of getting hard-cut at a context-window
+boundary.
+
+### Time-awareness
+
+Two pieces:
+
+- **Notes are wall-clock timestamped** at creation time (`ts_ms`), and
+  the `NoteId` encodes that time lexicographically so notes sort by
+  creation order even after process restarts.
+- **Notes can expire.** `valid_until_ms` lets the agent record facts
+  with explicit validity windows: "Bob is on-call until Friday at
+  17:00", "the deploy is in flight", "the cert expires in 30 days".
+  `recall_decayed` skips expired notes; `recall_window` lets you
+  inspect them on demand.
+
+The agent's prompt template includes the current wall-clock time, so
+the model can reason about elapsed time when recalling
+(e.g. "we discussed this 4 hours ago" / "last week").
+
+### Privacy
+
+Memory is the operator's, not ours. Memory contents are never attached
+to telemetry, sent to a cloud endpoint other than the one the operator
+chose, or shared between Kaimahi installs. See `PRIVACY.md`.
 
 ## Training-data capture
 

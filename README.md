@@ -17,8 +17,10 @@ from-scratch Rust runtime — no third-party inference libraries.
 
 - Local agent + cloud agent **at the same time**. Auth both, fan out, or
   pick per-turn.
-- Persistent agent memory under `filesDir/memory/`. Fold-and-forget so
-  long sessions don't blow context.
+- **Topological + time-aware persistent memory** under
+  `filesDir/memory/`. Notes form a per-session DAG with typed edges
+  (`Follows`, `CausedBy`, `Contradicts`, `Supersedes`, `Refines`,
+  `References`), optional expiry windows, and recency-decayed recall.
 - Local OpenAPI 3.1 surface ([`native/openapi.yaml`](native/openapi.yaml))
   with OpenAI-compat endpoints — point any existing tool at
   `OPENAI_BASE_URL=http://127.0.0.1:<port>/v1`.
@@ -265,6 +267,14 @@ Useful commands:
 
 Distributed under the **Apache 2.0** license. See [`LICENSE`](LICENSE)
 for details.
+
+## 🛡️ Privacy
+
+**Kaimahi never extracts PII. Not from operators, not from collaborators,
+not from anyone.** Edge inference works without it. See
+**[`PRIVACY.md`](PRIVACY.md)** for the four invariants this codebase
+holds, the three categories of outbound traffic that are allowed, and
+the rules a forker has to keep to be allowed to keep the name.
 
 ## 🪶 Mihi (acknowledgements)
 

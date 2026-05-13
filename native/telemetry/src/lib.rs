@@ -1,8 +1,25 @@
 //! Local-only structured tracing. Lock-free-ish ring buffer + JSON-lines
-//! file sink. Zero network. **All fields are typed enums or non-PII
-//! scalars** — prompts, completions, tool args, file contents are never
-//! emitted here. The `leak-pii` feature is intentionally absent: making
-//! that an explicit opt-in would be a footgun.
+//! file sink. Zero network.
+//!
+//! # Non-extractive contract — load-bearing
+//!
+//! See `PRIVACY.md`. This crate is the chokepoint that enforces "no PII
+//! ever leaves this device through telemetry". The `Event` enum is
+//! structurally incapable of carrying user prompts, model completions,
+//! tool arguments, or file contents:
+//!
+//! - All variant fields are typed enums, bounded scalars, or
+//!   `&'static str` short tags compiled into the binary.
+//! - The `Error` variant's `kind` is `&'static str` so it CAN'T be
+//!   arbitrary runtime text. The `message` field is intended for short
+//!   stable tags ("rate-limited", "timeout", "OOM") — never for raw
+//!   error bodies that might echo user input. Reviewers should reject
+//!   any PR that passes a free-form message at a call site.
+//! - There is no `leak-pii` feature flag and there never will be.
+//!
+//! The `audit_no_pii` helper runs in CI and over captured trace files
+//! during instrumented tests. Widening this enum is a privacy review,
+//! not a routine change.
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -33,9 +50,16 @@ pub enum Event {
         ok: bool,
         duration_ms: u64,
     },
+    /// Errors are described by:
+    /// - `kind`: which subsystem failed (compile-time string).
+    /// - `tag`: short stable identifier like "rate-limited", "timeout",
+    ///   "oom", "parse-error". MUST NOT contain runtime payload. Use a
+    ///   `&'static str` so the type system enforces this — adding a
+    ///   `String` field here would defeat the non-extractive contract
+    ///   and should be rejected at review.
     Error {
         kind: &'static str,
-        message: String,
+        tag: &'static str,
     },
 }
 
@@ -94,12 +118,8 @@ impl Event {
                     escape(name)
                 ));
             }
-            Event::Error { kind, message } => {
-                s.push_str(&format!(
-                    r#","err_kind":"{}","message":"{}""#,
-                    escape(kind),
-                    escape(message)
-                ));
+            Event::Error { kind, tag } => {
+                s.push_str(&format!(r#","err_kind":"{kind}","tag":"{tag}""#));
             }
         }
         s.push('}');
@@ -212,14 +232,14 @@ mod tests {
     }
 
     #[test]
-    fn escape_handles_quotes_and_newlines() {
+    fn error_emits_static_tag_only() {
         let ev = Event::Error {
             kind: "parse",
-            message: "oops \"quoted\"\nline".to_string(),
+            tag: "rate-limited",
         };
         let line = ev.to_json_line(0);
-        assert!(line.contains(r#"\"quoted\""#));
-        assert!(line.contains(r"\n"));
+        assert!(line.contains(r#""err_kind":"parse""#));
+        assert!(line.contains(r#""tag":"rate-limited""#));
     }
 
     #[test]
