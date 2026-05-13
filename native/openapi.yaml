@@ -1,0 +1,302 @@
+openapi: 3.1.0
+info:
+  title: gemini-android-app local runtime API
+  version: 0.1.0
+  description: |
+    Unified local-only contract for on-device inference, agent loop, and
+    emdash management. Implemented in two ways:
+
+      1. JNI surface consumed by the Android app (`Java_com_gemini_*`).
+      2. Hand-rolled HTTP/1.1 server bound to 127.0.0.1 on a kernel-assigned
+         port. No third-party HTTP framework. Daily devops tools (CLIs,
+         editor plugins, scripts) consume the same endpoints the app does.
+
+    Principles:
+      - Local only. No remote calls originate here.
+      - Non-extractive. No telemetry, no analytics, no remote logging.
+      - Architecture-agnostic. Models are opaque; their architecture is
+        read from GGUF metadata.
+      - Stable semver. Daily-driver friendly.
+servers:
+  - url: http://127.0.0.1:{port}
+    variables:
+      port:
+        default: "0"
+        description: Kernel-assigned port. Discover via `GET /info` over the JNI bridge first.
+
+paths:
+  /info:
+    get:
+      summary: Runtime info — ISA chosen, thread count, loaded arch, version.
+      responses:
+        "200":
+          description: Runtime info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeInfo"
+
+  /models:
+    get:
+      summary: List models available under filesDir/models/.
+      responses:
+        "200":
+          description: Available models
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ModelHandle" }
+
+  /models/load:
+    post:
+      summary: Load weights from a local file path. Architecture chosen from metadata.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path: { type: string, description: Absolute file path on device. }
+      responses:
+        "200":
+          description: Loaded model handle
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelHandle" }
+
+  /generate:
+    post:
+      summary: Stream tokens from the loaded model. Non-extractive — no input is persisted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GenerateRequest" }
+      responses:
+        "200":
+          description: NDJSON token stream
+          content:
+            application/x-ndjson:
+              schema: { $ref: "#/components/schemas/Token" }
+
+  /agent/run:
+    post:
+      summary: Run the agent loop. Streams events (thinking, tool calls, results).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentRunRequest" }
+      responses:
+        "200":
+          description: NDJSON agent event stream
+          content:
+            application/x-ndjson:
+              schema: { $ref: "#/components/schemas/AgentEvent" }
+
+  /agent/decision:
+    post:
+      summary: Resolve a pending tool-call approval. Required for destructive tools.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [call_id, decision]
+              properties:
+                call_id: { type: string }
+                decision:
+                  type: string
+                  enum: [approve, reject, always_approve]
+                reason: { type: string }
+      responses:
+        "204": { description: Decision accepted }
+
+  /emdash/profiles:
+    get:
+      summary: List configured remote emdash instances.
+      responses:
+        "200":
+          description: Connection profiles (URL + label; never returns auth).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/EmdashProfile" }
+
+  /emdash/{profile}/collections:
+    get:
+      summary: Proxy to remote /_emdash/api/collections under the named profile.
+      parameters:
+        - in: path
+          name: profile
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Collections list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, additionalProperties: true }
+
+  /emdash/{profile}/preview-diff:
+    post:
+      summary: Server-side dry-run; required before any destructive emdash mutation.
+      parameters:
+        - in: path
+          name: profile
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Structured diff
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EmdashDiff" }
+
+  /traces:
+    get:
+      summary: Read the local trace JSONL. App-execution telemetry only; user-readable, user-deletable.
+      parameters:
+        - in: query
+          name: tail
+          schema: { type: integer, minimum: 1, maximum: 10000, default: 200 }
+      responses:
+        "200":
+          description: Recent trace events
+          content:
+            application/x-ndjson:
+              schema: { $ref: "#/components/schemas/TraceEvent" }
+
+components:
+  schemas:
+    RuntimeInfo:
+      type: object
+      required: [version, arch, isa, threads, model_loaded]
+      properties:
+        version: { type: string, description: "Semver of this runtime build." }
+        arch: { type: string, description: "Detected CPU architecture (aarch64, x86_64)." }
+        isa: { type: string, description: "ISA tier in use (e.g. neon-dotprod, neon-i8mm, avx2, scalar)." }
+        threads: { type: integer }
+        model_loaded:
+          oneOf:
+            - { type: "null" }
+            - { $ref: "#/components/schemas/ModelHandle" }
+
+    ModelHandle:
+      type: object
+      required: [id, path, arch_tag]
+      properties:
+        id: { type: string }
+        path: { type: string }
+        arch_tag:
+          type: string
+          description: |
+            Architecture identifier read from weights metadata.
+            Examples: gemma4, llama3, "custom:<your-arch>". Determines which
+            `arch/<tag>/` module is dispatched. No content inspection beyond this.
+        params:
+          type: object
+          properties:
+            vocab_size: { type: integer }
+            context_length: { type: integer }
+            quant_scheme: { type: string }
+
+    GenerateRequest:
+      type: object
+      required: [prompt]
+      properties:
+        prompt: { type: string }
+        max_new_tokens: { type: integer, default: 256 }
+        temperature: { type: number, default: 0.7 }
+        top_p: { type: number, default: 0.95 }
+        stop:
+          type: array
+          items: { type: string }
+
+    Token:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string }
+        token_id: { type: integer }
+        logprob: { type: number }
+        done: { type: boolean, default: false }
+
+    AgentRunRequest:
+      type: object
+      required: [goal]
+      properties:
+        goal: { type: string }
+        attached_docs:
+          type: array
+          description: User-attached docs (local file paths via SAF). Kept in app memory only.
+          items: { type: string }
+        max_iterations: { type: integer, default: 50 }
+        emdash_profile: { type: string, nullable: true }
+
+    AgentEvent:
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [thinking, tool_call_pending, tool_call_completed, message, done, error]
+        call_id: { type: string }
+        tool_name: { type: string }
+        text: { type: string }
+        ok: { type: boolean }
+
+    EmdashProfile:
+      type: object
+      required: [name, base_url, env]
+      properties:
+        name: { type: string }
+        base_url: { type: string, format: uri }
+        env:
+          type: string
+          enum: [dev, staging, prod]
+
+    EmdashDiff:
+      type: object
+      properties:
+        adds: { type: array, items: { type: object, additionalProperties: true } }
+        updates: { type: array, items: { type: object, additionalProperties: true } }
+        deletes: { type: array, items: { type: object, additionalProperties: true } }
+        warnings:
+          type: array
+          items: { type: string }
+
+    TraceEvent:
+      type: object
+      required: [ts, kind]
+      properties:
+        ts: { type: string, format: date-time }
+        kind:
+          type: string
+          enum:
+            - model_loaded
+            - generate_started
+            - generate_finished
+            - agent_iteration
+            - tool_call_started
+            - tool_call_finished
+            - error
+        duration_ms: { type: integer }
+        tokens_per_sec: { type: number }
+        tool_name: { type: string }
+        ok: { type: boolean }
+        message: { type: string, description: "Human-readable, non-PII." }

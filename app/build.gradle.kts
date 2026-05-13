@@ -18,6 +18,18 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
+    }
+
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "x86_64")
+            isUniversalApk = true
+        }
     }
 
     buildTypes {
@@ -56,6 +68,9 @@ dependencies {
     implementation(project(":core-bridge"))
     implementation(project(":domain"))
     implementation(project(":ui-components"))
+    implementation(project(":inference-bridge"))
+    implementation(project(":agent-bridge"))
+    implementation(project(":emdash-bridge"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

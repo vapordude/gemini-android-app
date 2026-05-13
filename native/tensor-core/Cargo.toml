@@ -1,0 +1,16 @@
+[package]
+name = "tensor-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+libm = "0.2"
+
+[features]
+default = []
+diag = []
