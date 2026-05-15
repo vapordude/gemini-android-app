@@ -6,6 +6,8 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import android.webkit.MimeTypeMap
 import androidx.documentfile.provider.DocumentFile
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
@@ -138,7 +140,11 @@ class Workspace(private val context: Context) {
         return Resolution(candidate, null)
     }
 
-    fun resolve(path: String): DocumentFile? {
+    suspend fun resolve(path: String): DocumentFile? = withContext(Dispatchers.IO) {
+        resolveSync(path)
+    }
+
+    internal fun resolveSync(path: String): DocumentFile? {
         val safe = sanitize(path) ?: return null
         if (safe.isEmpty()) return root
         var cur = root ?: return null
@@ -149,15 +155,15 @@ class Workspace(private val context: Context) {
         return cur
     }
 
-    fun read(path: String): String {
-        val file = resolve(path) ?: throw IllegalArgumentException("Not found: $path")
+    suspend fun read(path: String): String = withContext(Dispatchers.IO) {
+        val file = resolveSync(path) ?: throw IllegalArgumentException("Not found: $path")
         if (file.isDirectory) throw IllegalArgumentException("Is a directory: $path")
-        return context.contentResolver.openInputStream(file.uri)?.use {
+        context.contentResolver.openInputStream(file.uri)?.use {
             it.readBytes().toString(Charsets.UTF_8)
         } ?: throw IllegalStateException("Cannot read $path")
     }
 
-    fun write(path: String, content: String): Entry {
+    suspend fun write(path: String, content: String): Entry = withContext(Dispatchers.IO) {
         val parts = sanitize(path) ?: throw IllegalArgumentException("Invalid path: $path")
         if (parts.isEmpty()) throw IllegalArgumentException("Refusing to write to root")
         var cur = root ?: throw IllegalStateException("No workspace root")
@@ -174,7 +180,7 @@ class Workspace(private val context: Context) {
             it.write(content.toByteArray(Charsets.UTF_8))
         } ?: throw IllegalStateException("Cannot write $path")
 
-        return Entry(
+        Entry(
             name = target.name ?: fileName,
             path = parts.joinToString("/"),
             isDir = false,
@@ -182,11 +188,11 @@ class Workspace(private val context: Context) {
         )
     }
 
-    fun list(path: String): List<Entry> {
-        val dir = resolve(path) ?: throw IllegalArgumentException("Not found: $path")
+    suspend fun list(path: String): List<Entry> = withContext(Dispatchers.IO) {
+        val dir = resolveSync(path) ?: throw IllegalArgumentException("Not found: $path")
         if (!dir.isDirectory) throw IllegalArgumentException("Not a directory: $path")
         val prefix = sanitize(path)?.joinToString("/")?.ifEmpty { null }
-        return dir.listFiles().map {
+        dir.listFiles().map {
             val name = it.name ?: "?"
             Entry(
                 name = name,
@@ -197,13 +203,13 @@ class Workspace(private val context: Context) {
         }.sortedWith(compareByDescending<Entry> { it.isDir }.thenBy { it.name.lowercase() })
     }
 
-    fun delete(path: String): Boolean {
-        val file = resolve(path) ?: return false
-        return file.delete()
+    suspend fun delete(path: String): Boolean = withContext(Dispatchers.IO) {
+        val file = resolveSync(path) ?: return@withContext false
+        file.delete()
     }
 
     fun walk(path: String, maxEntries: Int = 2000): Sequence<Entry> = sequence {
-        val start = resolve(path) ?: return@sequence
+        val start = resolveSync(path) ?: return@sequence
         val startParts = sanitize(path) ?: return@sequence
         val stack = ArrayDeque<Pair<DocumentFile, List<String>>>()
         stack.addLast(start to startParts)

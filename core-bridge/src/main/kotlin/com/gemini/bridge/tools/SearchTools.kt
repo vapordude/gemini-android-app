@@ -5,6 +5,8 @@ import com.gemini.domain.ToolCall
 import com.gemini.domain.ToolCallResult
 import com.gemini.domain.ToolCategory
 import com.gemini.domain.ToolSpec
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class GlobTool(private val ws: Workspace) : Tool {
     override val spec = ToolSpec(
@@ -19,17 +21,22 @@ class GlobTool(private val ws: Workspace) : Tool {
         )
     )
 
-    override suspend fun execute(call: ToolCall): ToolCallResult = runCatching {
+    override suspend fun execute(call: ToolCall): ToolCallResult = try {
         val pattern = call.arguments["pattern"] as? String ?: error("pattern is required")
         val base = (call.arguments["path"] as? String).orEmpty()
         val regex = globToRegex(pattern)
-        val matches = ws.walk(base).filter { !it.isDir && regex.matches(it.path) }
-            .take(500)
-            .map { it.path }
-            .toList()
+        val matches = withContext(Dispatchers.IO) {
+            ws.walk(base).filter { !it.isDir && regex.matches(it.path) }
+                .take(500)
+                .map { it.path }
+                .toList()
+        }
         if (matches.isEmpty()) ToolOutput.clamp("(no matches)", call.id)
         else ToolOutput.clamp(matches.joinToString("\n"), call.id)
-    }.getOrElse { ToolOutput.error(call.id, it.message ?: "glob failed") }
+    } catch (e: Exception) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        ToolOutput.error(call.id, e.message ?: "glob failed")
+    }
 
     private fun globToRegex(glob: String): Regex {
         val sb = StringBuilder("^")
@@ -69,7 +76,7 @@ class GrepTool(private val ws: Workspace) : Tool {
         )
     )
 
-    override suspend fun execute(call: ToolCall): ToolCallResult = runCatching {
+    override suspend fun execute(call: ToolCall): ToolCallResult = try {
         val pattern = call.arguments["pattern"] as? String ?: error("pattern is required")
         val base = (call.arguments["path"] as? String).orEmpty()
         val glob = call.arguments["glob"] as? String
@@ -78,22 +85,30 @@ class GrepTool(private val ws: Workspace) : Tool {
         val results = StringBuilder()
         var shown = 0
         val limit = 200
-        for (entry in ws.walk(base)) {
-            if (entry.isDir) continue
-            if (globRegex != null && !globRegex.matches(entry.name)) continue
-            val text = runCatching { ws.read(entry.path) }.getOrNull() ?: continue
-            text.lineSequence().forEachIndexed { idx, line ->
-                if (regex.containsMatchIn(line)) {
-                    results.append(entry.path).append(':').append(idx + 1).append(": ")
-                        .append(line).append('\n')
-                    shown++
+        withContext(Dispatchers.IO) {
+            for (entry in ws.walk(base)) {
+                if (entry.isDir) continue
+                if (globRegex != null && !globRegex.matches(entry.name)) continue
+                val text = try { ws.read(entry.path) } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    null
+                } ?: continue
+                text.lineSequence().forEachIndexed { idx, line ->
+                    if (regex.containsMatchIn(line)) {
+                        results.append(entry.path).append(':').append(idx + 1).append(": ")
+                            .append(line).append('\n')
+                        shown++
+                    }
                 }
+                if (shown >= limit) break
             }
-            if (shown >= limit) break
         }
         if (shown == 0) ToolOutput.clamp("(no matches)", call.id)
         else ToolOutput.clamp(results.toString().trimEnd(), call.id)
-    }.getOrElse { ToolOutput.error(call.id, it.message ?: "grep failed") }
+    } catch (e: Exception) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        ToolOutput.error(call.id, e.message ?: "grep failed")
+    }
 
     private fun filenameGlobRegex(glob: String): Regex {
         val sb = StringBuilder("^")
