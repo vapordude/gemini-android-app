@@ -15,6 +15,7 @@ playServicesAuth = "21.5.1"
 appauth = "0.11.1"
 browser = "1.8.0"
 junit = "4.13.2"
+orgJson = "20231013"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -38,6 +39,7 @@ play-services-auth = { module = "com.google.android.gms:play-services-auth", ver
 appauth = { module = "net.openid:appauth", version.ref = "appauth" }
 androidx-browser = { module = "androidx.browser:browser", version.ref = "browser" }
 junit = { module = "junit:junit", version.ref = "junit" }
+org-json = { module = "org.json:json", version.ref = "orgJson" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

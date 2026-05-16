@@ -18,6 +18,9 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -30,4 +33,7 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.core)
+    // Android's `org.json` is a stub during host-JVM unit tests; pull in the
+    // real artifact so the PatchKernelClient tests can run.
+    testImplementation(libs.org.json)
 }
