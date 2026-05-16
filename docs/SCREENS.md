@@ -3,7 +3,7 @@
 Most screens in this app are the same shape: a top app bar with a title and
 maybe a back button or a few actions, a scrollable body, sometimes a FAB or
 a bottom action row. Roll all of that into one wrapper —
-`com.gemini.ui.AppScreen` — and use it everywhere.
+`nz.kaimahi.ui.AppScreen` — and use it everywhere.
 
 The only screens that legitimately deviate are:
 
@@ -27,7 +27,7 @@ fun MyScreen() {
 }
 ```
 
-That's it. Material 3, dark-first tokens from `GeminiTheme`, center-aligned
+That's it. Material 3, dark-first tokens from `KaimahiTheme`, center-aligned
 title, 16dp content padding, vertical scrolling wired in.
 
 ## With back nav + actions
@@ -177,7 +177,7 @@ which forces the renderer update in the same diff.
 ## Where to put a new screen
 
 ```
-app/src/main/kotlin/com/gemini/app/ui/<feature>/<ScreenName>.kt
+app/src/main/kotlin/nz/kaimahi/app/ui/<feature>/<ScreenName>.kt
 ```
 
 One screen per file. Companion ViewModel in the same package if non-trivial.

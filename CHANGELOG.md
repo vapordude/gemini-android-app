@@ -7,7 +7,21 @@ ratchets independently and is currently `0.2.0`.
 
 ## [Unreleased]
 
-Nothing yet. The bar for `Unreleased` is concrete changes since 0.1.0.
+### Changed
+- Consolidated active remote development branches into the mainline
+  integration history so current app/runtime changes ship together.
+
+### Added
+- Login/auth UX now supports both API key and Google OAuth with a
+  browser-first entry point before in-app continuation.
+- Gemini CLI login shortcuts now exist in three places: Login screen,
+  chat top app bar, and app drawer. Starting the flow copies
+  `gemini login` and opens Termux.
+- Settings now include local GGUF model file import from Android
+  storage, persisted local-model selection, and model file deletion.
+- Settings now explicitly warn that Play Store Termux builds are
+  outdated for external command integration, recommending F-Droid or
+  GitHub releases.
 
 ## [0.1.0] — 2026-05-13
 

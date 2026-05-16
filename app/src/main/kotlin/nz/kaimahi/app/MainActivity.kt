@@ -20,12 +20,7 @@ import nz.kaimahi.app.ui.chat.ChatScreen
 import nz.kaimahi.app.ui.chat.ChatViewModel
 import nz.kaimahi.app.ui.login.LoginScreen
 import nz.kaimahi.app.ui.settings.ThemeMode
-import nz.kaimahi.bridge.DriverMode
-import nz.kaimahi.bridge.DriverRouter
-import nz.kaimahi.bridge.NetworkInfo
 import nz.kaimahi.bridge.RestGeminiCore
-import nz.kaimahi.bridge.storage.SecurePrefs
-import nz.kaimahi.localdriver.Gemma4LocalCore
 import nz.kaimahi.ui.KaimahiTheme
 
 class MainActivity : ComponentActivity() {
@@ -43,40 +38,12 @@ class MainActivity : ComponentActivity() {
             KaimahiTheme(darkTheme = darkTheme) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     val appContext = LocalContext.current.applicationContext
-
-                    // Two driver instances + a SAFETY_FIRST router that picks
-                    // between them per turn. RestGeminiCore is also the
-                    // settings/persistence/workspace backend; Gemma4LocalCore
-                    // is the on-device Rust driver (no-op when libgemma4.so
-                    // isn't packaged in this build).
-                    val core = remember {
-                        val rest = RestGeminiCore(appContext)
-                        val authService = nz.kaimahi.app.ui.login.GeminiCliAuthService(appContext)
-                        rest.onTokenRefreshRequested = refresh@{
-                            val saved = rest.persistedOAuthTokens() ?: return@refresh null
-                            val refreshed = authService.refresh(saved) ?: return@refresh null
-                            SecurePrefs(appContext).oauthTokens = refreshed
-                            refreshed
-                        }
-                        rest
-                    }
-                    val local = remember { Gemma4LocalCore() }
-                    val prefs = remember { SecurePrefs(appContext) }
-                    val router = remember {
-                        DriverRouter(
-                            local = local,
-                            remote = core,
-                            mode = { DriverMode.parse(prefs.driverMode) },
-                            connectivity = { NetworkInfo.isOnline(appContext) },
-                            isLocalReady = { local.isReady() },
-                        )
-                    }
-
+                    val core = remember { RestGeminiCore(appContext) }
                     val factory = remember {
                         object : ViewModelProvider.Factory {
                             @Suppress("UNCHECKED_CAST")
                             override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                                ChatViewModel(core, messaging = router) as T
+                                ChatViewModel(core) as T
                         }
                     }
                     val vm: ChatViewModel = viewModel(factory = factory)

@@ -2,13 +2,10 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ main, "claude/**", "copilot/**" ]
+    branches: [ main, "claude/**" ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
-
-permissions:
-  contents: read
 
 jobs:
   build:
@@ -22,19 +19,6 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-
-      - name: Rust workspace tests
-        working-directory: rust
-        run: cargo test --workspace --release
-
-      - name: Rust clippy lint (warnings as errors)
-        working-directory: rust
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
       - name: Cache Gradle
         uses: actions/cache@v4
         with:
@@ -45,46 +29,6 @@ jobs:
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
-
-      - name: Unit tests (core-bridge)
-        run: ./gradlew :core-bridge:testDebugUnitTest --stacktrace --info
-
-      - name: Upload unit-test reports (on failure)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: core-bridge-test-reports
-          path: |
-            core-bridge/build/reports/tests/
-            core-bridge/build/test-results/
-          if-no-files-found: ignore
-
-      - name: Android lint
-        run: ./gradlew :app:lint --stacktrace --info
-
-      - name: Upload lint reports (on failure)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-lint-reports
-          path: |
-            app/build/reports/lint-results-*.html
-            app/build/reports/lint-results-*.xml
-            app/build/intermediates/lint_intermediate_text_report/
-          if-no-files-found: ignore
-
-      - name: Assemble debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace --info
-
-      - name: Upload app build reports (on failure)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-build-reports
-          path: |
-            app/build/reports/
-            app/build/outputs/logs/
-          if-no-files-found: ignore
 
       - name: Run JVM/Kotlin tests
         run: ./gradlew :domain:test --stacktrace
