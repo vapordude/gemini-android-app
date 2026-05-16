@@ -6,7 +6,24 @@
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack_Compose-2024.06-4285F4.svg?logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
 [![Android API 26+](https://img.shields.io/badge/API-26%2B-3DDC84.svg?logo=android&logoColor=white)](https://developer.android.com/)
 
-> 🇬🇧 English · [🇫🇷 Version française](fr/README.md)
+> 🇳🇿 Te Reo Māori + English · [🇫🇷 Version française](fr/README.md)
+
+> **Kupu whakamāori / Translator's note** — He whakamāoritanga tuatahi
+> tēnei. Ehara au i te kaikōrero matatau o te reo Māori; mā te hunga
+> matatau e whakatika ngā hapa. He pai te whakapā mai mā te
+> [Pull Request](https://github.com/vapordude/gemini-android-app/pulls).
+> _This is a first-pass translation. I am not a fluent te reo Māori
+> speaker; corrections from fluent speakers are welcome via PR._
+
+---
+
+**Kaimahi** he pūnaha tuhi-waehere ā-pūkoro mō Android. E rua ngā tauira
+reo nui e mahi tahi ana — kotahi i runga i te taputapu (ā-taputapu),
+tētahi atu i te kapua (ā-kapua). Ka pānui, ka tuhi, ka whakatika
+pūkete tēnei kaimahi; ka rere i ngā tono pūoho (shell); ka waihanga i
+ngā āhua; ka pupuri i te maharatanga mai i tētahi wā ki tētahi atu.
+Kotahi te aronga: ko Kotlin + Jetpack Compose i te taha-kaiwhakamahi,
+ko Rust hou-hangaia kei raro. Kāore he wharangi inference o waho.
 
 **Kaimahi** (*Te Reo Māori for "worker"*) is a pocket coding workstation
 for Android. Local on-device LLM + cloud LLM running side by side under
@@ -29,7 +46,18 @@ from-scratch Rust runtime — no third-party inference libraries.
 - API failures (cloud or tool) flow back to the agent as structured
   error events so it can adapt mid-turn.
 
-## 🎯 What you can actually do with it
+## 🎯 What you can actually do with it · *Ngā mahi tūturu*
+
+Ka taea e te tauira te whakarerekē i tō kaupapa — ehara i te
+whakaahua noa. Ka huaki i ngā pūkete o tō wāhi mahi (mā te SAF, mā te
+kōpaki ā-rohe rānei), ka whakatika tika, ka whakaatu i te
+rerekētanga. Ka tukua kotahi tau, ka huri rānei i te aunoa-whakaae kia
+mahi haere ai te tauira.
+
+The model can modify your project, not just describe one. It opens
+files in your workspace (SAF or local folder), edits them literally,
+and shows you a diff. You approve once — or flip auto-approve and let
+it iterate on its own.
 
 - **Ask the model to modify a project, not just describe one.** It opens
   files in your workspace (SAF or local folder), edits them literally,
@@ -77,7 +105,17 @@ from-scratch Rust runtime — no third-party inference libraries.
   share sheet — send the full conversation (text, code blocks, tables,
   image references) to any app.
 
-## ✨ Feature breakdown
+## ✨ Feature breakdown · *Ngā āhuatanga matua*
+
+E rua ngā ara reo-whakaheke mō te kōrero ā-kapua: te API Gemini
+tūmatanui, me te API Code Assist (mā te `gemini-cli`). Ka mahia te
+inference ā-taputapu mā `libkaimahi_native.so`, kua hangaia mai i te
+takiwā Rust o roto (`native/`).
+
+Two streaming transports cover cloud chat: the public Gemini API and
+the Code Assist API (via `gemini-cli` credentials). On-device inference
+runs through `libkaimahi_native.so`, built from the Rust workspace
+(`native/`).
 
 - **Two streaming transports for cloud chat:**
   - **Public Gemini API** (`generativelanguage.googleapis.com`) when
@@ -120,7 +158,16 @@ from-scratch Rust runtime — no third-party inference libraries.
 - **Diff viewer** in the tool-result bubble for `edit_file`.
 - **Two languages**: EN / FR interface, full parity.
 
-## 🛠 Prerequisites
+## 🛠 Prerequisites · *Ngā mea me whai i mua*
+
+Hei whakamahi i te ara kapua, me whai i tētahi pūkenga Google — mā
+Play Services, mā `gemini-cli` rānei. Hei whakamahi i te ara
+ā-taputapu anake, kāore he take pūkenga Google; mēnā ka hiahia koe ki
+te tukutuku pūoho, me whakauru a Termux.
+
+Cloud chat needs one Google credential path — either Play Services or
+`gemini-cli`. Local-only mode needs no Google account at all. Termux is
+required if you want shell tool calls.
 
 - **Android 8.0+** (API 26+).
 - For cloud chat — **one of**:
@@ -143,15 +190,20 @@ To build from source:
   rebuilds. The CI workflow at `.github/workflows/native.yml` shows the
   exact incantation.
 
-## 🚀 Installation
+## 🚀 Installation · *Te whakatū*
 
-### Option 1: pre-built APK
+E rua ngā ara whakatū: tikina mai te APK kua oti te hanga, hangaia
+rānei mai i te puna.
+
+Two install paths: download the prebuilt APK, or build from source.
+
+### Option 1: pre-built APK · *Te APK kua oti te hanga*
 
 Download the latest APK from the
 [Releases page](https://github.com/vapordude/gemini-android-app/releases).
 Both debug-signed and release-signed APKs are published on each tag.
 
-### Option 2: build from source
+### Option 2: build from source · *Hangaia mai i te puna*
 
 ```bash
 git clone https://github.com/vapordude/gemini-android-app
@@ -160,7 +212,15 @@ cd gemini-android-app
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## 💻 First-run setup
+## 💻 First-run setup · *Te whakaritenga tuatahi*
+
+Kōwhiria tētahi o ngā ara takiuru i te mata tuatahi. Mēnā kua oti i a
+koe te `gemini-cli`, kōwhiria "Load from Termux ~/.gemini"; mēnā kāore
+he pūkenga Google, kōwhiria te ara ā-taputapu anake.
+
+Pick a login path on first launch. If you've already run `gemini-cli`,
+pick "Load from Termux ~/.gemini"; if you have no Google credentials at
+all, pick local-only mode.
 
 1. **Login screen — pick a path**:
    - *Load from Termux ~/.gemini* — recommended if you've already used
@@ -189,11 +249,15 @@ adb install app/build/outputs/apk/debug/app-debug.apk
    files. Once selected, the next cold start skips the login screen and
    comes up in local-agent mode.
 
-## 🧱 Architecture
+## 🧱 Architecture · *Te hanga*
 
-Multi-module Gradle project. Existing cloud-Gemini path stays untouched;
-new modules add on-device inference, an agent loop, emdash management,
-and a local OpenAPI server.
+He kaupapa Gradle maha-momo. Ka noho tonu te ara Gemini ā-kapua o
+mua; kua tāpiri he momo hou — te inference ā-taputapu, te koromeke
+māngai, te whakahaere emdash, me te tūmau OpenAPI ā-rohe.
+
+Multi-module Gradle project. The existing cloud-Gemini path stays
+untouched; new modules add on-device inference, an agent loop, emdash
+management, and a local OpenAPI server.
 
 | Module | Role |
 | --- | --- |
@@ -224,9 +288,15 @@ side dequantizes weights from GGUF and runs the Gemma forward pass.
 No DI framework, no Room. `SharedPreferences` + JSON files under
 `filesDir`.
 
-## ⚠️ Known gaps
+## ⚠️ Known gaps · *Ngā āputa kua mōhio kē*
 
-Honest about where the current build is wobbly:
+E pono ana mātou mō ngā wāhi kāore anō kia oti. Ko te āputa nui rawa
+ko te whakawā parity i te ara Gemma 4 — kua oti te porotiti, engari
+kāore anō kia whakatauritea ki te tauira HuggingFace o waho.
+
+We're honest about where the build is still wobbly. The biggest gap is
+end-to-end parity verification on the Gemma 4 forward pass — ported,
+unit-tested, but not yet compared against a HuggingFace reference.
 
 - **Gemma 4 forward-pass parity is unverified end-to-end.** The math
   is a line-by-line port of `llama.cpp/src/models/gemma4.cpp` (every
@@ -275,7 +345,7 @@ Honest about where the current build is wobbly:
 If you want to help close any of these, the relevant entry points are
 called out in `docs/PORTING.md` and `docs/SCAFFOLDING.md`.
 
-### On-device runtime principles
+### On-device runtime principles · *Ngā mātāpono ā-taputapu*
 
 - **No external libs where possible.** The tensor core is hand-rolled.
 - **Content-neutral.** Weights are opaque; architecture comes from
@@ -287,9 +357,13 @@ called out in `docs/PORTING.md` and `docs/SCAFFOLDING.md`.
   architectures slot in without core changes. NPU/GPU acceleration
   plugs in via the `Delegate` trait. See [`docs/PORTING.md`](docs/PORTING.md).
 
-## ⚙️ Advanced configuration
+## ⚙️ Advanced configuration · *Whirihora matatau*
 
-### Auto-compression
+### Auto-compression · *Whakapiri aunoa*
+
+Ka whakaaturia e te tauira te tatauranga kupu-hua i tēnā, i tēnā
+whakautu. Inā nui ake i te paepae (70% te paerewa), ka whakarāpopotohia
+te kōrero ki te wāhanga hou i te paparua.
 
 The model reports `usageMetadata.totalTokenCount` on every response.
 Once `total / inputTokenLimit` crosses the threshold (default **70 %**),
@@ -299,7 +373,7 @@ a non-blocking banner signals the operation.
 Tune the threshold in **Settings → Auto-compression** (50 % → 95 %) or
 disable it entirely.
 
-### Image generation
+### Image generation · *Te waihanga āhua*
 
 - **Imagen** (`imagen-3.0-generate-002` by default, picker in
   Settings → Model) — called via the `generate_image` function tool
@@ -314,14 +388,14 @@ Both image paths require billing on the Google Cloud project linked to
 your API key — the Gemini free tier has a quota of **0** for these
 models.
 
-### Background shell commands
+### Background shell commands · *Ngā tono pūoho ā-muri*
 
 `run_shell_command` accepts a `background: true` flag so the model can
 start long-running processes (web servers, file watchers, training
 loops) without Termux's 12-second IPC timeout killing them. Output
 lands in `$HOME/.gemini-bg/run-<id>.log`, tailable on demand.
 
-## 🧪 Gemini compatibility
+## 🧪 Gemini compatibility · *Te hototahitanga Gemini*
 
 Tested with:
 
@@ -334,7 +408,12 @@ picker but don't support function calling — they'll work for pure chat
 but the tool stack won't be available. On-device Gemma 4 (E2B / E4B
 GGUFs) is the only locally-runnable family right now; see "Known gaps".
 
-## 🔌 Local API (OpenAPI)
+## 🔌 Local API (OpenAPI) · *Te API ā-rohe*
+
+Ka whakaputa te rorohiko Rust i te kirimana OpenAPI 3.1 i runga i
+`127.0.0.1`. Kotahi te kirimana ([`native/openapi.yaml`](native/openapi.yaml)),
+e rua ngā kaiwhakatutuki — te JNI mō Android, me te tūmau HTTP/1.1
+motuhake.
 
 The Rust runtime exposes a single OpenAPI 3.1 contract
 ([`native/openapi.yaml`](native/openapi.yaml)) served on `127.0.0.1`:
@@ -354,9 +433,15 @@ The Rust runtime exposes a single OpenAPI 3.1 contract
 
 Full surface guide: [`docs/API.md`](docs/API.md).
 
-## 🤝 Contributing
+## 🤝 Contributing · *Te takoha mai*
 
-Contributions welcome:
+He pai te whakapā mai. Whakawehe i tētahi peka, tuhia ō panonitanga,
+pana mai. Tirohia te [`CONTRIBUTING.md`](CONTRIBUTING.md) mō ngā tikanga
+hāpaitia me whai.
+
+Contributions welcome. Fork a branch, commit your changes, push.
+[`CONTRIBUTING.md`](CONTRIBUTING.md) has the five load-bearing
+contracts.
 
 1. **Fork** the project.
 2. Create a branch: `git checkout -b feature/my-feature`.
@@ -364,7 +449,7 @@ Contributions welcome:
 4. Push: `git push origin feature/my-feature`.
 5. Open a Pull Request.
 
-### Dev setup
+### Dev setup · *Te whakaritenga mō te whakawhanake*
 
 - **Language**: Kotlin 1.9.24, target JDK 17.
 - **UI**: Compose BOM 2024.06.00 + Material 3.
@@ -377,12 +462,12 @@ Useful commands:
 ./gradlew :core-bridge:test         # unit tests
 ```
 
-## 📄 License
+## 📄 License · *Te raihana*
 
 Distributed under the **Apache 2.0** license. See [`LICENSE`](LICENSE)
 for details.
 
-## 📚 Documentation
+## 📚 Documentation · *Ngā tuhinga*
 
 | File | What's in it |
 | --- | --- |
@@ -402,7 +487,13 @@ for details.
 | [`native/README.md`](native/README.md) | Rust workspace crate map + OpenAPI tags. |
 | [`native/openapi.yaml`](native/openapi.yaml) | Source-of-truth API contract. |
 
-## 🛡️ Privacy
+## 🛡️ Privacy · *Te tūmataiti*
+
+**Kāore a Kaimahi e tango i ngā PII. Ehara mai i ngā kaiwhakahaere,
+ehara mai i ngā kaimahi tahi, ehara mai i tētahi atu.** Ka taea te
+inference ā-tapa me te kore PII. Tirohia [`PRIVACY.md`](PRIVACY.md) mō
+ngā mātāpono e whā e mau ana te waehere nei, ngā kāwai puta e toru e
+whakaaetia ana, me ngā ture mā te kaiwhakapō kia mau tonu ai te ingoa.
 
 **Kaimahi never extracts PII. Not from operators, not from collaborators,
 not from anyone.** Edge inference works without it. See
@@ -410,7 +501,10 @@ not from anyone.** Edge inference works without it. See
 holds, the three categories of outbound traffic that are allowed, and
 the rules a forker has to keep to be allowed to keep the name.
 
-## 🪶 Mihi (acknowledgements)
+## 🪶 Mihi (acknowledgements) · *He mihi*
+
+E tū ana a Kaimahi i runga i ngā pakihiwi o ētahi atu. Tirohia
+[`MIHI.md`](MIHI.md) mō te mihi katoa; he poto:
 
 Kaimahi stands on shoulders. See [`MIHI.md`](MIHI.md) for the full
 acknowledgement; in short:
