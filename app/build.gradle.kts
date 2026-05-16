@@ -19,9 +19,8 @@ android {
             useSupportLibrary = true
         }
 
-        // AppAuth's library merge requires this placeholder even when we use a
-        // loopback redirect (http://127.0.0.1:PORT/oauth2callback). The custom
-        // scheme acts as a fallback only.
+        // AppAuth's library merge requires this placeholder; our OAuth redirect
+        // URI uses this custom scheme (com.google.gemini.android:/oauth2redirect).
         manifestPlaceholders += mapOf("appAuthRedirectScheme" to "com.google.gemini.android")
     }
 

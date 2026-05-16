@@ -33,11 +33,9 @@
         </activity>
 
         <!--
-            AppAuth redirect handler. The primary OAuth flow uses a loopback
-            redirect (http://127.0.0.1:8085/oauth2callback) so this filter is
-            a fallback for the custom-scheme path documented in the gemini-cli
-            mobile loopback note. AppAuth requires the activity declaration
-            even when only loopback is used.
+            AppAuth redirect handler for OAuth browser callbacks. The app uses a
+            custom-scheme redirect URI (com.google.gemini.android:/oauth2redirect)
+            so Chrome returns control directly here after consent.
         -->
         <activity
             android:name="net.openid.appauth.RedirectUriReceiverActivity"
