@@ -119,7 +119,19 @@ private fun KaimahiApp(
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     var destination by remember { mutableStateOf(KaimahiDestination.Chat) }
     var activeProjectName by remember { mutableStateOf<String?>(null) }
+    var activePinnedScreenId by remember { mutableStateOf<String?>(null) }
     var projectsRefreshTrigger by remember { mutableStateOf(0) }
+    var pinnedRefreshTrigger by remember { mutableStateOf(0) }
+    val pinnedScreens by produceState(
+        initialValue = emptyList<nz.kaimahi.app.ui.drawer.PinnedScreen>(),
+        pinnedRefreshTrigger,
+    ) {
+        value = withContext(Dispatchers.IO) {
+            core.screenRegistry.list().map { s ->
+                nz.kaimahi.app.ui.drawer.PinnedScreen(id = s.id, title = s.title)
+            }
+        }
+    }
     val projects by produceState(initialValue = emptyList<DrawerProject>(), projectsRefreshTrigger) {
         value = withContext(Dispatchers.IO) {
             val now = System.currentTimeMillis()
@@ -178,11 +190,23 @@ private fun KaimahiApp(
                     vm.deleteChat(p.name); refreshProjects()
                     if (activeProjectName == p.name) activeProjectName = null
                 },
+                pinnedScreens = pinnedScreens,
+                activePinnedScreenId = activePinnedScreenId,
+                onPinnedScreenSelected = { ps ->
+                    activePinnedScreenId = ps.id
+                    destination = KaimahiDestination.DynamicScreen
+                    scope.launch { drawerState.close() }
+                },
                 activeModelLabel = if (vm.preselectedLocalModelPath() != null) "local" else "cloud",
             )
         },
     ) {
-        val openDrawer: () -> Unit = { scope.launch { drawerState.open() } }
+        val openDrawer: () -> Unit = {
+            // Bump the pinned-screens refresh so agent-added screens
+            // appear without an app restart.
+            pinnedRefreshTrigger++
+            scope.launch { drawerState.open() }
+        }
         when (destination) {
             KaimahiDestination.Chat -> ChatScreen(
                 viewModel = vm,
@@ -251,6 +275,18 @@ private fun KaimahiApp(
             KaimahiDestination.About -> AboutScreen(
                 onBack = { destination = KaimahiDestination.Chat },
             )
+            KaimahiDestination.DynamicScreen -> {
+                val id = activePinnedScreenId
+                if (id == null) {
+                    destination = KaimahiDestination.Chat
+                } else {
+                    nz.kaimahi.app.ui.dynamic.runtime.DynamicScreenHost(
+                        screenId = id,
+                        registry = core.screenRegistry,
+                        onDrawerOpen = openDrawer,
+                    )
+                }
+            }
         }
     }
 
