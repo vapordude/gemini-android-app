@@ -24,6 +24,8 @@ data class GenerateRequest(
     val maxNewTokens: Int = 256,
     val temperature: Float = 0.7f,
     val topP: Float = 0.95f,
+    val topK: Int = 40,
+    val seed: Long = 0L,
     val stop: List<String> = emptyList(),
 )
 

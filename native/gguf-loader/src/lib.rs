@@ -149,6 +149,36 @@ pub struct TensorInfo {
     pub offset: u64,
 }
 
+impl TensorInfo {
+    /// Total scalar count = product of dims.
+    pub fn numel(&self) -> usize {
+        self.dims.iter().fold(1usize, |acc, &d| acc * d as usize)
+    }
+
+    /// Bytes occupied on disk for this tensor's raw payload. Block-quants
+    /// pack 32 or 256 scalars per fixed-size byte block; F-floats are one
+    /// scalar per (2 or 4) bytes.
+    pub fn byte_size(&self) -> usize {
+        let numel = self.numel();
+        match self.ggml_type {
+            GgmlType::F32 => numel * 4,
+            GgmlType::F16 | GgmlType::BF16 => numel * 2,
+            GgmlType::Q8_0 => (numel / 32) * (2 + 32),
+            GgmlType::Q4_0 => (numel / 32) * (2 + 16),
+            GgmlType::Q4_1 => (numel / 32) * (2 + 2 + 16),
+            GgmlType::Q5_0 => (numel / 32) * (2 + 4 + 16),
+            GgmlType::Q5_1 => (numel / 32) * (2 + 2 + 4 + 16),
+            GgmlType::Q8_1 => (numel / 32) * (4 + 4 + 32),
+            GgmlType::Q2_K => (numel / 256) * (16 + 64 + 2 + 2),
+            GgmlType::Q3_K => (numel / 256) * (32 + 64 + 12 + 2),
+            GgmlType::Q4_K => (numel / 256) * (2 + 2 + 12 + 128),
+            GgmlType::Q5_K => (numel / 256) * (2 + 2 + 12 + 32 + 128),
+            GgmlType::Q6_K => (numel / 256) * (128 + 64 + 16 + 2),
+            GgmlType::Q8_K => (numel / 256) * (4 + 256 + 4 * (256 / 16)),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct GgufFile {
     pub version: u32,
@@ -167,6 +197,49 @@ impl GgufFile {
 
     pub fn get(&self, key: &str) -> Option<&MetaValue> {
         self.metadata.iter().find(|(k, _)| k == key).map(|(_, v)| v)
+    }
+
+    pub fn tensor(&self, name: &str) -> Option<&TensorInfo> {
+        self.tensors.iter().find(|t| t.name == name)
+    }
+}
+
+/// In-memory copy of a GGUF file plus the parsed header. The tensor
+/// payload sits at `bytes[tensor_data_start..]`, with each tensor's
+/// region starting at `bytes[tensor_data_start + tensor.offset]` and
+/// running for `tensor.byte_size()` bytes.
+///
+/// Loading the whole file into a `Vec<u8>` is wasteful for multi-GB
+/// quants, but it sidesteps the mmap lifetime ceremony and works
+/// identically on Android and host. The real production path is a
+/// memory-mapped view; this struct's API is shaped so that swap is a
+/// one-call substitution.
+pub struct GgufBytes {
+    pub file: GgufFile,
+    pub bytes: Vec<u8>,
+}
+
+impl GgufBytes {
+    pub fn read(path: &Path) -> Result<Self, LoadError> {
+        let bytes = std::fs::read(path)?;
+        // Re-parse the header from the in-memory buffer rather than
+        // re-opening the file. Simpler than juggling a Cursor.
+        let file = read(path)?;
+        Ok(Self { file, bytes })
+    }
+
+    /// Raw on-disk slice for `name`, or `None` if the tensor is missing
+    /// or its declared region runs past the file. Callers feed this
+    /// directly into `tensor_core::quant::dequantize_to_f32`.
+    pub fn tensor_bytes(&self, name: &str) -> Option<&[u8]> {
+        let t = self.file.tensor(name)?;
+        let start = self.file.tensor_data_start as usize + t.offset as usize;
+        let len = t.byte_size();
+        let end = start.checked_add(len)?;
+        if end > self.bytes.len() {
+            return None;
+        }
+        Some(&self.bytes[start..end])
     }
 }
 

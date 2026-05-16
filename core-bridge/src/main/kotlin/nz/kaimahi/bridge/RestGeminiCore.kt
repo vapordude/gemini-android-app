@@ -126,6 +126,17 @@ class RestGeminiCore(
     fun persistedAccessToken(): String? = prefs.accessToken
     fun hasPersistedSession(): Boolean = !prefs.apiKey.isNullOrBlank() || !prefs.accessToken.isNullOrBlank()
 
+    /**
+     * Mark the core as "local-only ready" so [sendMessage] refuses cloud
+     * calls cleanly when there's no auth. Doesn't touch persisted state;
+     * sign-in from the side menu still works.
+     */
+    fun markLocalOnly() {
+        // Nothing to persist — the in-memory absence of apiKey/accessToken
+        // is the signal. We just want a hook the ViewModel can call so the
+        // intent is explicit and future-proofed.
+    }
+
     private val _events = MutableSharedFlow<GeminiEvent>(
         replay = 0,
         extraBufferCapacity = 64,

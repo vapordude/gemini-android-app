@@ -217,6 +217,30 @@ class ChatViewModel(
 
     fun hasPersistedSession(): Boolean = core.hasPersistedSession()
 
+    /**
+     * Path of a GGUF the user has previously imported and chosen as the
+     * default local model. Used by MainActivity to skip the login screen
+     * on cold start when local-only mode is viable.
+     */
+    fun preselectedLocalModelPath(): String? = core.selectedLocalModelPath()
+
+    /**
+     * Skip cloud auth entirely. The chat screen comes up immediately in
+     * local-agent mode; if [path] is non-null, also pin it as the
+     * selected local model. Used by both the "Skip — local model only"
+     * button on the login screen and the auto-bring-up path that fires
+     * when a local model was already picked.
+     */
+    fun enterLocalOnlyMode(path: String?) {
+        if (!path.isNullOrBlank()) {
+            core.setSelectedLocalModelPath(path)
+            _selectedLocalModelPath.value = path
+        }
+        core.markLocalOnly()
+        _inferenceMode.value = InferenceMode.LOCAL_AGENT
+        _isReady.value = true
+    }
+
     fun tryAutoLogin(context: android.content.Context) {
         val savedApi = core.persistedApiKey()
         val savedToken = core.persistedAccessToken()
