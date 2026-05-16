@@ -19,154 +19,155 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// ─── Kaimahi tokens ────────────────────────────────────────────────────
+// ─── Kaimahi tokens — Cathedral palette ────────────────────────────────
 // Mirror of docs/STYLES.md and docs/BRAND.md. Keep all three in sync.
 //
-// Design language: dark-first, grounded, sovereign. Three material
-// references — pounamu (greenstone), kowhai (native flower), kauri
-// (timber). No Google blue. Brand gradient is reserved for hero +
-// learning moments; UI chrome uses neutral grades only.
+// Design language: dark-first, sovereign, mathematical. Three references —
+// whero (crimson), kōura (gold), pō (night). Kaimahi sits in the
+// Cathedral AI / Scarlet Sovereign Systems family; the palette is shared
+// across Crimson, Scarlet, Lux, and the Pātaka Whero / Takurua Whero Iho
+// sibling sites. The legacy pounamu / kowhai / kauri palette was retired
+// when Kaimahi joined the family.
 
-// Dark surfaces (deep, slightly teal-tinted neutrals — workshop at night).
-private val Bg         = Color(0xFF0E1416)
-private val Surface1   = Color(0xFF1A2226)
-private val Surface2   = Color(0xFF232E33)
-private val Surface3   = Color(0xFF2C383D)
+// Dark surfaces (deep, neutral-warm blacks — cathedral at night).
+private val Bg         = Color(0xFF0A0A0A)
+private val Surface1   = Color(0xFF111111)
+private val Surface2   = Color(0xFF161616)
+private val Surface3   = Color(0xFF1E1E1E)
 
 // Lines.
-private val Line       = Color(0xFF243035)
-private val LineStrong = Color(0xFF34434A)
+private val Line       = Color(0xFF222222)
+private val LineStrong = Color(0xFF2F2F2F)
 
 // Text.
-private val TextStrong = Color(0xFFF2F5F5)
-private val Text       = Color(0xFFDDE5E6)
-private val TextSec    = Color(0xFFA8B5B7)
-private val TextMuted  = Color(0xFF6F7D80)
-private val TextDis    = Color(0xFF4A5559)
+private val TextStrong = Color(0xFFF4ECE4)
+private val Text       = Color(0xFFE0E0E0)
+private val TextSec    = Color(0xFFB0ADA6)
+private val TextMuted  = Color(0xFF7A7770)
+private val TextDis    = Color(0xFF484440)
 
 // Chip / interactive surface.
-private val Chip       = Color(0xFF1F2A2E)
+private val Chip       = Color(0xFF1A1A1A)
 
-// Brand — pounamu (greenstone), the interactive primary.
-private val Pounamu        = Color(0xFF4FA3A3)
-private val PounamuOn      = Color(0xFF042525)
-private val PounamuMuted   = Color(0xFF1A4747)
-private val PounamuMutedOn = Color(0xFFB8E3E3)
+// Brand — whero (crimson), the interactive primary.
+private val Whero          = Color(0xFFC1272D)
+private val WheroOn        = Color(0xFFFFFFFF)
+private val WheroMuted     = Color(0xFF3A1212)
+private val WheroMutedOn   = Color(0xFFF4ECE4)
 
-// Secondary — kowhai (yellow flower), signal / learning.
-private val Kowhai         = Color(0xFFE8C75F)
-private val KowhaiOn       = Color(0xFF2B2407)
-private val KowhaiMuted    = Color(0xFF4A3E1A)
-private val KowhaiMutedOn  = Color(0xFFF4E1A2)
+// Secondary — kōura (gold), signal / learning.
+private val Koura          = Color(0xFFD8A857)
+private val KouraOn        = Color(0xFF2B2107)
+private val KouraMuted     = Color(0xFF3A2D14)
+private val KouraMutedOn   = Color(0xFFF4DFA8)
 
-// Tertiary — kauri (warm timber), agent-acting accent.
-private val Kauri          = Color(0xFFBD7B5C)
-private val KauriOn        = Color(0xFF301607)
-private val KauriMuted     = Color(0xFF4A2D1C)
-private val KauriMutedOn   = Color(0xFFE7C2AC)
+// Tertiary — ember (warm orange between whero and kōura), agent-acting accent.
+private val Ember          = Color(0xFFD97742)
+private val EmberOn        = Color(0xFF2F1107)
+private val EmberMuted     = Color(0xFF3F1E10)
+private val EmberMutedOn   = Color(0xFFF3CBAF)
 
 // Semantic states.
-private val StateSuccess   = Color(0xFF7BC18D) // ngahere — forest
-private val StateWarn      = Color(0xFFE0B25B) // muted kowhai
-private val StateDanger    = Color(0xFFE07A6B) // warm coral, not pure red
+private val StateSuccess   = Color(0xFF6B8E5E) // kauri-green, used sparingly
+private val StateWarn      = Color(0xFFD8A857) // kōura
+private val StateDanger    = Color(0xFFC1272D) // whero proper
 
 /**
- * Kaimahi brand gradient. Pounamu → ngahere → kowhai → kauri. Used for
- * the hero, the streaming/loading indicator, and the memory-folded
- * "learning" halo. NEVER as UI chrome.
+ * Kaimahi brand gradient. Whero → ember → kōura. Used for the hero, the
+ * streaming indicator, and the memory-folded "learning" halo. NEVER as
+ * UI chrome.
  */
 val KaimahiBrandGradient: Brush = Brush.linearGradient(
-    0.00f to Pounamu,
-    0.40f to StateSuccess,
-    0.75f to Kowhai,
-    1.00f to Kauri,
+    0.00f to Whero,
+    0.55f to Ember,
+    1.00f to Koura,
 )
 
-/** Ambient "workshop at night" glow — used behind hero + empty states. */
+/** Ambient "cathedral at night" radial glow — used behind hero + empty states. */
 val KaimahiDuskGradient: Brush = Brush.radialGradient(
-    0.0f to Pounamu.copy(alpha = 0.18f),
-    0.5f to Kauri.copy(alpha = 0.06f),
+    0.0f to Whero.copy(alpha = 0.15f),
+    0.5f to Ember.copy(alpha = 0.05f),
     1.0f to Color.Transparent,
 )
 
 /** Soft halo behind agentic-memory affordances ("I learned this"). */
 val KaimahiLearningHalo: Brush = Brush.radialGradient(
-    0.0f to Kowhai.copy(alpha = 0.22f),
-    0.6f to Kowhai.copy(alpha = 0.06f),
+    0.0f to Koura.copy(alpha = 0.22f),
+    0.6f to Koura.copy(alpha = 0.06f),
     1.0f to Color.Transparent,
 )
 
-// Light mirror — pounamu darkened for contrast, neutrals inverted.
-private val BgLight         = Color(0xFFFAFBFB)
-private val Surface1Light   = Color(0xFFF1F4F4)
-private val Surface2Light   = Color(0xFFE6EBEB)
-private val Surface3Light   = Color(0xFFD8E0E0)
-private val LineLight       = Color(0xFFE0E5E5)
-private val LineStrongLight = Color(0xFFC9D2D2)
-private val TextStrongLight = Color(0xFF0A1213)
-private val TextLight       = Color(0xFF1F2A2B)
-private val TextSecLight    = Color(0xFF3D4A4B)
-private val TextMutedLight  = Color(0xFF6B7878)
-private val ChipLight       = Color(0xFFEAF0F0)
-private val PounamuLight    = Color(0xFF2E7878)
+// Light mirror — whero darkened for contrast, neutrals inverted.
+private val BgLight         = Color(0xFFFAF7F2)
+private val Surface1Light   = Color(0xFFF3EFE8)
+private val Surface2Light   = Color(0xFFE9E4DC)
+private val Surface3Light   = Color(0xFFDCD6CC)
+private val LineLight       = Color(0xFFD6D0C5)
+private val LineStrongLight = Color(0xFFBDB6A8)
+private val TextStrongLight = Color(0xFF18160F)
+private val TextLight       = Color(0xFF1F1C14)
+private val TextSecLight    = Color(0xFF4B463B)
+private val TextMutedLight  = Color(0xFF6E6960)
+private val ChipLight       = Color(0xFFEEE8DC)
+private val WheroLight      = Color(0xFF8F2520)
 
 private val DarkColors = darkColorScheme(
-    primary              = Pounamu,
-    onPrimary            = PounamuOn,
-    primaryContainer     = PounamuMuted,
-    onPrimaryContainer   = PounamuMutedOn,
-    secondary            = Kowhai,
-    onSecondary          = KowhaiOn,
-    secondaryContainer   = KowhaiMuted,
-    onSecondaryContainer = KowhaiMutedOn,
-    tertiary             = Kauri,
-    onTertiary           = KauriOn,
-    tertiaryContainer    = KauriMuted,
-    onTertiaryContainer  = KauriMutedOn,
+    primary              = Whero,
+    onPrimary            = WheroOn,
+    primaryContainer     = WheroMuted,
+    onPrimaryContainer   = WheroMutedOn,
+    secondary            = Koura,
+    onSecondary          = KouraOn,
+    secondaryContainer   = KouraMuted,
+    onSecondaryContainer = KouraMutedOn,
+    tertiary             = Ember,
+    onTertiary           = EmberOn,
+    tertiaryContainer    = EmberMuted,
+    onTertiaryContainer  = EmberMutedOn,
     background           = Bg,
     onBackground         = Text,
     surface              = Surface1,
     onSurface            = Text,
     surfaceVariant       = Surface2,
     onSurfaceVariant     = TextSec,
-    surfaceTint          = Pounamu,
+    surfaceTint          = Whero,
     inverseSurface       = Text,
     inverseOnSurface     = Bg,
     outline              = LineStrong,
     outlineVariant       = Line,
     scrim                = Color.Black,
     error                = StateDanger,
-    onError              = Color(0xFF3B0F0A),
-    errorContainer       = Color(0xFF4F1B14),
-    onErrorContainer     = Color(0xFFFFD9D2),
+    onError              = Color.White,
+    errorContainer       = WheroMuted,
+    onErrorContainer     = WheroMutedOn,
 )
 
 private val LightColors = lightColorScheme(
-    primary              = PounamuLight,
+    primary              = WheroLight,
     onPrimary            = Color.White,
-    primaryContainer     = Color(0xFFCBE8E8),
-    onPrimaryContainer   = Color(0xFF052525),
+    primaryContainer     = Color(0xFFF5E0DE),
+    onPrimaryContainer   = Color(0xFF3A0F0C),
     secondary            = Color(0xFF8A6A0F),
     onSecondary          = Color.White,
     secondaryContainer   = Color(0xFFFAEAB2),
-    onSecondaryContainer = Color(0xFF2B2407),
-    tertiary             = Color(0xFF8A4D2E),
+    onSecondaryContainer = Color(0xFF2B2107),
+    tertiary             = Color(0xFFA84D20),
     onTertiary           = Color.White,
     tertiaryContainer    = Color(0xFFF6D7C5),
-    onTertiaryContainer  = Color(0xFF3A1B07),
+    onTertiaryContainer  = Color(0xFF3F1107),
     background           = BgLight,
     onBackground         = TextLight,
     surface              = Surface1Light,
     onSurface            = TextLight,
     surfaceVariant       = Surface2Light,
     onSurfaceVariant     = TextSecLight,
-    surfaceTint          = PounamuLight,
+    surfaceTint          = WheroLight,
     outline              = LineStrongLight,
     outlineVariant       = LineLight,
-    error                = Color(0xFFB4271C),
+    error                = WheroLight,
     onError              = Color.White,
-    errorContainer       = Color(0xFFFCD9D2),
-    onErrorContainer     = Color(0xFF420B07),
+    errorContainer       = Color(0xFFF5E0DE),
+    onErrorContainer     = Color(0xFF3A0F0C),
 )
 
 // Radii — pill (28) for primary CTAs + chat composer, 16 for cards.
@@ -284,11 +285,11 @@ data class KaimahiExtendedColors(
     val success: Color,
     val warn: Color,
     val danger: Color,
-    /** Pounamu — the brand primary, exposed for direct draw (e.g. logo). */
+    /** Whero (crimson) — the brand primary, exposed for direct draw (e.g. logo). */
     val brand: Color,
-    /** Kowhai — signal accent for learning + memory affordances. */
+    /** Kōura (gold) — signal accent for learning + memory affordances. */
     val signal: Color,
-    /** Kauri — agent-acting accent. */
+    /** Ember — agent-acting accent, between whero and kōura. */
     val act: Color,
     /** Linear gradient: hero, streaming, full-bleed onboarding moments. */
     val brandGradient: Brush,
@@ -306,9 +307,9 @@ private val DarkExtended = KaimahiExtendedColors(
     success = StateSuccess,
     warn = StateWarn,
     danger = StateDanger,
-    brand = Pounamu,
-    signal = Kowhai,
-    act = Kauri,
+    brand = Whero,
+    signal = Koura,
+    act = Ember,
     brandGradient = KaimahiBrandGradient,
     duskGradient = KaimahiDuskGradient,
     learningHalo = KaimahiLearningHalo,
@@ -318,13 +319,13 @@ private val LightExtended = KaimahiExtendedColors(
     surfaceMax = Surface3Light,
     textStrong = TextStrongLight,
     muted = TextMutedLight,
-    disabled = Color(0xFF9AA8A8),
-    success = Color(0xFF2E7D43),
+    disabled = Color(0xFFB0ADA6),
+    success = Color(0xFF496B3D),
     warn = Color(0xFF8A6A0F),
-    danger = Color(0xFFB4271C),
-    brand = PounamuLight,
+    danger = WheroLight,
+    brand = WheroLight,
     signal = Color(0xFF8A6A0F),
-    act = Color(0xFF8A4D2E),
+    act = Color(0xFFA84D20),
     brandGradient = KaimahiBrandGradient,
     duskGradient = KaimahiDuskGradient,
     learningHalo = KaimahiLearningHalo,
