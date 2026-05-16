@@ -61,6 +61,7 @@ dependencies {
     implementation(project(":core-bridge"))
     implementation(project(":domain"))
     implementation(project(":ui-components"))
+    implementation(project(":native-driver"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
