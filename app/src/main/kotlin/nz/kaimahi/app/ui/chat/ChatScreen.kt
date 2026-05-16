@@ -113,7 +113,9 @@ import kotlinx.coroutines.launch
 fun ChatScreen(
     viewModel: ChatViewModel,
     themeMode: ThemeMode = ThemeMode.SYSTEM,
-    onThemeChange: (ThemeMode) -> Unit = {}
+    onThemeChange: (ThemeMode) -> Unit = {},
+    onOpenLocalTraces: () -> Unit = {},
+    onOpenDeploymentConfigs: () -> Unit = {}
 ) {
     var textState by remember { mutableStateOf("") }
     var showActions by remember { mutableStateOf(false) }
@@ -190,7 +192,9 @@ fun ChatScreen(
                     onClose = { scope.launch { drawerState.close() } },
                     onOpenSettings = { showSettings = true },
                     onOpenChats = { showChats = true },
-                    onOpenAbout = { showAbout = true }
+                    onOpenAbout = { showAbout = true },
+                    onOpenLocalTraces = onOpenLocalTraces,
+                    onOpenDeploymentConfigs = onOpenDeploymentConfigs
                 )
             }
         }
