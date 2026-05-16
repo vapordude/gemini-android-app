@@ -340,15 +340,105 @@ object KaimahiTokens {
         get() = LocalKaimahiColors.current
 }
 
+/**
+ * Theme variants beyond the standard dark/light pair. Mirrors the
+ * design system in `docs/design/kaimahi.css`:
+ *
+ *   - [Cathedral]   — the default dark on neutral blacks (#0A0A0A …).
+ *   - [PatakaWarm]  — warm paper for cosy / fireside scenes.
+ *   - [PoStealth]   — true OLED black, dim foreground; nightstand
+ *                     reading without burning eyes.
+ *
+ * Selecting a variant always wins over `darkTheme` (the variant is
+ * the more specific signal).
+ */
+enum class KaimahiThemeVariant {
+    /** Default. Black + crimson + gold on neutral blacks. */
+    Cathedral,
+    /** Warm paper. Whero darkened to read on cream; kōura antique. */
+    PatakaWarm,
+    /** OLED black. Dim foreground, no full white. Nightstand reading. */
+    PoStealth,
+}
+
+// ── Stealth variant tokens — OLED black, dim foreground ────────────────
+private val StealthBg          = Color(0xFF000000)
+private val StealthSurface1    = Color(0xFF050505)
+private val StealthSurface2    = Color(0xFF0A0A0A)
+private val StealthSurface3    = Color(0xFF101010)
+private val StealthLine        = Color(0xFF141414)
+private val StealthLineStrong  = Color(0xFF1C1C1C)
+private val StealthTextStrong  = Color(0xFFB0A8A0)
+private val StealthText        = Color(0xFF807872)
+private val StealthTextSec     = Color(0xFF5A554F)
+private val StealthTextMuted   = Color(0xFF3C3833)
+private val StealthTextDis     = Color(0xFF232020)
+// Brand stays whero/kōura/ember; only the surfaces + text shift.
+
+private val StealthColors = darkColorScheme(
+    primary              = Whero,
+    onPrimary            = WheroOn,
+    primaryContainer     = WheroMuted,
+    onPrimaryContainer   = WheroMutedOn,
+    secondary            = Koura,
+    onSecondary          = KouraOn,
+    secondaryContainer   = KouraMuted,
+    onSecondaryContainer = KouraMutedOn,
+    tertiary             = Ember,
+    onTertiary           = EmberOn,
+    tertiaryContainer    = EmberMuted,
+    onTertiaryContainer  = EmberMutedOn,
+    background           = StealthBg,
+    onBackground         = StealthText,
+    surface              = StealthSurface1,
+    onSurface            = StealthText,
+    surfaceVariant       = StealthSurface2,
+    onSurfaceVariant     = StealthTextSec,
+    surfaceTint          = Whero,
+    inverseSurface       = StealthText,
+    inverseOnSurface     = StealthBg,
+    outline              = StealthLineStrong,
+    outlineVariant       = StealthLine,
+    scrim                = Color.Black,
+    error                = StateDanger,
+    onError              = Color.White,
+    errorContainer       = WheroMuted,
+    onErrorContainer     = WheroMutedOn,
+)
+
+private val StealthExtended = KaimahiExtendedColors(
+    surfaceMax = StealthSurface3,
+    textStrong = StealthTextStrong,
+    muted = StealthTextMuted,
+    disabled = StealthTextDis,
+    success = StateSuccess,
+    warn = StateWarn,
+    danger = StateDanger,
+    brand = Whero,
+    signal = Koura,
+    act = Ember,
+    brandGradient = KaimahiBrandGradient,
+    duskGradient = KaimahiDuskGradient,
+    learningHalo = KaimahiLearningHalo,
+)
+
 @Composable
 fun KaimahiTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    variant: KaimahiThemeVariant = KaimahiThemeVariant.Cathedral,
     content: @Composable () -> Unit,
 ) {
-    val extended = if (darkTheme) DarkExtended else LightExtended
+    val (scheme, extended) = when (variant) {
+        KaimahiThemeVariant.PoStealth -> StealthColors to StealthExtended
+        KaimahiThemeVariant.PatakaWarm -> LightColors to LightExtended
+        KaimahiThemeVariant.Cathedral -> {
+            if (darkTheme) DarkColors to DarkExtended
+            else LightColors to LightExtended
+        }
+    }
     CompositionLocalProvider(LocalKaimahiColors provides extended) {
         MaterialTheme(
-            colorScheme = if (darkTheme) DarkColors else LightColors,
+            colorScheme = scheme,
             typography = KaimahiTypography,
             shapes = KaimahiShapes,
             content = content,
