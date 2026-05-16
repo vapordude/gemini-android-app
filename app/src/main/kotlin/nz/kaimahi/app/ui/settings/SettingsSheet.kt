@@ -360,7 +360,7 @@ fun SettingsSheet(
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = {
-                        modelFileLauncher.launch(arrayOf("application/octet-stream", "*/*"))
+                        modelFileLauncher.launch(arrayOf("*/*"))
                     }) {
                         Icon(Icons.Default.Folder, contentDescription = null)
                         Spacer(Modifier.width(6.dp))

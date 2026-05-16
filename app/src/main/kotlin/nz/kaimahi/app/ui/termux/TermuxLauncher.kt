@@ -10,15 +10,7 @@ import android.widget.Toast
 
 private const val TERMUX_PACKAGE = "com.termux"
 private const val TERMUX_INSTALL_URL = "https://f-droid.org/packages/com.termux/"
-private const val GEMINI_CLI_LOGIN_COMMAND =
-    """
-    if command -v gemini >/dev/null 2>&1; then
-      gemini login
-    else
-      echo 'Gemini CLI not found.'
-      echo 'Install Node + Gemini CLI, then run: gemini login'
-    fi
-    """.trimIndent()
+private const val GEMINI_CLI_LOGIN_COMMAND = "gemini login"
 
 fun startGeminiCliLoginInTermux(context: Context) {
     copyToClipboard(context, "gemini-cli-login", GEMINI_CLI_LOGIN_COMMAND)
