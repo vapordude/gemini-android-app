@@ -291,7 +291,10 @@ class ChatViewModel(
             _isLoading.value = true
             try {
                 val inference = runCatching { localInference }.getOrElse {
-                    throw IllegalStateException("Local runtime unavailable", it)
+                    throw IllegalStateException(
+                        "Failed to initialize local inference engine. Check native runtime libraries.",
+                        it
+                    )
                 }
                 _messages.add(
                     GeminiMessage(
@@ -304,7 +307,9 @@ class ChatViewModel(
                 )
                 if (localLoadedModelPath != modelPath) {
                     val loaded = inference.loadModel(modelPath).getOrElse {
-                        throw IllegalStateException("Could not load local model: ${it.message ?: "unknown error"}")
+                        throw IllegalStateException(
+                            "Could not load local model: ${it.message ?: "unexpected runtime error"}"
+                        )
                     }
                     localLoadedModelPath = loaded.path
                 }
