@@ -1,4 +1,4 @@
-package com.gemini.bridge.patchkernel
+package nz.kaimahi.bridge.patchkernel
 
 import org.junit.After
 import org.junit.Assert.assertEquals

@@ -1,11 +1,11 @@
-package com.gemini.localdriver
+package nz.kaimahi.localdriver
 
-import com.gemini.domain.GeminiCore
-import com.gemini.domain.GeminiEvent
-import com.gemini.domain.GeminiMessage
-import com.gemini.domain.GeminiResult
-import com.gemini.domain.ToolDecision
-import com.gemini.domain.ToolSpec
+import nz.kaimahi.domain.GeminiCore
+import nz.kaimahi.domain.GeminiEvent
+import nz.kaimahi.domain.GeminiMessage
+import nz.kaimahi.domain.GeminiResult
+import nz.kaimahi.domain.ToolDecision
+import nz.kaimahi.domain.ToolSpec
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow

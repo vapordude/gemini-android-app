@@ -13,10 +13,13 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "GeminiAndroid"
+rootProject.name = "Kaimahi"
 
 include(":app")
 include(":core-bridge")
 include(":domain")
 include(":ui-components")
 include(":native-driver")
+include(":inference-bridge")
+include(":agent-bridge")
+include(":emdash-bridge")

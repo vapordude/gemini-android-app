@@ -1,0 +1,686 @@
+openapi: 3.1.0
+info:
+  title: Kaimahi local runtime API
+  version: 0.2.0
+  description: |
+    Unified local-only contract for on-device inference, agent loop,
+    emdash management, and OpenAI-compatible chat/embeddings/image/video
+    endpoints. Implemented in two ways that share this contract:
+
+      1. JNI surface consumed by the Android app (`Java_com_gemini_*`).
+      2. Hand-rolled HTTP/1.1 server bound to 127.0.0.1 on a kernel-
+         assigned port. No third-party HTTP framework. Daily devops
+         tools (CLIs, editor plugins, scripts) consume the same
+         endpoints the app does.
+
+    Operating principles (locked in):
+      - **Local only.** All traffic stays on the loopback interface.
+      - **Non-extractive.** No telemetry, no analytics, no remote logs.
+      - **Architecture-agnostic.** Models are opaque; their architecture
+        is read from GGUF metadata. No allowlist, no fingerprinting.
+      - **Stable semver.** Daily-driver friendly.
+      - **OpenAI-compat as a convenience surface.** Existing tooling
+        that speaks the OpenAI API can target this server unchanged.
+        Our native /info, /generate, /agent/run surface stays the
+        canonical form for new clients.
+
+servers:
+  - url: http://127.0.0.1:{port}
+    variables:
+      port:
+        default: "0"
+        description: |
+          Kernel-assigned port. Discover via the JNI bridge on Android
+          or via the `PORT` file the server writes to its data dir on
+          desktop (`$XDG_RUNTIME_DIR/kaimahi-runtime/port`).
+
+paths:
+  # ─── Native surface ────────────────────────────────────────────────
+  /info:
+    get:
+      summary: Runtime info — ISA, threads, loaded arch, version, delegate.
+      tags: [native]
+      responses:
+        "200":
+          description: Runtime info
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimeInfo" }
+
+  /models:
+    get:
+      summary: List models available under filesDir/models/.
+      tags: [native]
+      responses:
+        "200":
+          description: Available models
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ModelHandle" }
+
+  /models/load:
+    post:
+      summary: Load weights from a local file path. Architecture from metadata.
+      tags: [native]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path: { type: string }
+      responses:
+        "200":
+          description: Loaded model handle
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelHandle" }
+
+  /generate:
+    post:
+      summary: Stream tokens from the loaded model. Non-extractive — no input is persisted.
+      tags: [native]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GenerateRequest" }
+      responses:
+        "200":
+          description: NDJSON token stream
+          content:
+            application/x-ndjson:
+              schema: { $ref: "#/components/schemas/Token" }
+
+  /agent/run:
+    post:
+      summary: Run the agent loop. Streams events.
+      tags: [native]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentRunRequest" }
+      responses:
+        "200":
+          description: NDJSON agent event stream
+          content:
+            application/x-ndjson:
+              schema: { $ref: "#/components/schemas/AgentEvent" }
+
+  /agent/decision:
+    post:
+      summary: Resolve a pending tool-call approval (required for destructive tools).
+      tags: [native]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [call_id, decision]
+              properties:
+                call_id: { type: string }
+                decision: { type: string, enum: [approve, reject, always_approve] }
+                reason: { type: string }
+      responses:
+        "204": { description: Decision accepted }
+
+  # ─── OpenAI-compat surface ─────────────────────────────────────────
+  # Provided so existing tooling (OpenAI Python SDK, LangChain, llm,
+  # Cursor / Continue.dev / etc.) can target this server unchanged.
+  # Set `OPENAI_BASE_URL=http://127.0.0.1:<port>/v1` and any API key
+  # (ignored locally). Streaming uses SSE per the OpenAI spec.
+
+  /v1/models:
+    get:
+      summary: OpenAI-compatible model list.
+      tags: [openai-compat]
+      responses:
+        "200":
+          description: List of loadable models
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OpenAIModelList" }
+
+  /v1/chat/completions:
+    post:
+      summary: OpenAI-compatible chat completions (SSE streaming when `stream=true`).
+      tags: [openai-compat]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OpenAIChatRequest" }
+      responses:
+        "200":
+          description: Chat completion (single or stream).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OpenAIChatResponse" }
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE frames of `data: {...}\n\n` per OpenAI streaming spec.
+
+  /v1/completions:
+    post:
+      summary: OpenAI-compatible legacy text completions.
+      tags: [openai-compat]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model, prompt]
+              properties:
+                model: { type: string }
+                prompt: { type: string }
+                max_tokens: { type: integer, default: 256 }
+                temperature: { type: number, default: 0.7 }
+                stream: { type: boolean, default: false }
+      responses:
+        "200": { description: Completion result }
+
+  /v1/embeddings:
+    post:
+      summary: OpenAI-compatible embeddings.
+      tags: [openai-compat]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model, input]
+              properties:
+                model: { type: string }
+                input:
+                  oneOf:
+                    - { type: string }
+                    - { type: array, items: { type: string } }
+      responses:
+        "200":
+          description: Embedding vectors
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  object: { type: string, const: list }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        object: { type: string, const: embedding }
+                        embedding: { type: array, items: { type: number } }
+                        index: { type: integer }
+
+  /v1/images/generations:
+    post:
+      summary: OpenAI-compatible image generation (Stable Diffusion class once arch/diffusion lands).
+      tags: [openai-compat]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model, prompt]
+              properties:
+                model: { type: string }
+                prompt: { type: string }
+                n: { type: integer, default: 1, minimum: 1, maximum: 8 }
+                size: { type: string, default: "1024x1024", description: WxH }
+                response_format: { type: string, enum: [b64_json, url], default: b64_json }
+                negative_prompt: { type: string }
+                seed: { type: integer }
+                steps: { type: integer, default: 28 }
+                guidance_scale: { type: number, default: 7.5 }
+      responses:
+        "200":
+          description: Generated images
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OpenAIImageResponse" }
+        "501":
+          description: No diffusion arch loaded.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { error: { type: string } }
+
+  /v1/images/edits:
+    post:
+      summary: OpenAI-compatible image edit (inpaint/img2img). Multipart upload.
+      tags: [openai-compat]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [image, prompt]
+              properties:
+                image: { type: string, format: binary }
+                mask: { type: string, format: binary }
+                prompt: { type: string }
+                model: { type: string }
+                n: { type: integer, default: 1 }
+                size: { type: string, default: "1024x1024" }
+      responses:
+        "200":
+          description: Edited images
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OpenAIImageResponse" }
+        "501": { description: Diffusion arch not loaded. }
+
+  /v1/videos/generations:
+    post:
+      summary: |
+        Video generation. Placeholder — the spec is stable so clients can
+        wire against it now; the runtime returns 501 until a video arch
+        ships. Shape mirrors the image-gen request plus duration/fps.
+      tags: [openai-compat]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model, prompt]
+              properties:
+                model: { type: string }
+                prompt: { type: string }
+                duration_s: { type: number, default: 4 }
+                fps: { type: integer, default: 24 }
+                size: { type: string, default: "768x432" }
+                seed: { type: integer }
+      responses:
+        "200": { description: Video assets (b64 or URLs). }
+        "501": { description: No video arch loaded. }
+
+  # ─── Health + readiness ────────────────────────────────────────────
+  /healthz:
+    get:
+      summary: Liveness probe. Returns 200 if the runtime process is up.
+      tags: [health]
+      responses:
+        "200":
+          description: Alive
+          content:
+            text/plain:
+              schema: { type: string, const: ok }
+
+  /readyz:
+    get:
+      summary: Readiness probe. Returns 200 if a model is loaded and ready to serve.
+      tags: [health]
+      responses:
+        "200":
+          description: Ready
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReadinessReport" }
+        "503":
+          description: Not ready
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReadinessReport" }
+
+  /metrics:
+    get:
+      summary: |
+        Prometheus-format text summary of in-memory counters. Local only.
+        Non-extractive — only typed counters (tokens/sec, kernel timings,
+        ABI tier, tool-call counts/latencies), never user input.
+      tags: [health]
+      responses:
+        "200":
+          description: Plain-text Prometheus exposition format.
+          content:
+            text/plain:
+              schema: { type: string }
+
+  # ─── Diagnostics (only present in `--features diag` builds) ────────
+  /diag/probes:
+    get:
+      summary: List active diagnostic probe sites (D1..D11). Only available in diag builds.
+      tags: [diagnostics]
+      responses:
+        "200":
+          description: Probe inventory
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ProbeSite" }
+        "404": { description: This build was not compiled with the `diag` feature. }
+
+  /diag/snapshot:
+    get:
+      summary: |
+        Dump a structured snapshot of the most recent probe events
+        captured in memory. Useful for `kubectl exec`-style local
+        forensics when output diverges from expectation.
+      tags: [diagnostics]
+      parameters:
+        - in: query
+          name: tail
+          schema: { type: integer, default: 200, minimum: 1, maximum: 5000 }
+      responses:
+        "200":
+          description: Snapshot
+          content:
+            application/x-ndjson:
+              schema: { $ref: "#/components/schemas/ProbeEvent" }
+        "404": { description: This build was not compiled with the `diag` feature. }
+
+  # ─── Local traces (always-on, non-extractive) ──────────────────────
+  /traces:
+    get:
+      summary: Read the local trace JSONL. App-execution telemetry only.
+      tags: [telemetry]
+      parameters:
+        - in: query
+          name: tail
+          schema: { type: integer, minimum: 1, maximum: 10000, default: 200 }
+      responses:
+        "200":
+          description: Recent trace events
+          content:
+            application/x-ndjson:
+              schema: { $ref: "#/components/schemas/TraceEvent" }
+
+  # ─── Emdash management (proxy to remote /_emdash/api/*) ────────────
+  /emdash/profiles:
+    get:
+      summary: List configured remote emdash instances.
+      tags: [emdash]
+      responses:
+        "200":
+          description: Profiles (URL + label; never returns auth).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/EmdashProfile" }
+
+  /emdash/{profile}/collections:
+    get:
+      summary: Proxy to remote /_emdash/api/collections.
+      tags: [emdash]
+      parameters:
+        - in: path
+          name: profile
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Collections list
+          content:
+            application/json:
+              schema: { type: array, items: { type: object, additionalProperties: true } }
+
+  /emdash/{profile}/preview-diff:
+    post:
+      summary: Server-side dry-run; required before any destructive emdash mutation.
+      tags: [emdash]
+      parameters:
+        - in: path
+          name: profile
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Structured diff
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EmdashDiff" }
+
+components:
+  schemas:
+    RuntimeInfo:
+      type: object
+      required: [version, arch, isa, threads, model_loaded]
+      properties:
+        version: { type: string }
+        arch: { type: string, description: Detected CPU architecture (aarch64, x86_64). }
+        isa: { type: string, description: "ISA tier in use: scalar | neon-dotprod | neon-i8mm | avx2 | avx512" }
+        delegate:
+          type: string
+          description: "Active compute delegate: cpu | qnn | neural-engine | vulkan | opencl"
+          default: cpu
+        threads: { type: integer }
+        model_loaded:
+          oneOf:
+            - { type: "null" }
+            - { $ref: "#/components/schemas/ModelHandle" }
+
+    ModelHandle:
+      type: object
+      required: [id, path, arch_tag]
+      properties:
+        id: { type: string }
+        path: { type: string }
+        family:
+          type: string
+          enum: [lm, diffusion, video]
+          default: lm
+        arch_tag:
+          type: string
+          description: |
+            Architecture identifier read from weights metadata. Examples:
+            gemma4, llama3, sd1.5, sdxl, "custom:<your-arch>".
+        params:
+          type: object
+          properties:
+            vocab_size: { type: integer }
+            context_length: { type: integer }
+            quant_scheme: { type: string }
+
+    GenerateRequest:
+      type: object
+      required: [prompt]
+      properties:
+        prompt: { type: string }
+        max_new_tokens: { type: integer, default: 256 }
+        temperature: { type: number, default: 0.7 }
+        top_p: { type: number, default: 0.95 }
+        stop: { type: array, items: { type: string } }
+
+    Token:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string }
+        token_id: { type: integer }
+        logprob: { type: number }
+        done: { type: boolean, default: false }
+
+    AgentRunRequest:
+      type: object
+      required: [goal]
+      properties:
+        goal: { type: string }
+        attached_docs:
+          type: array
+          description: User-attached docs (local file paths via SAF). Kept in memory only.
+          items: { type: string }
+        max_iterations: { type: integer, default: 50 }
+        emdash_profile: { type: string, nullable: true }
+
+    AgentEvent:
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [thinking, tool_call_pending, tool_call_completed, message, done, error]
+        call_id: { type: string }
+        tool_name: { type: string }
+        text: { type: string }
+        ok: { type: boolean }
+
+    OpenAIModelList:
+      type: object
+      properties:
+        object: { type: string, const: list }
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              object: { type: string, const: model }
+              owned_by: { type: string }
+
+    OpenAIChatRequest:
+      type: object
+      required: [model, messages]
+      properties:
+        model: { type: string }
+        messages:
+          type: array
+          items:
+            type: object
+            required: [role, content]
+            properties:
+              role: { type: string, enum: [system, user, assistant, tool] }
+              content:
+                oneOf:
+                  - { type: string }
+                  - type: array
+                    items:
+                      type: object
+                      properties:
+                        type: { type: string, enum: [text, image_url] }
+                        text: { type: string }
+                        image_url:
+                          type: object
+                          properties: { url: { type: string } }
+        temperature: { type: number, default: 0.7 }
+        top_p: { type: number, default: 0.95 }
+        max_tokens: { type: integer }
+        stream: { type: boolean, default: false }
+        tools:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { type: string, const: function }
+              function:
+                type: object
+                properties:
+                  name: { type: string }
+                  description: { type: string }
+                  parameters: { type: object, additionalProperties: true }
+
+    OpenAIChatResponse:
+      type: object
+      properties:
+        id: { type: string }
+        object: { type: string, const: chat.completion }
+        created: { type: integer }
+        model: { type: string }
+        choices:
+          type: array
+          items:
+            type: object
+            properties:
+              index: { type: integer }
+              message:
+                type: object
+                properties:
+                  role: { type: string }
+                  content: { type: string }
+              finish_reason: { type: string, enum: [stop, length, tool_calls, content_filter] }
+
+    OpenAIImageResponse:
+      type: object
+      properties:
+        created: { type: integer }
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              b64_json: { type: string }
+              url: { type: string }
+              revised_prompt: { type: string }
+
+    ReadinessReport:
+      type: object
+      required: [ready, version]
+      properties:
+        ready: { type: boolean }
+        version: { type: string }
+        model_loaded: { type: boolean }
+        arch_tag: { type: string }
+        delegate: { type: string }
+        warmup_complete: { type: boolean }
+
+    ProbeSite:
+      type: object
+      properties:
+        id: { type: string, description: "D1..D11" }
+        path: { type: string }
+        purpose: { type: string }
+
+    ProbeEvent:
+      type: object
+      properties:
+        ts: { type: integer }
+        site: { type: string }
+        kind: { type: string }
+        payload: { type: object, additionalProperties: true }
+
+    EmdashProfile:
+      type: object
+      required: [name, base_url, env]
+      properties:
+        name: { type: string }
+        base_url: { type: string, format: uri }
+        env: { type: string, enum: [dev, staging, prod] }
+
+    EmdashDiff:
+      type: object
+      properties:
+        adds: { type: array, items: { type: object, additionalProperties: true } }
+        updates: { type: array, items: { type: object, additionalProperties: true } }
+        deletes: { type: array, items: { type: object, additionalProperties: true } }
+        warnings: { type: array, items: { type: string } }
+
+    TraceEvent:
+      type: object
+      required: [ts, kind]
+      properties:
+        ts: { type: string, format: date-time }
+        kind:
+          type: string
+          enum:
+            - model_loaded
+            - generate_started
+            - generate_finished
+            - agent_iteration
+            - tool_call_started
+            - tool_call_finished
+            - error
+        duration_ms: { type: integer }
+        tokens_per_sec: { type: number }
+        tool_name: { type: string }
+        ok: { type: boolean }
+        message: { type: string, description: Human-readable, non-PII. }

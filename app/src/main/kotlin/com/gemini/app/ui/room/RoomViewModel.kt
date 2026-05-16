@@ -1,17 +1,17 @@
-package com.gemini.app.ui.room
+package nz.kaimahi.app.ui.room
 
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.gemini.bridge.RestGeminiCore
-import com.gemini.bridge.persona.PersonaStore
-import com.gemini.bridge.room.ChatRoomEngine
-import com.gemini.domain.ChatRoom
-import com.gemini.domain.ChatRoomSeat
-import com.gemini.domain.GeminiCore
-import com.gemini.domain.Persona
-import com.gemini.domain.RoomMessage
-import com.gemini.domain.TurnPolicy
+import nz.kaimahi.bridge.RestGeminiCore
+import nz.kaimahi.bridge.persona.PersonaStore
+import nz.kaimahi.bridge.room.ChatRoomEngine
+import nz.kaimahi.domain.ChatRoom
+import nz.kaimahi.domain.ChatRoomSeat
+import nz.kaimahi.domain.GeminiCore
+import nz.kaimahi.domain.Persona
+import nz.kaimahi.domain.RoomMessage
+import nz.kaimahi.domain.TurnPolicy
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

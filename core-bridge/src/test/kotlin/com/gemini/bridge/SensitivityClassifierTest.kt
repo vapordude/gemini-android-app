@@ -1,6 +1,6 @@
-package com.gemini.bridge
+package nz.kaimahi.bridge
 
-import com.gemini.bridge.SensitivityClassifier.Category
+import nz.kaimahi.bridge.SensitivityClassifier.Category
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

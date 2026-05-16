@@ -13,4 +13,9 @@ kotlin {
 
 dependencies {
     implementation(libs.kotlinx.coroutines.core)
+    testImplementation(kotlin("test"))
+}
+
+tasks.withType<Test>().configureEach {
+    useJUnitPlatform()
 }

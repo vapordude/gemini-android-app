@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.gemini.bridge"
+    namespace = "nz.kaimahi.bridge"
     compileSdk = 34
 
     defaultConfig {

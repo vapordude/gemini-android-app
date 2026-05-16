@@ -1,94 +1,53 @@
-<h1>
-  <img src="../docs/logo_gemini.png" alt="" height="32" align="top" />
-  Code sur Android
-</h1>
-
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](../LICENSE)
-[![Kotlin](https://img.shields.io/badge/Kotlin-1.9.24-7F52FF.svg?logo=kotlin&logoColor=white)](https://kotlinlang.org/)
-[![Jetpack Compose](https://img.shields.io/badge/Jetpack_Compose-2024.06-4285F4.svg?logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
-[![Android API 26+](https://img.shields.io/badge/API-26%2B-3DDC84.svg?logo=android&logoColor=white)](https://developer.android.com/)
-[![Status](https://img.shields.io/badge/status-usable-brightgreen.svg)](#)
+# Kaimahi (FR)
 
 > 🇫🇷 Version française · [🇬🇧 English](../README.md)
 
-Un **client de coding Gemini natif pour Android** — pas un wrapper
-autour de l'app Google, pas un webview déguisé. Un vrai client qui
-transforme votre téléphone en poste de travail de poche : le modèle lit
-et écrit vos fichiers, exécute des commandes shell (compilation, tests,
-serveurs), génère des images, et garde le contexte sur des heures de
-conversation. Écrit en Kotlin + Jetpack Compose.
+**Kaimahi** (*Te Reo Māori pour « ouvrier »*) est un poste de travail
+de codage pour Android. Un agent local et un agent cloud travaillent
+côte à côte — pas l'un ou l'autre, les deux en même temps. Mémoire
+topologique persistante, surface OpenAPI sur 127.0.0.1, runtime Rust
+écrit de zéro. Pas de bibliothèque d'inférence tierce, pas de
+télémétrie distante, jamais d'extraction de données.
 
-<p align="center">
-  <img src="../docs/screenshot.jpg" alt="Chat en action : function calling + approbation d'outil" width="360" />
-</p>
+C'est un outil pour ceux qui veulent bricoler. La boucle d'agent, la
+mémoire, la capture d'entraînement, le runtime — chaque pièce est
+documentée et remplaçable.
 
-## 🎯 Ce que vous pouvez réellement faire avec
+## Points clés
 
-- **Demander au modèle de modifier un projet, pas juste de le
-  décrire.** Il ouvre les fichiers de votre workspace (SAF ou dossier
-  local), les édite littéralement, et affiche un diff. Vous approuvez
-  une fois — ou activez l'auto-approve et le laissez itérer tout seul.
-- **Exécuter des commandes shell depuis la conversation.** Le pont
-  Termux place le modèle dans le dossier de workspace : `python foo.py`,
-  `npm test`, `cargo build`, `pip install …`, `curl`, `git status`.
-  Les processus en arrière-plan (serveurs, watchers) continuent de
-  tourner quand le tour du modèle se termine.
-- **Générer des images inline.** À la fois **Imagen** (picker dédié
-  dans Settings → Model) et **Gemini 2.5 Flash Image** ("Nano Banana",
-  activé automatiquement quand vous le sélectionnez dans le dropdown
-  top-bar) sauvegardent leurs sorties en tant que vignettes dans la
-  bulle de conversation.
-- **Envoyer des images au modèle pour analyse.** Tapez sur l'icône
-  image, choisissez une photo de la galerie — elle est envoyée en
-  `inlineData` base64 au prochain tour. Le modèle peut faire de l'OCR,
-  décrire, ou raisonner sur l'image.
-- **Tenir sur des sessions longues.** L'app affiche l'usage tokens en
-  direct et auto-compresse la conversation dans un nouveau résumé dès
-  que la fenêtre de contexte se remplit, pour continuer à parler sans
-  erreur 400.
-- **Autosave à chaque tour.** Fermez l'app, revenez trois jours plus
-  tard, la conversation est exactement où vous l'aviez laissée.
-  Nommez et sauvegardez des snapshots depuis le drawer pour les
-  archiver.
-- **Exporter n'importe où.** Drawer → Export as Markdown ouvre le
-  sélecteur de partage Android — envoyez la conversation complète
-  (texte, blocs de code, tableaux, références d'images) vers n'importe
-  quelle app.
+- **Aucune extraction de données, jamais.** Voir
+  [`PRIVACY.md`](../PRIVACY.md) — les quatre invariants.
+- **Deux agents en parallèle.** Cloud + local authentifiés en même
+  temps ; la politique (`PreferFirst`, `RoundRobin`…) choisit par tour.
+  Les échecs API reviennent à l'agent sous forme d'événements
+  structurés pour qu'il s'adapte au lieu de boucler.
+- **Mémoire topologique et temporelle.** Les notes forment un DAG par
+  session avec des arêtes typées (`Follows`, `CausedBy`, `Contradicts`,
+  `Supersedes`, `Refines`, `References`), des fenêtres de validité et
+  un rappel pondéré par fraîcheur.
+- **Capture d'entraînement.** Quand les deux moteurs tournent, leurs
+  réponses peuvent être enregistrées localement comme corpus de
+  distillation pour affiner le modèle local. Activation explicite ;
+  rien ne quitte l'appareil sans export manuel.
+- **API locale OpenAPI 3.1.** Compatible OpenAI :
+  `OPENAI_BASE_URL=http://127.0.0.1:<port>/v1`.
+- **Runtime neutre.** L'architecture du modèle vient des métadonnées
+  GGUF ; pas de liste blanche, pas d'empreinte, pas de couche de refus.
 
-## ✨ Fonctionnalités en détail
+## Documentation principale
 
-- **Chat streaming** sur `generativelanguage.googleapis.com`. Clé API
-  chiffrée localement dans `EncryptedSharedPreferences`. Pas de serveur
-  intermédiaire.
-- **Function calling** avec 9 outils intégrés :
-  `read_file`, `write_file`, `edit_file`, `delete_file`,
-  `list_directory`, `glob_files`, `grep`, `run_shell_command`
-  (premier plan ou arrière-plan), `generate_image` (Imagen). Le modèle
-  décide quand les appeler.
-- **Sécurité sur les outils destructifs** : chaque `write_file` /
-  `edit_file` / `delete_file` / commande shell affiche un dialog
-  d'approbation avec les arguments et un diff (pour les édits) avant
-  de s'exécuter. Toggle « Auto-approve » en un tap pour les sessions
-  de confiance.
-- **Rendu Markdown riche** : titres, listes numérotées / à puces / à
-  cocher, code inline et blocs avec bouton copier, **gras**, *italique*,
-  tableaux GFM, citations, règles horizontales. Les URLs `https://…`
-  nues et les liens `[label](url)` sont cliquables et ouvrent le
-  navigateur.
-- **Pickers rapides en top bar** : tapez sur le nom du modèle pour en
-  changer sans ouvrir Settings. Tapez sur le nom du dossier workspace
-  pour « Open folder » (app Fichiers système) ou « Change folder »
-  (picker SAF).
-- **Entrée multimodale** : attachez une ou plusieurs images par tour,
-  les vignettes apparaissent dans la bulle utilisateur et persistent à
-  travers les reloads. Limite de 15 MB par image.
-- **Liste de modèles dynamique** : récupérée en live depuis
-  `/v1beta/models`, pas de catalogue figé. IDs de modèles personnalisés
-  acceptés dans Settings.
-- **Diff viewer** dans la bulle de résultat d'outil pour `edit_file`.
-- **Bilingue** : interface EN / FR, parité complète.
+| Fichier | Contenu |
+| --- | --- |
+| [`README.md`](../README.md) | Vue d'ensemble (anglais). |
+| [`PRIVACY.md`](../PRIVACY.md) | Engagement « ne jamais extraire ». |
+| [`MIHI.md`](../MIHI.md) | Remerciements aux projets sources. |
+| [`docs/AGENTIC.md`](../docs/AGENTIC.md) | Boucle d'agent, mémoire, capture. |
+| [`docs/API.md`](../docs/API.md) | Contrat OpenAPI local. |
+| [`docs/BRAND.md`](../docs/BRAND.md) | Identité visuelle (pounamu / kowhai / kauri). |
+| [`docs/PORTING.md`](../docs/PORTING.md) | Ajouter une architecture de modèle. |
+| [`docs/SCAFFOLDING.md`](../docs/SCAFFOLDING.md) | Étendre Kaimahi. |
 
-## 🛠 Prérequis
+## Licence
 
 - **Android 8.0+** (API 26+).
 - Une **clé API Gemini** (le free tier fonctionne pour le chat ; la
@@ -107,8 +66,11 @@ Pour compiler depuis les sources :
 ### Option 1 : APK pré-compilé
 
 Télécharger la dernière APK depuis la
-[page Releases](https://github.com/aciderix/gemini-android-app/releases).
-APKs debug-signé et release-signé publiés à chaque tag.
+[page Releases](https://github.com/vapordude/gemini-android-app/releases).
+Chaque tag publie `gemini-android-app-<tag>-debug.apk` et
+`gemini-android-app-<tag>-release.apk`. La variante release utilise le
+keystore de release configuré quand les secrets CI sont présents ; sinon
+elle retombe sur une signature debug pour rester installable.
 
 ### Option 2 : compiler depuis les sources
 
@@ -222,6 +184,9 @@ Commandes utiles :
 ./gradlew :core-bridge:test         # tests unitaires
 ```
 
+Les releases manuelles doivent passer par le workflow GitHub Actions
+**Release** avec un tag valide comme `v1.0.0`.
+
 ## 📄 Licence
 
 Distribué sous la licence **Apache 2.0**. Voir [`LICENSE`](../LICENSE)
@@ -234,4 +199,4 @@ pour les détails.
 - **Pont shell** : [Termux](https://termux.dev/) — merveille open-source.
 - **UI** : [Jetpack Compose](https://developer.android.com/jetpack/compose) + Material 3.
 
-Lien du projet : <https://github.com/aciderix/gemini-android-app>
+Lien du projet : <https://github.com/vapordude/gemini-android-app>

@@ -2,10 +2,13 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ main, "claude/**" ]
+    branches: [ main, "claude/**", "copilot/**" ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -56,6 +59,20 @@ jobs:
             core-bridge/build/test-results/
           if-no-files-found: ignore
 
+      - name: Android lint
+        run: ./gradlew :app:lint --stacktrace --info
+
+      - name: Upload lint reports (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-lint-reports
+          path: |
+            app/build/reports/lint-results-*.html
+            app/build/reports/lint-results-*.xml
+            app/build/intermediates/lint_intermediate_text_report/
+          if-no-files-found: ignore
+
       - name: Assemble debug APK
         run: ./gradlew :app:assembleDebug --stacktrace --info
 
@@ -68,6 +85,39 @@ jobs:
             app/build/reports/
             app/build/outputs/logs/
           if-no-files-found: ignore
+
+      - name: Run JVM/Kotlin tests
+        run: ./gradlew :domain:test --stacktrace
+
+      - name: Assemble debug APK
+        run: |
+          set -o pipefail
+          ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee gradle-debug.log
+          status=${PIPESTATUS[0]}
+          exit $status
+
+      - name: Surface gradle error on failure
+        if: failure()
+        run: |
+          if [ -f gradle-debug.log ]; then
+            echo "::group::Last 200 lines of gradle output"
+            tail -n 200 gradle-debug.log
+            echo "::endgroup::"
+            # Promote each meaningful error line to a GitHub annotation
+            grep -E "(e: |error: |FAILURE:|Execution failed|What went wrong|Caused by:|> Task .* FAILED)" gradle-debug.log | head -n 50 | while IFS= read -r line; do
+              # Strip ANSI color codes
+              clean=$(printf '%s' "$line" | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g')
+              echo "::error::${clean}"
+            done
+          fi
+
+      - name: Upload gradle log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-debug-log
+          path: gradle-debug.log
+          if-no-files-found: warn
 
       - name: Assemble release APK
         run: ./gradlew :app:assembleRelease --stacktrace
