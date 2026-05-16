@@ -65,7 +65,7 @@ fn take_session(handle: jlong) -> Option<Session> {
 /// `long initNative(String modelPath, byte[] config)` — returns a session
 /// handle, or 0 on failure.
 #[no_mangle]
-pub extern "C" fn Java_com_gemini_native_Gemma4Driver_initNative(
+pub extern "C" fn Java_com_gemini_localdriver_Gemma4LocalCore_initNative(
     env: *mut JNIEnv,
     _cls: jobject,
     model_path: jstring,
@@ -84,7 +84,7 @@ pub extern "C" fn Java_com_gemini_native_Gemma4Driver_initNative(
 /// `int sendMessageNative(long handle, byte[] msg, TokenCallback cb)` —
 /// returns 0 on success, non-zero on error. Tokens are emitted to `cb`.
 #[no_mangle]
-pub extern "C" fn Java_com_gemini_native_Gemma4Driver_sendMessageNative(
+pub extern "C" fn Java_com_gemini_localdriver_Gemma4LocalCore_sendMessageNative(
     _env: *mut JNIEnv,
     _cls: jobject,
     _handle: jlong,
@@ -98,7 +98,7 @@ pub extern "C" fn Java_com_gemini_native_Gemma4Driver_sendMessageNative(
 }
 
 #[no_mangle]
-pub extern "C" fn Java_com_gemini_native_Gemma4Driver_resetNative(
+pub extern "C" fn Java_com_gemini_localdriver_Gemma4LocalCore_resetNative(
     _env: *mut JNIEnv,
     _cls: jobject,
     _handle: jlong,
@@ -107,7 +107,7 @@ pub extern "C" fn Java_com_gemini_native_Gemma4Driver_resetNative(
 }
 
 #[no_mangle]
-pub extern "C" fn Java_com_gemini_native_Gemma4Driver_freeNative(
+pub extern "C" fn Java_com_gemini_localdriver_Gemma4LocalCore_freeNative(
     _env: *mut JNIEnv,
     _cls: jobject,
     handle: jlong,

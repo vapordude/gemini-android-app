@@ -1,4 +1,4 @@
-package com.gemini.native
+package com.gemini.localdriver
 
 import com.gemini.domain.GeminiCore
 import com.gemini.domain.GeminiEvent
