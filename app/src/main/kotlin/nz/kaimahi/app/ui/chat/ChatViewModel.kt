@@ -298,10 +298,18 @@ class ChatViewModel(
             if (!ok) _error.value = "Could not resume \"$name\""
         }
     }
-    /** Clear the UI message list. Underlying core state is reset on next send. */
+    /** Clear the UI message list and any transient turn state. Underlying core
+     *  state is reset on next send. Drops a stale pending tool-approval card,
+     *  in-flight thinking label, and pending attachments so the new chat
+     *  doesn't inherit ghosts from the previous turn. */
     fun startNewChat() {
+        sendJob?.cancel()
+        sendJob = null
         _messages.clear()
         _error.value = null
+        _pendingCall.value = null
+        _thinking.value = null
+        _pendingAttachments.value = emptyList()
     }
 
     fun sendMessage(text: String) {
@@ -760,7 +768,7 @@ fun ChatViewModel.exportAsMarkdown(): String {
     val ts = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US)
         .format(java.util.Date())
     val sb = StringBuilder()
-    sb.append("# Gemini conversation\n\n")
+    sb.append("# Kaimahi conversation\n\n")
     sb.append("_Model: ").append(model.value).append("_  \n")
     sb.append("_Exported: ").append(ts).append("_\n\n")
     messages.forEach { msg ->
@@ -769,7 +777,7 @@ fun ChatViewModel.exportAsMarkdown(): String {
                 sb.append("## User\n\n").append(msg.text.trim()).append("\n\n")
             }
             MessageRole.MODEL -> {
-                sb.append("## Gemini\n\n").append(msg.text.trim()).append("\n\n")
+                sb.append("## Kaimahi\n\n").append(msg.text.trim()).append("\n\n")
             }
             MessageRole.TOOL -> {
                 msg.toolCall?.let { call ->

@@ -348,8 +348,8 @@ fun SettingsSheet(
             SettingsAccordion(
                 title = "Local model (GGUF)",
                 icon = Icons.Default.Memory,
-                expanded = "Local model" in expanded,
-                onToggle = { toggle("Local model") }
+                expanded = "Local model (GGUF)" in expanded,
+                onToggle = { toggle("Local model (GGUF)") }
             ) {
                 Text(
                     "Import a GGUF model file from Android storage for local offline use.",
@@ -1239,7 +1239,7 @@ fun TermuxSetupDialog(
                     .fillMaxWidth()
             ) {
                 Text(
-                    "Gemini can run real shell commands (git, gradle, curl…) " +
+                    "Kaimahi can run real shell commands (git, gradle, curl…) " +
                         "through Termux. This is optional — skip if you only need " +
                         "chat and in-app file tools.",
                     style = MaterialTheme.typography.bodySmall,

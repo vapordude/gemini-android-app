@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Build
@@ -104,6 +105,9 @@ fun AppDrawer(
 
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         SectionLabel("Conversation")
+        DrawerItem(Icons.Default.Add, "New chat") {
+            onClose(); viewModel.startNewChat()
+        }
         DrawerItem(Icons.Default.ChatBubble, "Saved chats") {
             onClose(); onOpenChats()
         }
@@ -195,11 +199,13 @@ fun AboutDialog(viewModel: ChatViewModel, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-        title = { Text("Gemini for Android") },
+        title = { Text("Kaimahi") },
         text = {
             Column {
                 Text(
-                    "Native Android client for the Gemini function-calling API.",
+                    "Native Android client. Runs Gemma 4 on-device through the " +
+                        "Kaimahi runtime, with the Gemini function-calling API " +
+                        "available as a cloud fallback.",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(Modifier.height(8.dp))
@@ -236,7 +242,7 @@ private fun shareMarkdown(context: Context, markdown: String) {
     val intent = Intent(Intent.ACTION_SEND)
         .setType("text/markdown")
         .putExtra(Intent.EXTRA_TEXT, markdown)
-        .putExtra(Intent.EXTRA_SUBJECT, "Gemini conversation")
+        .putExtra(Intent.EXTRA_SUBJECT, "Kaimahi conversation")
     runCatching {
         context.startActivity(
             Intent.createChooser(intent, "Export conversation")

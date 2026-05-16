@@ -221,16 +221,23 @@ fun ChatScreen(
                                             selectedLocalModelPath
                                                 ?.substringAfterLast('/')
                                                 ?.takeIf { it.isNotBlank() }
-                                                ?: KaimahiBrand.ON_DEVICE_MODELS.first()
+                                                // No GGUF imported yet — surface that explicitly
+                                                // instead of silently labelling the bar with a
+                                                // canonical name the user hasn't actually picked.
+                                                ?: "No local model"
                                         InferenceMode.CLOUD_GEMINI -> model
                                     }
-                                    Text(
-                                        displayedModel,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        modifier = Modifier
-                                            .clickable { modelMenuOpen = true }
-                                            .padding(vertical = 2.dp, horizontal = 4.dp)
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.clickable { modelMenuOpen = true }
+                                    ) {
+                                        Text(
+                                            displayedModel,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            modifier = Modifier.padding(vertical = 2.dp, horizontal = 4.dp)
+                                        )
+                                        InferenceModeBadge(inferenceMode)
+                                    }
                                     DropdownMenu(
                                         expanded = modelMenuOpen,
                                         onDismissRequest = { modelMenuOpen = false }
@@ -269,7 +276,7 @@ fun ChatScreen(
                                                         viewModel.selectLocalModel(match.path)
                                                         viewModel.setInferenceMode(InferenceMode.LOCAL_AGENT)
                                                     } else {
-                                                        settingsInitialAccordion = "Local model"
+                                                        settingsInitialAccordion = "Local model (GGUF)"
                                                         showSettings = true
                                                     }
                                                 }
@@ -1015,6 +1022,15 @@ private fun ToolApprovalCard(
     onAlwaysApprove: () -> Unit,
     onReject: () -> Unit
 ) {
+    // Approving destructive tools blind is a foot-gun — silently
+    // truncating args at 200 chars hides the actual file path or
+    // command being run. Default to truncated for readability, but
+    // give the user an explicit toggle to see the full payload before
+    // they hit Approve. Key the state to the call name so a fresh
+    // approval always starts collapsed, even if the previous one was
+    // expanded when it resolved.
+    var argsExpanded by remember(name) { mutableStateOf(false) }
+    val anyTruncated = arguments.values.any { (it?.toString()?.length ?: 0) > 200 }
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -1043,12 +1059,29 @@ private fun ToolApprovalCard(
                 Spacer(Modifier.size(6.dp))
                 arguments.forEach { (k, v) ->
                     val str = v?.toString().orEmpty()
-                    val rendered = if (str.length > 200) str.substring(0, 200) + "…" else str
+                    val rendered = if (!argsExpanded && str.length > 200) {
+                        str.substring(0, 200) + "…"
+                    } else {
+                        str
+                    }
                     Text(
                         "$k: $rendered",
                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+                if (anyTruncated) {
+                    TextButton(
+                        onClick = { argsExpanded = !argsExpanded },
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                            horizontal = 4.dp, vertical = 0.dp
+                        )
+                    ) {
+                        Text(
+                            if (argsExpanded) "Show less" else "Show full args",
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
                 }
                 Spacer(Modifier.size(12.dp))
                 Row(
@@ -1318,6 +1351,39 @@ private fun openWorkspaceFolder(context: Context, workspaceUri: String?) {
                 Toast.LENGTH_SHORT
             ).show()
         }
+    }
+}
+
+/**
+ * Tiny "LOCAL" / "CLOUD" chip next to the model name. Tells the user
+ * at a glance whether their next message goes through the on-device
+ * runtime or out over the network — important for cost + privacy.
+ */
+@Composable
+private fun InferenceModeBadge(mode: InferenceMode) {
+    val (label, bg, fg) = when (mode) {
+        InferenceMode.LOCAL_AGENT -> Triple(
+            "LOCAL",
+            MaterialTheme.colorScheme.tertiaryContainer,
+            MaterialTheme.colorScheme.onTertiaryContainer,
+        )
+        InferenceMode.CLOUD_GEMINI -> Triple(
+            "CLOUD",
+            MaterialTheme.colorScheme.secondaryContainer,
+            MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+    }
+    Surface(
+        color = bg,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.padding(start = 4.dp)
+    ) {
+        Text(
+            label,
+            color = fg,
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+        )
     }
 }
 

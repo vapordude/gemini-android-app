@@ -101,7 +101,14 @@ private fun KaimahiApp(
     LaunchedEffect(Unit) {
         if (!isReady) {
             val localPath = vm.preselectedLocalModelPath()
-            if (!localPath.isNullOrBlank()) {
+            // Verify the GGUF file still exists on disk before flipping
+            // into local-only mode. Without this check, a user who
+            // imported a model in a previous version and then deleted
+            // the file (storage cleanup, OS-managed cache wipe) lands
+            // on the chat screen in LOCAL_AGENT with no usable model
+            // and no API key — first send fails ungracefully.
+            val localPathValid = localPath != null && java.io.File(localPath).isFile
+            if (localPathValid) {
                 vm.enterLocalOnlyMode(localPath)
             } else if (vm.hasPersistedSession()) {
                 vm.tryAutoLogin(context)
