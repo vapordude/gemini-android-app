@@ -1006,7 +1006,7 @@ private fun TermuxBody(viewModel: ChatViewModel) {
             testOutput = null
             scope.launch {
                 val out = runCatching { viewModel.testTermuxShell() }
-                    .getOrElse { it.message ?: "unknown error" }
+                    .getOrElse { it.message ?: "Failed to reach Termux shell" }
                 testOk = !out.startsWith("exit=")
                 testOutput = out
                 testing = false
@@ -1025,7 +1025,7 @@ private fun TermuxBody(viewModel: ChatViewModel) {
             authOutput = null
             scope.launch {
                 authOutput = runCatching { viewModel.checkGeminiCliAuthInTermux() }
-                    .getOrElse { it.message ?: "unknown error" }
+                    .getOrElse { it.message ?: "Failed to check Gemini CLI auth status" }
                 checkingAuth = false
             }
         }

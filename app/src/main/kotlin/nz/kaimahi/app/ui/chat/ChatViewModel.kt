@@ -290,6 +290,9 @@ class ChatViewModel(
         sendJob = viewModelScope.launch {
             _isLoading.value = true
             try {
+                val inference = runCatching { localInference }.getOrElse {
+                    throw IllegalStateException("Local runtime unavailable", it)
+                }
                 _messages.add(
                     GeminiMessage(
                         id = "local-user-${System.nanoTime()}",
@@ -300,9 +303,8 @@ class ChatViewModel(
                     )
                 )
                 if (localLoadedModelPath != modelPath) {
-                    val loaded = localInference.loadModel(modelPath).getOrElse {
-                        _error.value = "Could not load local model: ${it.message ?: "unknown error"}"
-                        return@launch
+                    val loaded = inference.loadModel(modelPath).getOrElse {
+                        throw IllegalStateException("Could not load local model: ${it.message ?: "unknown error"}")
                     }
                     localLoadedModelPath = loaded.path
                 }
@@ -317,7 +319,7 @@ class ChatViewModel(
                     )
                 )
                 var output = ""
-                localInference.generate(GenerateRequest(prompt = text)).collect { token ->
+                inference.generate(GenerateRequest(prompt = text)).collect { token ->
                     if (token.text.isEmpty()) return@collect
                     output += token.text
                     val idx = _messages.indexOfLast { it.id == modelMessageId }
@@ -326,7 +328,7 @@ class ChatViewModel(
                 if (output.isBlank()) {
                     val idx = _messages.indexOfLast { it.id == modelMessageId }
                     if (idx >= 0) _messages.removeAt(idx)
-                    _error.value = "Local runtime returned no tokens. Build native runtime or choose another model."
+                    _error.value = "No response generated. Verify the model is compatible or select a different GGUF model."
                 }
             } catch (_: CancellationException) {
                 // Cancelled by user — silent.
