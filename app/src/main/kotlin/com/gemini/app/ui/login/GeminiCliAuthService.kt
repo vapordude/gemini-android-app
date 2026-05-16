@@ -22,8 +22,8 @@ import kotlin.coroutines.resume
  * byte-for-byte. The installed-app client id and secret come from
  * `packages/core/src/code_assist/oauth2.ts` in
  * https://github.com/google-gemini/gemini-cli; scopes are cloud-platform,
- * userinfo.email, userinfo.profile; the redirect is the loopback IP literal
- * `http://127.0.0.1:{port}/oauth2callback`.
+ * userinfo.email, userinfo.profile; on Android we complete the flow through an
+ * AppAuth custom-scheme callback (`com.google.gemini.android:/oauth2redirect`).
  *
  * The resulting tokens unlock the Code Assist API
  * (`cloudcode-pa.googleapis.com`), which grants free-tier 2.5-Pro on personal
@@ -55,17 +55,16 @@ class GeminiCliAuthService(private val context: Context) {
      * `ActivityResultContracts.StartActivityForResult` and feeds the result
      * back into [handleAuthResponse].
      *
-     * Uses a loopback `redirect_uri` (`http://127.0.0.1:{port}/oauth2callback`)
-     * — identical to gemini-cli's desktop flow. On Android, AppAuth runs an
-     * in-process loopback server while Custom Tabs (Chrome) drives the browser
-     * portion of the flow.
+     * Uses AppAuth's custom-scheme `redirect_uri`
+     * (`com.google.gemini.android:/oauth2redirect`) so Chrome returns control
+     * directly to the app after consent.
      */
     fun buildAuthIntent(): Intent {
         val request = AuthorizationRequest.Builder(
             authConfig,
             CLIENT_ID,
             ResponseTypeValues.CODE,
-            Uri.parse(REDIRECT_URI_LOOPBACK),
+            Uri.parse(REDIRECT_URI_APPAUTH),
         )
             .setScopes(*SCOPES.toTypedArray())
             // AppAuth defaults code_challenge_method to S256 with a fresh verifier
@@ -173,10 +172,9 @@ class GeminiCliAuthService(private val context: Context) {
             "https://www.googleapis.com/auth/userinfo.profile",
         )
 
-        // Loopback redirect — Google reserves port 0 / dynamic; AppAuth picks one.
-        // The literal string here is the registered allowed value for installed
-        // apps using loopback IP. The port is appended by AppAuth at runtime.
-        const val REDIRECT_URI_LOOPBACK = "http://127.0.0.1:8085/oauth2callback"
+        // AppAuth custom-scheme redirect handled by RedirectUriReceiverActivity.
+        // Must match appAuthRedirectScheme in app/build.gradle.kts.
+        const val REDIRECT_URI_APPAUTH = "com.google.gemini.android:/oauth2redirect"
 
         const val AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
         const val TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"

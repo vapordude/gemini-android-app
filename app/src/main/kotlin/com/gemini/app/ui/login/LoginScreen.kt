@@ -270,7 +270,7 @@ fun LoginScreen(
                         Text("Sign in with Google (gemini-cli)", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "Same OAuth flow as the official Gemini CLI — PKCE + loopback redirect against the Code Assist API. Personal Google accounts unlock free-tier 2.5-Pro.",
+                            "Same OAuth flow as the official Gemini CLI — PKCE + secure app callback against the Code Assist API. Personal Google accounts unlock free-tier 2.5-Pro.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
