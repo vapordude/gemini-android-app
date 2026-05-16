@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
@@ -98,6 +99,8 @@ fun SettingsSheet(
     val tokenUsage by viewModel.tokenUsage.collectAsState()
     val autoSave by viewModel.autoSaveEnabled.collectAsState()
     val imagenModel by viewModel.imagenModel.collectAsState()
+    val localModels by viewModel.localModels.collectAsState()
+    val selectedLocalModelPath by viewModel.selectedLocalModelPath.collectAsState()
 
     var customModel by remember { mutableStateOf("") }
     var customImagenModel by remember { mutableStateOf("") }
@@ -107,6 +110,11 @@ fun SettingsSheet(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
         if (uri != null) viewModel.setProjectFolder(uri.toString())
+    }
+    val modelFileLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) viewModel.importLocalModel(uri)
     }
 
     fun toggle(name: String) {
@@ -335,6 +343,77 @@ fun SettingsSheet(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+
+            SettingsAccordion(
+                title = "Local model (GGUF)",
+                icon = Icons.Default.Memory,
+                expanded = "Local model" in expanded,
+                onToggle = { toggle("Local model") }
+            ) {
+                Text(
+                    "Import a GGUF from Android storage into app-local files for the local runtime/sandbox.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = {
+                        modelFileLauncher.launch(arrayOf("application/octet-stream", "*/*"))
+                    }) {
+                        Icon(Icons.Default.Folder, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Import GGUF")
+                    }
+                    OutlinedButton(onClick = { viewModel.refreshLocalModels() }) {
+                        Text("Refresh")
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                if (localModels.isEmpty()) {
+                    Text(
+                        "No local model files imported yet.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    localModels.forEach { modelFile ->
+                        val selected = modelFile.path == selectedLocalModelPath
+                        Surface(
+                            color = if (selected) MaterialTheme.colorScheme.secondaryContainer
+                            else MaterialTheme.colorScheme.surfaceVariant,
+                            shape = MaterialTheme.shapes.small,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(
+                                    modelFile.name,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Text(
+                                    "${humanReadableBytes(modelFile.sizeBytes)} · ${modelFile.path}",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedButton(onClick = { viewModel.selectLocalModel(modelFile.path) }) {
+                                        Icon(Icons.Default.PlayArrow, contentDescription = null)
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(if (selected) "Selected" else "Use")
+                                    }
+                                    OutlinedButton(onClick = { viewModel.deleteLocalModel(modelFile.path) }) {
+                                        Icon(Icons.Default.Delete, contentDescription = null)
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Delete")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             SettingsAccordion(
@@ -1025,6 +1104,16 @@ private fun openUrl(context: Context, url: String) {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         )
     }
+}
+
+private fun humanReadableBytes(bytes: Long): String {
+    if (bytes < 1024) return "$bytes B"
+    val kb = bytes / 1024.0
+    if (kb < 1024) return String.format(java.util.Locale.US, "%.1f KB", kb)
+    val mb = kb / 1024.0
+    if (mb < 1024) return String.format(java.util.Locale.US, "%.1f MB", mb)
+    val gb = mb / 1024.0
+    return String.format(java.util.Locale.US, "%.1f GB", gb)
 }
 
 private fun openTermux(context: Context) {

@@ -55,6 +55,8 @@ import kotlinx.coroutines.launch
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 
 private const val AISTUDIO_KEY_URL = "https://aistudio.google.com/app/apikey"
+private const val GOOGLE_BROWSER_SIGNIN_URL =
+    "https://accounts.google.com/signin/v2/identifier?continue=https%3A%2F%2Faistudio.google.com%2F"
 
 @Composable
 fun LoginScreen(
@@ -260,11 +262,21 @@ fun LoginScreen(
                         Text("Sign in with Google", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "Use your Google Account to authenticate directly. This requires access to your cloud platform and generative language API scopes.",
+                            "OAuth can start in your browser first, then continue in-app. " +
+                                "The app requests cloud-platform + generative-language scopes.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(Modifier.height(16.dp))
+                        OutlinedButton(
+                            onClick = { openUrl(context, GOOGLE_BROWSER_SIGNIN_URL) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Open Google OAuth in browser")
+                        }
+                        Spacer(Modifier.height(8.dp))
 
                         if (isLoading || isGoogleLoading) {
                             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -281,7 +293,7 @@ fun LoginScreen(
                             ) {
                                 Icon(Icons.Default.AccountCircle, contentDescription = null)
                                 Spacer(Modifier.width(8.dp))
-                                Text(stringResource(R.string.login_sign_in_google))
+                                Text("Continue OAuth in app")
                             }
                         }
                     }

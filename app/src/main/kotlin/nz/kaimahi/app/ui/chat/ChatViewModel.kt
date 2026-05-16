@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import nz.kaimahi.bridge.Attachment
+import nz.kaimahi.bridge.LocalModelFile
 import nz.kaimahi.bridge.RestGeminiCore
 import nz.kaimahi.domain.GeminiEvent
 import nz.kaimahi.domain.GeminiMessage
@@ -63,6 +64,12 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
 
     private val _imagenModel = MutableStateFlow(core.imagenModel())
     val imagenModel: StateFlow<String> = _imagenModel.asStateFlow()
+
+    private val _localModels = MutableStateFlow(core.listLocalModels())
+    val localModels: StateFlow<List<LocalModelFile>> = _localModels.asStateFlow()
+
+    private val _selectedLocalModelPath = MutableStateFlow(core.selectedLocalModelPath())
+    val selectedLocalModelPath: StateFlow<String?> = _selectedLocalModelPath.asStateFlow()
 
     private val _thinking = MutableStateFlow<String?>(null)
     val thinking: StateFlow<String?> = _thinking.asStateFlow()
@@ -457,6 +464,42 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
     fun setAutoCompressThreshold(fraction: Float) {
         core.setAutoCompressThreshold(fraction)
         _autoCompressThreshold.value = core.autoCompressThreshold()
+    }
+
+    fun refreshLocalModels() {
+        _localModels.value = core.listLocalModels()
+        val selected = core.selectedLocalModelPath()
+        _selectedLocalModelPath.value = selected
+        if (!selected.isNullOrBlank() && _localModels.value.none { it.path == selected }) {
+            core.setSelectedLocalModelPath(null)
+            _selectedLocalModelPath.value = null
+        }
+    }
+
+    fun selectLocalModel(path: String?) {
+        val selected = path?.takeIf { it.isNotBlank() }
+        core.setSelectedLocalModelPath(selected)
+        _selectedLocalModelPath.value = core.selectedLocalModelPath()
+    }
+
+    fun importLocalModel(uri: Uri) {
+        viewModelScope.launch {
+            core.importLocalModel(uri)
+                .onSuccess {
+                    refreshLocalModels()
+                }
+                .onFailure {
+                    _error.value = it.message ?: "Could not import model file"
+                }
+        }
+    }
+
+    fun deleteLocalModel(path: String) {
+        val deleted = core.removeLocalModel(path)
+        if (!deleted) {
+            _error.value = "Could not delete model file"
+        }
+        refreshLocalModels()
     }
 }
 
