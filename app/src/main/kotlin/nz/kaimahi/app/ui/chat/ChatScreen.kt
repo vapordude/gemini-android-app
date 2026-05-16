@@ -100,6 +100,8 @@ import nz.kaimahi.app.ui.settings.SettingsSheet
 import nz.kaimahi.app.ui.settings.TermuxSetupDialog
 import nz.kaimahi.app.ui.settings.ThemeMode
 import nz.kaimahi.app.ui.termux.startGeminiCliLoginInTermux
+import nz.kaimahi.app.ui.local.InferenceMode
+import nz.kaimahi.app.ui.local.InferenceModeToggle
 import nz.kaimahi.domain.GeminiMessage
 import nz.kaimahi.domain.MessageRole
 import nz.kaimahi.ui.LocalKaimahiColors
@@ -147,6 +149,7 @@ fun ChatScreen(
     val tokenUsage by viewModel.tokenUsage.collectAsState()
     val compressing by viewModel.compressing.collectAsState()
     val pendingAttachments by viewModel.pendingAttachments.collectAsState()
+    val inferenceMode by viewModel.inferenceMode.collectAsState()
 
     val imagePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -318,29 +321,38 @@ fun ChatScreen(
                 )
             },
             bottomBar = {
-                BottomChatBar(
-                    text = textState,
-                    enabled = !isLoading && pendingCall == null,
-                    isLoading = isLoading,
-                    attachments = pendingAttachments,
-                    onTextChange = { textState = it },
-                    onAddClick = { showActions = true },
-                    onAttachImage = {
-                        imagePicker.launch(
-                            PickVisualMediaRequest(
-                                ActivityResultContracts.PickVisualMedia.ImageOnly
+                Column {
+                    InferenceModeToggle(
+                        selected = inferenceMode,
+                        onSelect = { viewModel.setInferenceMode(it) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 0.dp)
+                    )
+                    BottomChatBar(
+                        text = textState,
+                        enabled = !isLoading && pendingCall == null,
+                        isLoading = isLoading,
+                        attachments = pendingAttachments,
+                        onTextChange = { textState = it },
+                        onAddClick = { showActions = true },
+                        onAttachImage = {
+                            imagePicker.launch(
+                                PickVisualMediaRequest(
+                                    ActivityResultContracts.PickVisualMedia.ImageOnly
+                                )
                             )
-                        )
-                    },
-                    onRemoveAttachment = { id -> viewModel.removeAttachment(id) },
-                    onSend = {
-                        if (textState.isNotBlank() || pendingAttachments.isNotEmpty()) {
-                            viewModel.sendMessage(textState)
-                            textState = ""
-                        }
-                    },
-                    onStop = { viewModel.cancelSend() }
-                )
+                        },
+                        onRemoveAttachment = { id -> viewModel.removeAttachment(id) },
+                        onSend = {
+                            if (textState.isNotBlank() || pendingAttachments.isNotEmpty()) {
+                                viewModel.sendMessage(textState)
+                                textState = ""
+                            }
+                        },
+                        onStop = { viewModel.cancelSend() }
+                    )
+                }
             }
         ) { paddingValues ->
             Box(modifier = Modifier.padding(paddingValues).background(MaterialTheme.colorScheme.background)) {

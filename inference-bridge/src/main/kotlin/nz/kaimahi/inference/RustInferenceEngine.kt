@@ -6,8 +6,10 @@ import nz.kaimahi.domain.InferenceEngine
 import nz.kaimahi.domain.ModelHandle
 import nz.kaimahi.domain.RuntimeInfo
 import nz.kaimahi.domain.Token
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.withContext
 import java.io.File
 
 class RustInferenceEngine(private val appContext: Context) : InferenceEngine {
@@ -35,6 +37,17 @@ class RustInferenceEngine(private val appContext: Context) : InferenceEngine {
     }
 
     override fun generate(request: GenerateRequest): Flow<Token> = flow {
+        val raw = withContext(Dispatchers.IO) {
+            NativeInference.generate(request.prompt, request.maxNewTokens)
+        }
+        if (raw.startsWith("error:")) {
+            throw IllegalStateException(raw.removePrefix("error:").trim())
+        }
+        // Emit the full response as a single token; streaming word-by-word
+        // requires a nativeGenerateStream callback surface which is planned
+        // but not yet in the JNI shim. One token keeps the UI responsive
+        // enough for now and the chat bubble renders as soon as it arrives.
+        emit(Token(text = raw, done = false))
         emit(Token(text = "", done = true))
     }
 

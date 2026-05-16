@@ -60,6 +60,7 @@ dependencies {
     implementation(project(":inference-bridge"))
     implementation(project(":agent-bridge"))
     implementation(project(":emdash-bridge"))
+    implementation(project(":native-driver"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

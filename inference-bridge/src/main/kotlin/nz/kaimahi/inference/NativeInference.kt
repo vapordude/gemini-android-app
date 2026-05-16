@@ -14,8 +14,12 @@ internal object NativeInference {
 
     @JvmStatic external fun nativeVersion(): String
     @JvmStatic external fun nativeLoadModel(path: String): String
+    @JvmStatic external fun nativeGenerate(prompt: String, maxNewTokens: Int): String
 
     fun version(): String = if (loaded) runCatching { nativeVersion() }.getOrElse { "stub" } else "stub"
     fun loadModel(path: String): String =
         if (loaded) runCatching { nativeLoadModel(path) }.getOrElse { "unknown" } else "unknown"
+    fun generate(prompt: String, maxNewTokens: Int): String =
+        if (loaded) runCatching { nativeGenerate(prompt, maxNewTokens) }.getOrElse { "error: ${it.message}" }
+        else "error: native inference library not available in this build"
 }

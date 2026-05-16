@@ -49,6 +49,23 @@ mod android {
     }
 
     #[no_mangle]
+    pub extern "system" fn Java_nz_kaimahi_inference_NativeInference_nativeGenerate<'a>(
+        mut env: JNIEnv<'a>,
+        _class: JClass<'a>,
+        prompt: JString<'a>,
+        _max_new_tokens: jint,
+    ) -> jstring {
+        // Stub — replaced by the real model-runtime dispatch when
+        // `libkaimahi_native.so` is compiled with the full Rust workspace.
+        // Returns an error string so the Kotlin side can surface a helpful
+        // message instead of silently returning empty output.
+        let _prompt: String = env.get_string(&prompt).map(|s| s.into()).unwrap_or_default();
+        env.new_string("error: native inference not yet implemented in this build")
+            .unwrap()
+            .into_raw()
+    }
+
+    #[no_mangle]
     pub extern "system" fn Java_nz_kaimahi_agent_NativeAgent_nativeMaxIterations<'a>(
         _env: JNIEnv<'a>,
         _class: JClass<'a>,
