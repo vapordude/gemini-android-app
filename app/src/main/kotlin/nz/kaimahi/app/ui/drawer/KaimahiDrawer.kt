@@ -60,7 +60,16 @@ enum class KaimahiDestination {
     ModelPicker,
     Settings,
     About,
+    /** A user/agent-pinned dynamic screen identified by id. The id
+     *  comes through state held by the host alongside this destination. */
+    DynamicScreen,
 }
+
+/** Lightweight projection of a dynamic ScreenSpec for the drawer list. */
+data class PinnedScreen(
+    val id: String,
+    val title: String,
+)
 
 /**
  * Lightweight project entry passed into the drawer. The drawer doesn't
@@ -95,6 +104,11 @@ fun KaimahiDrawerContent(
     onUnarchiveProject: (DrawerProject) -> Unit,
     onRenameProject: (DrawerProject) -> Unit,
     onDeleteProject: (DrawerProject) -> Unit,
+    /** Dynamic screens the agent (or user) has scaffolded — render
+     *  as a "Pinned screens" section between Tools and the footer. */
+    pinnedScreens: List<PinnedScreen> = emptyList(),
+    activePinnedScreenId: String? = null,
+    onPinnedScreenSelected: (PinnedScreen) -> Unit = {},
     appVersion: String = KaimahiBrand.VERSION,
     activeModelLabel: String? = null,
 ) {
@@ -276,6 +290,22 @@ fun KaimahiDrawerContent(
                 active = activeDestination == KaimahiDestination.About,
                 onClick = { onDestinationSelected(KaimahiDestination.About) },
             )
+
+            if (pinnedScreens.isNotEmpty()) {
+                KaimahiCaption(
+                    "PINNED SCREENS",
+                    modifier = Modifier.padding(start = 22.dp, top = 12.dp, bottom = 6.dp),
+                )
+                pinnedScreens.forEach { ps ->
+                    DrawerItem(
+                        label = ps.title,
+                        icon = DrawerIcons.Todo,
+                        active = activeDestination == KaimahiDestination.DynamicScreen &&
+                            activePinnedScreenId == ps.id,
+                        onClick = { onPinnedScreenSelected(ps) },
+                    )
+                }
+            }
 
             Divider(
                 color = MaterialTheme.colorScheme.outlineVariant,

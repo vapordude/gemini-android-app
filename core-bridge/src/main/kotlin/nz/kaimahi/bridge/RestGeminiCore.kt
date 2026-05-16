@@ -80,6 +80,10 @@ class RestGeminiCore(
 
     private val appContext: Context = appContext.applicationContext
 
+    /** Dynamic-screen registry — agent-built screens persist here. */
+    val screenRegistry: nz.kaimahi.bridge.screens.ScreenRegistry =
+        nz.kaimahi.bridge.screens.ScreenRegistry(appContext)
+
     private val registry = ToolRegistry().apply {
         register(ReadFileTool(workspace))
         register(WriteFileTool(workspace))
@@ -98,6 +102,13 @@ class RestGeminiCore(
                 }
             )
         )
+        // Dynamic-screen tools — the agent uses these to scaffold UI at runtime.
+        register(nz.kaimahi.bridge.tools.CreateScreenTool(screenRegistry))
+        register(nz.kaimahi.bridge.tools.UpdateScreenTool(screenRegistry))
+        register(nz.kaimahi.bridge.tools.DeleteScreenTool(screenRegistry))
+        register(nz.kaimahi.bridge.tools.ListScreensTool(screenRegistry))
+        register(nz.kaimahi.bridge.tools.ReadScreenDataTool(screenRegistry))
+        register(nz.kaimahi.bridge.tools.WriteScreenDataTool(screenRegistry))
     }
 
     /** MCP — adds tools from user-configured Model Context Protocol
