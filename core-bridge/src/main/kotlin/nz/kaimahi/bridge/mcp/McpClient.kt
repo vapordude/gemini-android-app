@@ -39,7 +39,8 @@ internal class McpClient(
         val out = mutableListOf<McpTool>()
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
-            val name = o.optString("name").ifBlank { continue }
+            val name = o.optString("name")
+            if (name.isBlank()) continue
             out.add(
                 McpTool(
                     name = name,

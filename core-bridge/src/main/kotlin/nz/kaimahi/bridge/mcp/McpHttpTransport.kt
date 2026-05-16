@@ -75,18 +75,23 @@ internal class McpHttpTransport(
     }
 
     private fun readSseUntilId(stream: java.io.InputStream, expectedId: Long): JSONObject {
+        // Plain while-readline rather than forEachLine — Kotlin's
+        // forEachLine inlines the action through useLines + Sequence.forEach
+        // which forbids non-local return from the action lambda. A
+        // straight loop keeps the early-return on a matching id valid.
         val reader = BufferedReader(InputStreamReader(stream, Charsets.UTF_8))
         val dataBuf = StringBuilder()
-        reader.forEachLine { line ->
+        while (true) {
+            val line = reader.readLine() ?: break
             when {
                 line.isEmpty() -> {
                     if (dataBuf.isNotEmpty()) {
                         val payload = dataBuf.toString()
                         dataBuf.clear()
-                        val obj = runCatching { JSONObject(payload) }.getOrNull() ?: return@forEachLine
-                        // Notifications have no id; skip them at this layer.
-                        if (!obj.has("id")) return@forEachLine
-                        if (obj.optLong("id", Long.MIN_VALUE) == expectedId) {
+                        val obj = runCatching { JSONObject(payload) }.getOrNull()
+                        if (obj != null && obj.has("id") &&
+                            obj.optLong("id", Long.MIN_VALUE) == expectedId
+                        ) {
                             return obj
                         }
                     }
