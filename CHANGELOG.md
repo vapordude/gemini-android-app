@@ -121,8 +121,6 @@ gemini-2.5-\* list below a divider.
 
 ## [0.2.0] — 2026-05-16
 
-## [0.2.0] — 2026-05-16
-
 The Gemini-CLI + real-Gemma-inference cut. Two big shifts:
 
 1. The "implement local inference" stub gets replaced by a working
