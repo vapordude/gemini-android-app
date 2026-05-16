@@ -2,19 +2,22 @@ package nz.kaimahi.app.ui.memory
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -35,11 +38,12 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import nz.kaimahi.ui.KaimahiCaption
 import nz.kaimahi.ui.KaimahiLogo
 import nz.kaimahi.ui.KaimahiLogoStyle
 import nz.kaimahi.ui.LocalKaimahiColors
 
-enum class MemoryTone { Person, Tool, Knowledge, Doc, Muted }
+enum class MemoryTone { Person, Tool, Knowledge, Muted }
 
 data class MemoryEntry(
     val id: String,
@@ -101,36 +105,33 @@ fun MemoryBrowserScreen(
             )
         },
     ) { padding ->
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                // Filter pills
-                LazyRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    item { FilterChip("All", count = totalCount, active = true) }
-                    item { FilterChip("Recent") }
-                    item { FilterChip("By tag") }
-                    item { FilterChip("Expiring") }
-                }
-                // Legend
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 18.dp, end = 18.dp, bottom = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    LegendDot("PERSON", tokens.brand)
-                    LegendDot("TOOL/TRACE", tokens.act)
-                    LegendDot("KNOWLEDGE", tokens.signal)
-                }
-                // Entry list — placeholder visualisation; real DAG canvas comes later
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                item { FilterChip("All", count = totalCount, active = true) }
+                item { FilterChip("Recent") }
+                item { FilterChip("By tag") }
+                item { FilterChip("Expiring") }
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 18.dp, end = 18.dp, bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                LegendDot("PERSON", tokens.brand)
+                LegendDot("TOOL/TRACE", tokens.act)
+                LegendDot("KNOWLEDGE", tokens.signal)
+            }
+            if (entries.isEmpty()) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -144,14 +145,27 @@ fun MemoryBrowserScreen(
                             shape = RoundedCornerShape(14.dp),
                         )
                         .padding(12.dp),
+                ) {
+                    EmptyMemoryHint()
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            MaterialTheme.colorScheme.surface,
+                            RoundedCornerShape(14.dp),
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                            shape = RoundedCornerShape(14.dp),
+                        ),
+                    contentPadding = PaddingValues(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    if (entries.isEmpty()) {
-                        EmptyMemoryHint()
-                    } else {
-                        entries.forEach { entry ->
-                            MemoryCard(entry, onClick = { onEntryClick(entry) })
-                        }
+                    items(entries, key = { it.id }) { entry ->
+                        MemoryCard(entry, onClick = { onEntryClick(entry) })
                     }
                 }
             }
@@ -180,39 +194,26 @@ private fun FilterChip(label: String, count: Int? = null, active: Boolean = fals
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(
+        KaimahiCaption(
             text = label.uppercase(),
-            fontFamily = FontFamily.Monospace,
             fontSize = 11.sp,
             letterSpacing = 0.4.sp,
             color = if (active) tokens.textStrong else tokens.muted,
         )
         if (count != null) {
-            Text(
-                text = "· $count",
-                fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp,
-                color = tokens.muted,
-            )
+            KaimahiCaption(text = "· $count", fontSize = 11.sp, letterSpacing = 0.sp)
         }
     }
 }
 
 @Composable
 private fun LegendDot(label: String, color: Color) {
-    val tokens = LocalKaimahiColors.current
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Box(modifier = Modifier.size(7.dp).background(color, CircleShape))
-        Text(
-            label,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 10.sp,
-            letterSpacing = 0.6.sp,
-            color = tokens.muted,
-        )
+        KaimahiCaption(label, fontSize = 10.sp, letterSpacing = 0.6.sp)
     }
 }
 
@@ -223,7 +224,6 @@ private fun MemoryCard(entry: MemoryEntry, onClick: () -> Unit) {
         MemoryTone.Person -> tokens.brand
         MemoryTone.Tool -> tokens.act
         MemoryTone.Knowledge -> tokens.signal
-        MemoryTone.Doc -> tokens.muted
         MemoryTone.Muted -> tokens.muted
     }
     Row(
@@ -252,19 +252,16 @@ private fun MemoryCard(entry: MemoryEntry, onClick: () -> Unit) {
             )
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    entry.tag.uppercase(),
-                    fontFamily = FontFamily.Monospace,
+                KaimahiCaption(
+                    text = entry.tag.uppercase(),
                     fontSize = 9.sp,
                     letterSpacing = 1.sp,
                     color = stripe,
                 )
-                Text(
-                    entry.whenLabel,
-                    fontFamily = FontFamily.Monospace,
+                KaimahiCaption(
+                    text = entry.whenLabel,
                     fontSize = 9.sp,
                     letterSpacing = 0.6.sp,
-                    color = tokens.muted,
                 )
             }
         }

@@ -1,6 +1,7 @@
 package nz.kaimahi.app.ui.drawer
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,6 +39,8 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import nz.kaimahi.ui.KaimahiBrand
+import nz.kaimahi.ui.KaimahiCaption
 import nz.kaimahi.ui.KaimahiLogo
 import nz.kaimahi.ui.KaimahiLogoStyle
 import nz.kaimahi.ui.KaimahiSigil
@@ -91,7 +94,7 @@ fun KaimahiDrawerContent(
     onUnarchiveProject: (DrawerProject) -> Unit,
     onRenameProject: (DrawerProject) -> Unit,
     onDeleteProject: (DrawerProject) -> Unit,
-    appVersion: String = "v0.3.0",
+    appVersion: String = KaimahiBrand.VERSION,
     activeModelLabel: String? = null,
 ) {
     val tokens = LocalKaimahiColors.current
@@ -114,19 +117,17 @@ fun KaimahiDrawerContent(
                 KaimahiLogo(size = 44.dp, style = KaimahiLogoStyle.Brand)
                 Column {
                     Text(
-                        text = "Kaimahi",
+                        text = KaimahiBrand.NAME,
                         fontFamily = FontFamily.Serif,
                         fontWeight = FontWeight.Medium,
                         fontSize = 26.sp,
                         color = tokens.textStrong,
                     )
                     Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = "YOUR LOCAL AI WORKER",
-                        fontFamily = FontFamily.Monospace,
+                    KaimahiCaption(
+                        text = KaimahiBrand.TAGLINE.uppercase(),
                         fontSize = 9.sp,
                         letterSpacing = 1.4.sp,
-                        color = tokens.muted,
                     )
                 }
             }
@@ -148,7 +149,7 @@ fun KaimahiDrawerContent(
                     .padding(start = 22.dp, end = 22.dp, top = 10.dp, bottom = 6.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                DrawerSectionLabel("PROJECTS")
+                KaimahiCaption("PROJECTS")
                 val activeCount = projects.count { !it.archived }
                 val countLabel = when {
                     activeCount == 0 && archivedCount == 0 -> "empty"
@@ -156,11 +157,10 @@ fun KaimahiDrawerContent(
                     activeCount == 0 -> "$archivedCount archived"
                     else -> "$activeCount active · $archivedCount archived"
                 }
-                Text(
+                KaimahiCaption(
                     text = countLabel,
-                    fontFamily = FontFamily.Monospace,
                     fontSize = 10.sp,
-                    color = tokens.muted,
+                    letterSpacing = 0.4.sp,
                 )
             }
 
@@ -215,7 +215,7 @@ fun KaimahiDrawerContent(
             }
 
             // Tools section header
-            DrawerSectionLabel(
+            KaimahiCaption(
                 "TOOLS",
                 modifier = Modifier.padding(start = 22.dp, top = 12.dp, bottom = 6.dp),
             )
@@ -285,20 +285,17 @@ fun KaimahiDrawerContent(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Column {
-                    Text(
+                    KaimahiCaption(
                         appVersion,
-                        fontFamily = FontFamily.Monospace,
                         fontSize = 10.sp,
-                        color = tokens.muted,
                         letterSpacing = 0.8.sp,
                     )
                     Spacer(Modifier.height(3.dp))
-                    Text(
-                        "CATHEDRAL AI",
-                        fontFamily = FontFamily.Monospace,
+                    KaimahiCaption(
+                        KaimahiBrand.FAMILY.uppercase(),
                         fontSize = 10.sp,
-                        color = tokens.disabled,
                         letterSpacing = 1.2.sp,
+                        color = tokens.disabled,
                     )
                 }
                 KaimahiSigil(
@@ -312,7 +309,6 @@ fun KaimahiDrawerContent(
 
 @Composable
 private fun NewChatPill(onClick: () -> Unit) {
-    val tokens = LocalKaimahiColors.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -337,22 +333,6 @@ private fun NewChatPill(onClick: () -> Unit) {
             letterSpacing = 0.15.sp,
         )
     }
-    // Silence unused-tokens warning when light/stealth variants land
-    @Suppress("UNUSED_EXPRESSION") tokens
-}
-
-@Composable
-private fun DrawerSectionLabel(text: String, modifier: Modifier = Modifier) {
-    val tokens = LocalKaimahiColors.current
-    Text(
-        text = text,
-        fontFamily = FontFamily.Monospace,
-        fontSize = 10.5f.sp,
-        letterSpacing = 1.5.sp,
-        fontWeight = FontWeight.Medium,
-        color = tokens.muted,
-        modifier = modifier,
-    )
 }
 
 @Composable
@@ -431,7 +411,6 @@ private fun ProjectMini(
     val tokens = LocalKaimahiColors.current
     var expanded by remember(project.name) { mutableStateOf(false) }
     val rowBg = if (active) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent
-    val border = if (active) tokens.brand else Color.Transparent
     val nameColor = when {
         dim -> tokens.muted
         active -> tokens.textStrong
@@ -441,14 +420,15 @@ private fun ProjectMini(
         modifier = Modifier
             .fillMaxWidth()
             .background(rowBg, RoundedCornerShape(10.dp))
-            .clickable { if (expanded) expanded = false else onClick() }
             .padding(horizontal = 12.dp, vertical = 10.dp)
             .alpha(if (dim && !expanded) 0.6f else 1f),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick),
         ) {
             Box(
                 modifier = Modifier
@@ -462,18 +442,13 @@ private fun ProjectMini(
                     color = nameColor,
                     maxLines = 1,
                 )
-                Text(
+                KaimahiCaption(
                     text = project.whenLabel,
-                    fontFamily = FontFamily.Monospace,
                     fontSize = 10.sp,
-                    color = tokens.muted,
                     letterSpacing = 0.4.sp,
                 )
             }
             CountBadge(count = project.messageCount)
-            // Tap once = open; long-press would show actions, but Compose
-            // long-press wiring is heavy; instead we expose an ellipsis
-            // that toggles the swipe-action row below.
             Text(
                 text = "⋯",
                 fontSize = 16.sp,
@@ -501,7 +476,6 @@ private fun ProjectMini(
             }
         }
     }
-    @Suppress("UNUSED_EXPRESSION") border
 }
 
 @Composable
@@ -538,18 +512,16 @@ private fun ArchivedToggle(count: Int, expanded: Boolean, onClick: () -> Unit) {
             fontSize = 11.sp,
             color = tokens.muted,
         )
-        Text(
-            text = "ARCHIVED",
-            fontFamily = FontFamily.Monospace,
+        KaimahiCaption(
+            "ARCHIVED",
             fontSize = 11.sp,
             letterSpacing = 1.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text(
+        KaimahiCaption(
             text = count.toString(),
-            fontFamily = FontFamily.Monospace,
             fontSize = 11.sp,
-            color = tokens.muted,
+            letterSpacing = 0.sp,
         )
     }
 }
@@ -558,10 +530,16 @@ private fun ArchivedToggle(count: Int, expanded: Boolean, onClick: () -> Unit) {
 private fun ActionChip(label: String, danger: Boolean = false, onClick: () -> Unit) {
     val tokens = LocalKaimahiColors.current
     val color = if (danger) tokens.danger else MaterialTheme.colorScheme.onSurfaceVariant
-    val borderColor = if (danger) tokens.danger.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outline
+    val borderColor =
+        if (danger) tokens.danger.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outline
     Box(
         modifier = Modifier
             .background(Color.Transparent, RoundedCornerShape(6.dp))
+            .border(
+                width = 1.dp,
+                color = borderColor,
+                shape = RoundedCornerShape(6.dp),
+            )
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 5.dp),
     ) {
@@ -573,7 +551,6 @@ private fun ActionChip(label: String, danger: Boolean = false, onClick: () -> Un
             color = color,
         )
     }
-    @Suppress("UNUSED_EXPRESSION") borderColor
 }
 
 @Composable

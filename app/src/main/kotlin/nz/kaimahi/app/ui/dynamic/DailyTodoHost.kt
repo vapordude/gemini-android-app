@@ -1,7 +1,6 @@
 package nz.kaimahi.app.ui.dynamic
 
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -14,6 +13,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
+import nz.kaimahi.ui.KaimahiTextDialog
 
 /**
  * Drop-in host for the daily-todo screen — owns a DailyTodoViewModel,
@@ -52,7 +52,11 @@ fun DailyTodoHost(
     )
 
     if (showAdd) {
-        AddTodoDialog(
+        KaimahiTextDialog(
+            title = "Add to daily todo",
+            label = "What needs doing?",
+            confirmLabel = "Add",
+            singleLine = false,
             onDismiss = { showAdd = false },
             onConfirm = { text ->
                 vm.add(text)
@@ -80,33 +84,4 @@ fun DailyTodoHost(
             },
         )
     }
-}
-
-@Composable
-private fun AddTodoDialog(
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
-) {
-    var text by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add to daily todo") },
-        text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                label = { Text("What needs doing?") },
-                singleLine = false,
-            )
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { if (text.isNotBlank()) onConfirm(text.trim()) },
-                enabled = text.isNotBlank(),
-            ) { Text("Add") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        },
-    )
 }

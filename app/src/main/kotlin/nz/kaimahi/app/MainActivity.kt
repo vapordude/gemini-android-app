@@ -12,11 +12,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -25,7 +28,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import nz.kaimahi.app.ui.about.AboutScreen
 import nz.kaimahi.app.ui.chat.ChatScreen
 import nz.kaimahi.app.ui.chat.ChatViewModel
@@ -39,8 +44,10 @@ import nz.kaimahi.app.ui.login.LoginScreen
 import nz.kaimahi.app.ui.memory.MemoryBrowserHost
 import nz.kaimahi.app.ui.settings.ThemeMode
 import nz.kaimahi.bridge.RestGeminiCore
+import nz.kaimahi.bridge.storage.ChatStore
 import nz.kaimahi.domain.EmdashProfile
 import nz.kaimahi.emdash.RustEmdashClient
+import nz.kaimahi.ui.KaimahiTextDialog
 import nz.kaimahi.ui.KaimahiTheme
 
 class MainActivity : ComponentActivity() {
@@ -111,17 +118,18 @@ private fun KaimahiApp(
     var destination by remember { mutableStateOf(KaimahiDestination.Chat) }
     var activeProjectName by remember { mutableStateOf<String?>(null) }
     var projectsRefreshTrigger by remember { mutableStateOf(0) }
-    val projects = remember(projectsRefreshTrigger) {
-        // Read-only snapshot for the drawer; mutated through the
-        // archive/unarchive/delete handlers below.
-        (vm.listActiveChats() + vm.listArchivedChats()).map { e ->
-            DrawerProject(
-                name = e.name,
-                displayName = e.name,
-                whenLabel = relativeTimeLabel(e.updatedAt),
-                messageCount = e.messageCount,
-                archived = e.archived,
-            )
+    val projects by produceState(initialValue = emptyList<DrawerProject>(), projectsRefreshTrigger) {
+        value = withContext(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            (vm.listActiveChats() + vm.listArchivedChats()).map { e ->
+                DrawerProject(
+                    name = e.name,
+                    displayName = e.name,
+                    whenLabel = relativeTimeLabel(now, e.updatedAt),
+                    messageCount = e.messageCount,
+                    archived = e.archived,
+                )
+            }
         }
     }
     val archivedCount = projects.count { it.archived }
@@ -234,13 +242,17 @@ private fun KaimahiApp(
 
     val targetForRename = renameTarget
     if (targetForRename != null) {
-        RenameProjectDialog(
+        KaimahiTextDialog(
+            title = "Rename project",
+            label = "New name",
             initial = targetForRename.displayName,
+            confirmLabel = "Rename",
+            requireChange = true,
             onDismiss = { renameTarget = null },
             onConfirm = { newName ->
                 val ok = vm.renameChat(targetForRename.name, newName)
                 if (ok && activeProjectName == targetForRename.name) {
-                    activeProjectName = slugify(newName)
+                    activeProjectName = ChatStore.slug(newName)
                 }
                 renameTarget = null
                 refreshProjects()
@@ -249,44 +261,7 @@ private fun KaimahiApp(
     }
 }
 
-@androidx.compose.runtime.Composable
-private fun RenameProjectDialog(
-    initial: String,
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
-) {
-    var text by remember { mutableStateOf(initial) }
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { androidx.compose.material3.Text("Rename project") },
-        text = {
-            androidx.compose.material3.OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                label = { androidx.compose.material3.Text("New name") },
-                singleLine = true,
-            )
-        },
-        confirmButton = {
-            androidx.compose.material3.TextButton(
-                onClick = { if (text.isNotBlank() && text.trim() != initial) onConfirm(text.trim()) },
-                enabled = text.isNotBlank() && text.trim() != initial,
-            ) { androidx.compose.material3.Text("Rename") }
-        },
-        dismissButton = {
-            androidx.compose.material3.TextButton(onClick = onDismiss) {
-                androidx.compose.material3.Text("Cancel")
-            }
-        },
-    )
-}
-
-/** Mirror of ChatStore.slug — keeps the active-project pointer in sync. */
-private fun slugify(raw: String): String =
-    raw.trim().lowercase().replace(Regex("[^a-z0-9._-]+"), "-").take(64)
-
-private fun relativeTimeLabel(epochMs: Long): String {
-    val now = System.currentTimeMillis()
+internal fun relativeTimeLabel(now: Long, epochMs: Long): String {
     val delta = (now - epochMs).coerceAtLeast(0)
     val minutes = delta / 60_000
     val hours = minutes / 60

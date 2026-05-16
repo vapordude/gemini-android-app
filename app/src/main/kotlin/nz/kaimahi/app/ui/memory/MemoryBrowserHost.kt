@@ -2,6 +2,7 @@ package nz.kaimahi.app.ui.memory
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import nz.kaimahi.app.relativeTimeLabel
 import nz.kaimahi.app.ui.chat.ChatViewModel
 
 /**
@@ -20,13 +21,14 @@ fun MemoryBrowserHost(
     onDrawerOpen: () -> Unit,
 ) {
     val (entries, total) = remember(chatViewModel) {
+        val now = System.currentTimeMillis()
         val all = chatViewModel.listSavedChats()
         val mapped = all.map { e ->
             MemoryEntry(
                 id = e.name,
                 label = e.name,
                 tag = if (e.archived) "archived" else "project",
-                whenLabel = relativeLabel(e.updatedAt),
+                whenLabel = relativeTimeLabel(now, e.updatedAt),
                 tone = when {
                     e.archived -> MemoryTone.Muted
                     e.messageCount >= 100 -> MemoryTone.Tool
@@ -44,21 +46,4 @@ fun MemoryBrowserHost(
         onSearch = { /* search wiring lands when the real MemoryStore JNI does */ },
         onEntryClick = { entry -> chatViewModel.resumeChat(entry.id) },
     )
-}
-
-private fun relativeLabel(epochMs: Long): String {
-    val delta = (System.currentTimeMillis() - epochMs).coerceAtLeast(0)
-    val minutes = delta / 60_000
-    val hours = minutes / 60
-    val days = hours / 24
-    val weeks = days / 7
-    return when {
-        minutes < 1 -> "now"
-        minutes < 60 -> "${minutes}m"
-        hours < 24 -> "${hours}h"
-        days == 1L -> "1d"
-        days < 7 -> "${days}d"
-        weeks < 5 -> "${weeks}w"
-        else -> "long"
-    }
 }

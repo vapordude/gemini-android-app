@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -41,6 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import nz.kaimahi.ui.KaimahiCaption
 import nz.kaimahi.ui.KaimahiLogo
 import nz.kaimahi.ui.KaimahiLogoStyle
 import nz.kaimahi.ui.LocalKaimahiColors
@@ -138,12 +141,10 @@ fun DailyTodoScreen(
                         color = tokens.textStrong,
                     )
                     Spacer(Modifier.height(6.dp))
-                    Text(
+                    KaimahiCaption(
                         text = summaryLine.uppercase(),
-                        fontFamily = FontFamily.Monospace,
                         fontSize = 10.sp,
                         letterSpacing = 1.sp,
-                        color = tokens.muted,
                     )
                 }
 
@@ -190,6 +191,7 @@ private fun TodoCard(item: TodoItem, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .height(IntrinsicSize.Min)
             .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp))
             .border(
                 width = 1.dp,
@@ -198,12 +200,11 @@ private fun TodoCard(item: TodoItem, onClick: () -> Unit) {
             )
             .clickable(onClick = onClick),
     ) {
-        // Whero left stripe on overdue (3dp wide, full card height)
         if (item.overdue) {
             Box(
                 modifier = Modifier
                     .width(3.dp)
-                    .height(58.dp)
+                    .fillMaxHeight()
                     .background(tokens.brand),
             )
         }

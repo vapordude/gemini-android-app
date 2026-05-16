@@ -2,9 +2,12 @@ package nz.kaimahi.app.ui.dynamic
 
 import android.content.Context
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import nz.kaimahi.bridge.storage.TodoStore
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -18,6 +21,8 @@ import java.util.Locale
 class DailyTodoViewModel(context: Context) : ViewModel() {
 
     private val store = TodoStore(context.applicationContext)
+    private val dateFormatter = SimpleDateFormat("EEEE, d MMMM", Locale.getDefault())
+    private val builtFormatter = SimpleDateFormat("d MMM", Locale.getDefault())
 
     private val _items = MutableStateFlow<List<TodoItem>>(emptyList())
     val items: StateFlow<List<TodoItem>> = _items.asStateFlow()
@@ -26,12 +31,14 @@ class DailyTodoViewModel(context: Context) : ViewModel() {
     val builtAt: StateFlow<Long?> = _builtAt.asStateFlow()
 
     init {
-        val now = System.currentTimeMillis()
-        // Materialise the screen the first time it's opened so the
-        // footer has a date to show. The agent (when wired) will reset
-        // this through a `create_screen` tool call.
-        _builtAt.value = store.ensureBuilt().takeIf { it > 0 } ?: now
-        refresh()
+        // Materialise the screen the first time it's opened (off the
+        // main thread) so the footer has a date to show. The agent
+        // (when wired) will reset this through a `create_screen` tool
+        // call against the same store.
+        viewModelScope.launch(Dispatchers.IO) {
+            _builtAt.value = store.ensureBuilt()
+            refresh()
+        }
     }
 
     private fun refresh() {
@@ -42,28 +49,35 @@ class DailyTodoViewModel(context: Context) : ViewModel() {
 
     fun add(text: String, meta: String = "added by Kaimahi") {
         if (text.isBlank()) return
-        store.add(text, meta)
-        refresh()
+        viewModelScope.launch(Dispatchers.IO) {
+            store.add(text, meta)
+            refresh()
+        }
     }
 
     fun toggleDone(item: TodoItem) {
-        store.toggleDone(item.id)
-        refresh()
+        viewModelScope.launch(Dispatchers.IO) {
+            store.toggleDone(item.id)
+            refresh()
+        }
     }
 
     fun delete(item: TodoItem) {
-        store.delete(item.id)
-        refresh()
+        viewModelScope.launch(Dispatchers.IO) {
+            store.delete(item.id)
+            refresh()
+        }
     }
 
     fun clearAll() {
-        store.clear()
-        refresh()
+        viewModelScope.launch(Dispatchers.IO) {
+            store.clear()
+            refresh()
+        }
     }
 
     /** Returns a date line for the header (e.g. "Saturday, 16 May"). */
-    fun dateLine(): String =
-        SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(Date())
+    fun dateLine(): String = dateFormatter.format(Date())
 
     /**
      * Returns the summary line for the header strip, e.g.
@@ -87,8 +101,7 @@ class DailyTodoViewModel(context: Context) : ViewModel() {
     /** Returns the footer card copy ("Built by Kaimahi on 16 May."). */
     fun builtCopy(): String? {
         val at = _builtAt.value ?: return null
-        val day = SimpleDateFormat("d MMM", Locale.getDefault()).format(Date(at))
-        return "Built by Kaimahi on $day."
+        return "Built by Kaimahi on ${builtFormatter.format(Date(at))}."
     }
 
     private fun List<TodoStore.Item>.toUi(): List<TodoItem> = map { it ->

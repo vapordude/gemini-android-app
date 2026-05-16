@@ -36,7 +36,6 @@ class TodoStore(context: Context, screenId: String = "daily-todo") {
     )
 
     fun load(): Snapshot {
-        if (!file.exists()) return Snapshot(items = emptyList(), builtAt = null)
         val root = runCatching { JSONObject(file.readText()) }.getOrNull()
             ?: return Snapshot(items = emptyList(), builtAt = null)
         val arr = root.optJSONArray("items") ?: JSONArray()

@@ -34,6 +34,9 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Color
+import nz.kaimahi.ui.KaimahiBrand
+import nz.kaimahi.ui.KaimahiCaption
 import nz.kaimahi.ui.KaimahiSigil
 import nz.kaimahi.ui.LocalKaimahiColors
 
@@ -47,7 +50,7 @@ import nz.kaimahi.ui.LocalKaimahiColors
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun AboutScreen(
-    version: String = "v0.3.0",
+    version: String = KaimahiBrand.VERSION,
     onBack: () -> Unit,
 ) {
     val tokens = LocalKaimahiColors.current
@@ -81,9 +84,8 @@ fun AboutScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(start = 22.dp, end = 22.dp, top = 18.dp, bottom = 100.dp),
         ) {
-            Text(
-                text = "KAIMAHI · ${version.uppercase()}",
-                fontFamily = FontFamily.Monospace,
+            KaimahiCaption(
+                text = "${KaimahiBrand.NAME.uppercase()} · ${version.uppercase()}",
                 fontSize = 10.sp,
                 letterSpacing = 1.8.sp,
                 color = tokens.signal,
@@ -155,7 +157,7 @@ fun AboutScreen(
             SectionLabel("TE REO WHAKAPĀ")
             Spacer(Modifier.height(6.dp))
             Text(
-                "He aha te mea nui o te ao? He tāngata, he tāngata, he tāngata.",
+                KaimahiBrand.WHAKATAUKI_REO,
                 fontFamily = FontFamily.Serif,
                 fontStyle = FontStyle.Italic,
                 fontSize = 16.sp,
@@ -164,7 +166,7 @@ fun AboutScreen(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                "What is the most important thing in the world? It is people.",
+                KaimahiBrand.WHAKATAUKI_EN,
                 fontSize = 12.sp,
                 color = tokens.muted,
             )
@@ -174,15 +176,7 @@ fun AboutScreen(
 
 @Composable
 private fun SectionLabel(text: String) {
-    val tokens = LocalKaimahiColors.current
-    Text(
-        text = text,
-        fontFamily = FontFamily.Monospace,
-        fontSize = 10.5f.sp,
-        letterSpacing = 1.8.sp,
-        fontWeight = FontWeight.Medium,
-        color = tokens.muted,
-    )
+    KaimahiCaption(text = text, letterSpacing = 1.8.sp)
 }
 
 @Composable
@@ -197,7 +191,7 @@ private fun SectionDivider() {
 @Composable
 private fun FamilyRow(
     name: String,
-    stripe: androidx.compose.ui.graphics.Color,
+    stripe: Color,
     desc: String,
     muted: Boolean = false,
 ) {

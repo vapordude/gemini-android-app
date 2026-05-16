@@ -37,29 +37,32 @@ class ChatStore(context: Context) {
         ?.filter { it.isFile && it.name.endsWith(".json") }
         ?.mapNotNull { f ->
             runCatching {
-                val root = JSONObject(f.readText())
+                val obj = JSONObject(f.readText())
                 Entry(
                     name = f.nameWithoutExtension,
                     updatedAt = f.lastModified(),
-                    messageCount = root.optJSONArray("messages")?.length() ?: 0,
-                    archived = root.optBoolean("archived", false),
+                    messageCount = obj.optJSONArray("messages")?.length() ?: 0,
+                    archived = obj.optBoolean("archived", false),
                 )
             }.getOrNull()
         }
         ?.sortedByDescending { it.updatedAt }
         ?: emptyList()
 
+    /** Partition [list] once into (active, archived). */
+    fun listPartitioned(): Pair<List<Entry>, List<Entry>> =
+        list().partition { !it.archived }
+
     /** Active (non-archived) projects, newest first. */
-    fun listActive(): List<Entry> = list().filter { !it.archived }
+    fun listActive(): List<Entry> = listPartitioned().first
 
     /** Archived projects, newest first. */
-    fun listArchived(): List<Entry> = list().filter { it.archived }
+    fun listArchived(): List<Entry> = listPartitioned().second
 
     /** Flip the archive flag on a saved chat. Returns true if the chat existed. */
     fun setArchived(name: String, archived: Boolean): Boolean {
         val safe = slug(name)
         val f = File(root, "$safe.json")
-        if (!f.exists()) return false
         val obj = runCatching { JSONObject(f.readText()) }.getOrNull() ?: return false
         obj.put("archived", archived)
         runCatching { f.writeText(obj.toString()) }
@@ -73,7 +76,7 @@ class ChatStore(context: Context) {
         if (from.isBlank() || to.isBlank() || from == to) return false
         val src = File(root, "$from.json")
         val dst = File(root, "$to.json")
-        if (!src.exists() || dst.exists()) return false
+        if (dst.exists()) return false
         val obj = runCatching { JSONObject(src.readText()) }.getOrNull() ?: return false
         obj.put("name", to)
         runCatching { dst.writeText(obj.toString()) }
@@ -98,7 +101,6 @@ class ChatStore(context: Context) {
     fun load(name: String): Snapshot? {
         val safe = slug(name)
         val f = File(root, "$safe.json")
-        if (!f.exists()) return null
         val obj = runCatching { JSONObject(f.readText()) }.getOrNull() ?: return null
         val turnsArr = obj.optJSONArray("turns") ?: JSONArray()
         val turns = (0 until turnsArr.length()).map { turnsArr.getJSONObject(it) }
@@ -130,7 +132,6 @@ class ChatStore(context: Context) {
     }
 
     fun loadCurrent(): Snapshot? {
-        if (!currentFile.exists()) return null
         val obj = runCatching { JSONObject(currentFile.readText()) }.getOrNull() ?: return null
         val turnsArr = obj.optJSONArray("turns") ?: JSONArray()
         val turns = (0 until turnsArr.length()).map { turnsArr.getJSONObject(it) }
@@ -227,6 +228,11 @@ class ChatStore(context: Context) {
         return out
     }
 
-    private fun slug(raw: String): String =
-        raw.trim().lowercase().replace(Regex("[^a-z0-9._-]+"), "-").take(64)
+    companion object {
+        /** Shared slug rule. Exposed so callers can predict the on-disk name
+         *  without going through a save (e.g. updating the active-project
+         *  pointer after a rename). */
+        fun slug(raw: String): String =
+            raw.trim().lowercase().replace(Regex("[^a-z0-9._-]+"), "-").take(64)
+    }
 }
