@@ -8,3 +8,4 @@ core-js-source/
 local.properties
 core-bridge/src/main/assets/gemini-core-bundle.*
 node_modules/
+rust/target/
