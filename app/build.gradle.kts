@@ -18,6 +18,11 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        // AppAuth's library merge requires this placeholder even when we use a
+        // loopback redirect (http://127.0.0.1:PORT/oauth2callback). The custom
+        // scheme acts as a fallback only.
+        manifestPlaceholders += mapOf("appAuthRedirectScheme" to "com.google.gemini.android")
     }
 
     buildTypes {
@@ -56,6 +61,7 @@ dependencies {
     implementation(project(":core-bridge"))
     implementation(project(":domain"))
     implementation(project(":ui-components"))
+    implementation(project(":native-driver"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -71,6 +77,8 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.play.services.auth)
+    implementation(libs.appauth)
+    implementation(libs.androidx.browser)
 
     debugImplementation(libs.compose.ui.tooling)
 }

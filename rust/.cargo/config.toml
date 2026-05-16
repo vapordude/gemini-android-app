@@ -1,0 +1,20 @@
+# Android NDK cross-compile linker paths. The actual linker absolute path
+# differs by NDK version and host OS — override via environment variable
+# `ANDROID_NDK_HOME` and the `cargo` wrapper that sets:
+#
+#   CC_aarch64-linux-android, AR_aarch64-linux-android, etc.
+#
+# Without an NDK present, `cargo build` still works for the workspace on the
+# host (Linux/Mac) so the math-parity tests can run off-device.
+
+[target.aarch64-linux-android]
+ar = "llvm-ar"
+linker = "aarch64-linux-android26-clang"
+
+[target.armv7-linux-androideabi]
+ar = "llvm-ar"
+linker = "armv7a-linux-androideabi26-clang"
+
+[target.x86_64-linux-android]
+ar = "llvm-ar"
+linker = "x86_64-linux-android26-clang"

@@ -1,0 +1,15 @@
+[package]
+name = "gemma4-ops"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[dependencies]
+gemma4-core = { path = "../gemma4-core" }
+
+[lib]
+name = "gemma4_ops"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

@@ -1,0 +1,15 @@
+[package]
+name = "gemma4-quant"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[dependencies]
+gemma4-core = { path = "../gemma4-core" }
+
+[lib]
+name = "gemma4_quant"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
