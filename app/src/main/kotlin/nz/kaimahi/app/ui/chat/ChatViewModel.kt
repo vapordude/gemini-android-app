@@ -298,10 +298,18 @@ class ChatViewModel(
             if (!ok) _error.value = "Could not resume \"$name\""
         }
     }
-    /** Clear the UI message list. Underlying core state is reset on next send. */
+    /** Clear the UI message list and any transient turn state. Underlying core
+     *  state is reset on next send. Drops a stale pending tool-approval card,
+     *  in-flight thinking label, and pending attachments so the new chat
+     *  doesn't inherit ghosts from the previous turn. */
     fun startNewChat() {
+        sendJob?.cancel()
+        sendJob = null
         _messages.clear()
         _error.value = null
+        _pendingCall.value = null
+        _thinking.value = null
+        _pendingAttachments.value = emptyList()
     }
 
     fun sendMessage(text: String) {

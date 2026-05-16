@@ -348,8 +348,8 @@ fun SettingsSheet(
             SettingsAccordion(
                 title = "Local model (GGUF)",
                 icon = Icons.Default.Memory,
-                expanded = "Local model" in expanded,
-                onToggle = { toggle("Local model") }
+                expanded = "Local model (GGUF)" in expanded,
+                onToggle = { toggle("Local model (GGUF)") }
             ) {
                 Text(
                     "Import a GGUF model file from Android storage for local offline use.",

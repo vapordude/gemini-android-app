@@ -221,7 +221,10 @@ fun ChatScreen(
                                             selectedLocalModelPath
                                                 ?.substringAfterLast('/')
                                                 ?.takeIf { it.isNotBlank() }
-                                                ?: KaimahiBrand.ON_DEVICE_MODELS.first()
+                                                // No GGUF imported yet — surface that explicitly
+                                                // instead of silently labelling the bar with a
+                                                // canonical name the user hasn't actually picked.
+                                                ?: "No local model"
                                         InferenceMode.CLOUD_GEMINI -> model
                                     }
                                     Row(
@@ -273,7 +276,7 @@ fun ChatScreen(
                                                         viewModel.selectLocalModel(match.path)
                                                         viewModel.setInferenceMode(InferenceMode.LOCAL_AGENT)
                                                     } else {
-                                                        settingsInitialAccordion = "Local model"
+                                                        settingsInitialAccordion = "Local model (GGUF)"
                                                         showSettings = true
                                                     }
                                                 }
@@ -1023,8 +1026,10 @@ private fun ToolApprovalCard(
     // truncating args at 200 chars hides the actual file path or
     // command being run. Default to truncated for readability, but
     // give the user an explicit toggle to see the full payload before
-    // they hit Approve.
-    var argsExpanded by remember { mutableStateOf(false) }
+    // they hit Approve. Key the state to the call name so a fresh
+    // approval always starts collapsed, even if the previous one was
+    // expanded when it resolved.
+    var argsExpanded by remember(name) { mutableStateOf(false) }
     val anyTruncated = arguments.values.any { (it?.toString()?.length ?: 0) > 200 }
     Surface(
         modifier = Modifier
