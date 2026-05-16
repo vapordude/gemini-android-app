@@ -327,7 +327,7 @@ fun ChatScreen(
                         onSelect = { viewModel.setInferenceMode(it) },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 0.dp)
+                            .padding(horizontal = 12.dp)
                     )
                     BottomChatBar(
                         text = textState,

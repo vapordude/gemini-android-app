@@ -41,7 +41,7 @@ class RustInferenceEngine(private val appContext: Context) : InferenceEngine {
             NativeInference.generate(request.prompt, request.maxNewTokens)
         }
         if (raw.startsWith("error:")) {
-            throw IllegalStateException(raw.removePrefix("error:").trim())
+            throw IllegalStateException("Native inference failure: ${raw.removePrefix("error:").trim()}")
         }
         // Emit the full response as a single token; streaming word-by-word
         // requires a nativeGenerateStream callback surface which is planned
