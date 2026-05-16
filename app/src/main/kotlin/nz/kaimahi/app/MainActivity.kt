@@ -32,11 +32,11 @@ import nz.kaimahi.app.ui.chat.ChatViewModel
 import nz.kaimahi.app.ui.drawer.DrawerProject
 import nz.kaimahi.app.ui.drawer.KaimahiDestination
 import nz.kaimahi.app.ui.drawer.KaimahiDrawerContent
-import nz.kaimahi.app.ui.dynamic.DailyTodoScreen
+import nz.kaimahi.app.ui.dynamic.DailyTodoHost
 import nz.kaimahi.app.ui.local.DeploymentConfigsScreen
 import nz.kaimahi.app.ui.local.TraceViewerScreen
 import nz.kaimahi.app.ui.login.LoginScreen
-import nz.kaimahi.app.ui.memory.MemoryBrowserScreen
+import nz.kaimahi.app.ui.memory.MemoryBrowserHost
 import nz.kaimahi.app.ui.settings.ThemeMode
 import nz.kaimahi.bridge.RestGeminiCore
 import nz.kaimahi.domain.EmdashProfile
@@ -129,6 +129,7 @@ private fun KaimahiApp(
     val emdashClient = remember { RustEmdashClient() }
     var deploymentProfiles by remember { mutableStateOf<List<EmdashProfile>>(emptyList()) }
     var loadingDeployments by remember { mutableStateOf(false) }
+    var renameTarget by remember { mutableStateOf<DrawerProject?>(null) }
 
     fun refreshProjects() { projectsRefreshTrigger++ }
 
@@ -162,7 +163,7 @@ private fun KaimahiApp(
                 onUnarchiveProject = { p ->
                     vm.unarchiveChat(p.name); refreshProjects()
                 },
-                onRenameProject = { /* dialog wiring in a follow-up */ },
+                onRenameProject = { p -> renameTarget = p },
                 onDeleteProject = { p ->
                     vm.deleteChat(p.name); refreshProjects()
                     if (activeProjectName == p.name) activeProjectName = null
@@ -180,23 +181,10 @@ private fun KaimahiApp(
                 onOpenLocalTraces = { destination = KaimahiDestination.TraceViewer },
                 onOpenDeploymentConfigs = { destination = KaimahiDestination.Deployments },
             )
-            KaimahiDestination.DailyTodo -> DailyTodoScreen(
-                dateLine = "Saturday, 16 May",
-                summaryLine = "0 open · 0 done",
-                items = emptyList(),
-                builtNote = null,
+            KaimahiDestination.DailyTodo -> DailyTodoHost(onDrawerOpen = openDrawer)
+            KaimahiDestination.MemoryBrowser -> MemoryBrowserHost(
+                chatViewModel = vm,
                 onDrawerOpen = openDrawer,
-                onOverflow = {},
-                onToggleDone = {},
-                onAdd = {},
-                onEditSchema = {},
-            )
-            KaimahiDestination.MemoryBrowser -> MemoryBrowserScreen(
-                entries = emptyList(),
-                totalCount = 0,
-                onDrawerOpen = openDrawer,
-                onSearch = {},
-                onEntryClick = {},
             )
             KaimahiDestination.TraceViewer -> TraceViewerScreen(
                 events = localTraces,
@@ -243,7 +231,59 @@ private fun KaimahiApp(
             )
         }
     }
+
+    val targetForRename = renameTarget
+    if (targetForRename != null) {
+        RenameProjectDialog(
+            initial = targetForRename.displayName,
+            onDismiss = { renameTarget = null },
+            onConfirm = { newName ->
+                val ok = vm.renameChat(targetForRename.name, newName)
+                if (ok && activeProjectName == targetForRename.name) {
+                    activeProjectName = slugify(newName)
+                }
+                renameTarget = null
+                refreshProjects()
+            },
+        )
+    }
 }
+
+@androidx.compose.runtime.Composable
+private fun RenameProjectDialog(
+    initial: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var text by remember { mutableStateOf(initial) }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { androidx.compose.material3.Text("Rename project") },
+        text = {
+            androidx.compose.material3.OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                label = { androidx.compose.material3.Text("New name") },
+                singleLine = true,
+            )
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(
+                onClick = { if (text.isNotBlank() && text.trim() != initial) onConfirm(text.trim()) },
+                enabled = text.isNotBlank() && text.trim() != initial,
+            ) { androidx.compose.material3.Text("Rename") }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) {
+                androidx.compose.material3.Text("Cancel")
+            }
+        },
+    )
+}
+
+/** Mirror of ChatStore.slug — keeps the active-project pointer in sync. */
+private fun slugify(raw: String): String =
+    raw.trim().lowercase().replace(Regex("[^a-z0-9._-]+"), "-").take(64)
 
 private fun relativeTimeLabel(epochMs: Long): String {
     val now = System.currentTimeMillis()
