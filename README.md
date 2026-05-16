@@ -39,6 +39,11 @@ from-scratch Rust runtime — no third-party inference libraries.
   the model into your workspace directory: `python foo.py`, `npm test`,
   `cargo build`, `pip install …`, `curl`, `git status`. Backgrounded
   processes (servers, watchers) keep running when the model's turn ends.
+- **Sign in the way you prefer.** Use a Gemini API key or Google OAuth
+  (including a browser-first handoff, then continue in app).
+- **Kick off Gemini CLI auth quickly.** Start `gemini login` from the
+  Login screen, chat top bar, or app drawer; the command is copied for
+  easy paste in Termux.
 - **Generate images inline.** Both **Imagen** (dedicated picker in
   Settings → Model) and **Gemini 2.5 Flash Image** ("Nano Banana",
   auto-enabled when you pick it in the top-bar dropdown) save their
@@ -95,6 +100,8 @@ from-scratch Rust runtime — no third-party inference libraries.
   from F-Droid or [the GitHub releases](https://github.com/termux/termux-app/releases)
   (⚠️ **not** the Play Store version, abandoned since 2020) if you want
   shell command execution.
+- **Optional (local/offline inference)** — one or more GGUF model files
+  you can import from Android storage in Settings.
 
 To build from source:
 - **Android SDK** (API 34+), **JDK 17** on `JAVA_HOME`.
@@ -118,8 +125,8 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 ## 💻 First-run setup
 
-1. **Settings → Account**: paste your Gemini API key. It's stored
-   encrypted on device.
+1. **Login / Settings → Account**: authenticate with either a Gemini API
+   key or Google OAuth. Secrets are stored encrypted on device.
 2. **Top-bar folder name → Change folder**: pick a workspace under
    `/storage/emulated/0/` (avoid `/Android/data/…`, unreachable to
    Termux). The file tools operate relative to this folder.
@@ -130,6 +137,8 @@ adb install app/build/outputs/apk/debug/app-debug.apk
    `gemini-2.5-flash` for everyday coding, `gemini-2.5-pro` for harder
    reasoning, `gemini-2.5-flash-image-preview` if you want inline image
    generation (requires billing).
+5. **Settings → Local model (GGUF)** (optional): import a local model,
+   select it for use, and remove stale model files as needed.
 
 ## 🧱 Architecture
 
