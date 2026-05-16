@@ -2,6 +2,7 @@ package nz.kaimahi.app.ui.chat
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -32,6 +33,10 @@ class ChatViewModel(
     private val core: RestGeminiCore,
     private val appContext: Context,
 ) : ViewModel() {
+    private companion object {
+        private const val TAG = "ChatViewModel"
+        private const val MILLIS_PER_SECOND = 1000.0
+    }
 
     private val _messages = mutableStateListOf<GeminiMessage>()
     val messages: List<GeminiMessage> = _messages
@@ -316,7 +321,9 @@ class ChatViewModel(
                         )
                     }
                     localLoadedModelPath = loaded.path
-                    val runtime = runCatching { inference.info() }.getOrNull()
+                    val runtime = runCatching { inference.info() }
+                        .onFailure { Log.w(TAG, "Could not read local runtime info", it) }
+                        .getOrNull()
                     _localTraceEvents.value = _localTraceEvents.value + TraceEvent.ModelLoaded(
                         timestampMs = System.currentTimeMillis(),
                         archTag = loaded.archTag.ifBlank { "unknown" },
@@ -354,7 +361,7 @@ class ChatViewModel(
                         timestampMs = System.currentTimeMillis(),
                         tokens = tokenCount,
                         durationMs = durationMs,
-                        tokensPerSec = tokenCount * 1000.0 / durationMs
+                        tokensPerSec = tokenCount * MILLIS_PER_SECOND / durationMs
                     )
                 }
             } catch (_: CancellationException) {
