@@ -1,0 +1,15 @@
+[package]
+name = "gemma4-driver"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[dependencies]
+gemma4-core = { path = "../gemma4-core" }
+gemma4-ops = { path = "../gemma4-ops" }
+gemma4-model = { path = "../gemma4-model" }
+gemma4-tokenizer = { path = "../gemma4-tokenizer" }
+
+[lib]
+name = "gemma4_driver"
+path = "src/lib.rs"

@@ -7,6 +7,16 @@ name = "gemma4-core"
 version = "0.0.1"
 
 [[package]]
+name = "gemma4-driver"
+version = "0.0.1"
+dependencies = [
+ "gemma4-core",
+ "gemma4-model",
+ "gemma4-ops",
+ "gemma4-tokenizer",
+]
+
+[[package]]
 name = "gemma4-jni"
 version = "0.0.1"
 dependencies = [
