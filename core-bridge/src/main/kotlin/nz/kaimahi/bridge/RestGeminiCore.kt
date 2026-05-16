@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.util.Base64
 import android.util.Log
+import androidx.documentfile.provider.DocumentFile
 import nz.kaimahi.bridge.termux.TermuxBridge
 import nz.kaimahi.bridge.tools.DeleteFileTool
 import nz.kaimahi.bridge.tools.EditFileTool
@@ -212,9 +213,7 @@ class RestGeminiCore(
         runCatching {
             localModelsDir.mkdirs()
             val resolver = appContext.contentResolver
-            val displayName = runCatching {
-                androidx.documentfile.provider.DocumentFile.fromSingleUri(appContext, uri)?.name
-            }.getOrNull()
+            val displayName = runCatching { DocumentFile.fromSingleUri(appContext, uri)?.name }.getOrNull()
             val baseName = (displayName ?: "model-${System.currentTimeMillis()}.gguf")
                 .substringAfterLast('/')
                 .replace(Regex("[^A-Za-z0-9._-]"), "_")

@@ -78,6 +78,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import nz.kaimahi.app.ui.chat.ChatViewModel
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1109,11 +1110,11 @@ private fun openUrl(context: Context, url: String) {
 private fun humanReadableBytes(bytes: Long): String {
     if (bytes < 1024) return "$bytes B"
     val kb = bytes / 1024.0
-    if (kb < 1024) return String.format(java.util.Locale.US, "%.1f KiB", kb)
+    if (kb < 1024) return String.format(Locale.US, "%.1f KiB", kb)
     val mb = kb / 1024.0
-    if (mb < 1024) return String.format(java.util.Locale.US, "%.1f MiB", mb)
+    if (mb < 1024) return String.format(Locale.US, "%.1f MiB", mb)
     val gb = mb / 1024.0
-    return String.format(java.util.Locale.US, "%.1f GiB", gb)
+    return String.format(Locale.US, "%.1f GiB", gb)
 }
 
 private fun openTermux(context: Context) {
