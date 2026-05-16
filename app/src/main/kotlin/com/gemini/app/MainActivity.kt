@@ -19,6 +19,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.gemini.app.ui.chat.ChatScreen
 import com.gemini.app.ui.chat.ChatViewModel
 import com.gemini.app.ui.login.LoginScreen
+import com.gemini.app.ui.room.RoomScreen
+import com.gemini.app.ui.room.RoomViewModel
 import com.gemini.app.ui.settings.ThemeMode
 import com.gemini.bridge.DriverMode
 import com.gemini.bridge.DriverRouter
@@ -27,6 +29,12 @@ import com.gemini.bridge.RestGeminiCore
 import com.gemini.bridge.storage.SecurePrefs
 import com.gemini.localdriver.Gemma4LocalCore
 import com.gemini.ui.GeminiTheme
+
+/** Top-level screen the user is currently looking at. */
+private enum class Screen(val label: String) {
+    Chat("Chat"),
+    Room("Room"),
+}
 
 class MainActivity : ComponentActivity() {
 
@@ -88,12 +96,41 @@ class MainActivity : ComponentActivity() {
                         if (!isReady && vm.hasPersistedSession()) vm.tryAutoLogin(context)
                     }
 
-                    if (isReady) ChatScreen(
-                        viewModel = vm,
-                        themeMode = themeMode,
-                        onThemeChange = { themeMode = it }
-                    )
-                    else LoginScreen(
+                    if (isReady) {
+                        var screen by remember { mutableStateOf(Screen.Chat) }
+                        val roomVm = remember {
+                            RoomViewModel(appContext, routed = router, core = core)
+                        }
+                        androidx.compose.foundation.layout.Column(
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            // Slim top tab strip
+                            androidx.compose.material3.TabRow(
+                                selectedTabIndex = screen.ordinal,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Screen.values().forEach { s ->
+                                    androidx.compose.material3.Tab(
+                                        selected = screen == s,
+                                        onClick = { screen = s },
+                                        text = { androidx.compose.material3.Text(s.label) },
+                                    )
+                                }
+                            }
+                            androidx.compose.foundation.layout.Box(
+                                modifier = Modifier.fillMaxSize(),
+                            ) {
+                                when (screen) {
+                                    Screen.Chat -> ChatScreen(
+                                        viewModel = vm,
+                                        themeMode = themeMode,
+                                        onThemeChange = { themeMode = it },
+                                    )
+                                    Screen.Room -> RoomScreen(roomVm)
+                                }
+                            }
+                        }
+                    } else LoginScreen(
                         onLoginSuccess = { config -> vm.initCore(config) },
                         isLoading = isLoading
                     )
