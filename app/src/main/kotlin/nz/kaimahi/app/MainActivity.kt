@@ -30,7 +30,6 @@ import nz.kaimahi.app.ui.settings.ThemeMode
 import nz.kaimahi.bridge.RestGeminiCore
 import nz.kaimahi.emdash.RustEmdashClient
 import nz.kaimahi.domain.EmdashProfile
-import nz.kaimahi.domain.TraceEvent
 import nz.kaimahi.ui.KaimahiTheme
 
 private enum class AppPane { CHAT, TRACE_VIEWER, DEPLOYMENTS }
@@ -61,11 +60,11 @@ class MainActivity : ComponentActivity() {
                     val vm: ChatViewModel = viewModel(factory = factory)
                     val isReady by vm.isReady.collectAsState()
                     val isLoading by vm.isLoading.collectAsState()
+                    val localTraces by vm.localTraceEvents.collectAsState()
                     var pane by remember { mutableStateOf(AppPane.CHAT) }
                     val emdashClient = remember { RustEmdashClient() }
                     var deploymentProfiles by remember { mutableStateOf<List<EmdashProfile>>(emptyList()) }
                     var loadingDeployments by remember { mutableStateOf(false) }
-                    var localTraces by remember { mutableStateOf<List<TraceEvent>>(emptyList()) }
 
                     val context = LocalContext.current
                     androidx.compose.runtime.LaunchedEffect(Unit) {

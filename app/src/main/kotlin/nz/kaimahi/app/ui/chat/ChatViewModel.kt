@@ -2,6 +2,7 @@ package nz.kaimahi.app.ui.chat
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -14,6 +15,7 @@ import nz.kaimahi.domain.GeminiMessage
 import nz.kaimahi.domain.GeminiResult
 import nz.kaimahi.domain.GenerateRequest
 import nz.kaimahi.domain.MessageRole
+import nz.kaimahi.domain.TraceEvent
 import nz.kaimahi.domain.ToolCall
 import nz.kaimahi.domain.ToolDecision
 import nz.kaimahi.domain.ToolSpec
@@ -31,6 +33,11 @@ class ChatViewModel(
     private val core: RestGeminiCore,
     private val appContext: Context,
 ) : ViewModel() {
+    private companion object {
+        private const val TAG = "ChatViewModel"
+        private const val MILLIS_PER_SECOND = 1000.0
+        private const val MIN_DURATION_MS = 1L
+    }
 
     private val _messages = mutableStateListOf<GeminiMessage>()
     val messages: List<GeminiMessage> = _messages
@@ -103,6 +110,9 @@ class ChatViewModel(
     private val _pendingAttachments = MutableStateFlow<List<PendingAttachment>>(emptyList())
     val pendingAttachments: StateFlow<List<PendingAttachment>> = _pendingAttachments.asStateFlow()
 
+    private val _localTraceEvents = MutableStateFlow<List<TraceEvent>>(emptyList())
+    val localTraceEvents: StateFlow<List<TraceEvent>> = _localTraceEvents.asStateFlow()
+
     private var sendJob: Job? = null
     private var lastUserPrompt: String? = null
     private val localInference by lazy { RustInferenceEngine(appContext) }
@@ -125,11 +135,11 @@ class ChatViewModel(
 
     suspend fun checkGeminiCliAuthInTermux(): String {
         val command = """
-            if [ -d "$HOME/.gemini" ]; then
-              echo "FOUND:$HOME/.gemini"
-              ls -la "$HOME/.gemini"
+            if [ -d "${'$'}HOME/.gemini" ]; then
+              echo "FOUND:${'$'}HOME/.gemini"
+              ls -la "${'$'}HOME/.gemini"
             else
-              echo "MISSING:$HOME/.gemini"
+              echo "MISSING:${'$'}HOME/.gemini"
             fi
         """.trimIndent()
         val r = core.termux.run(command)
@@ -312,6 +322,15 @@ class ChatViewModel(
                         )
                     }
                     localLoadedModelPath = loaded.path
+                    val runtime = runCatching { inference.info() }
+                        .onFailure { Log.w(TAG, "Could not read local runtime info", it) }
+                        .getOrNull()
+                    _localTraceEvents.value = _localTraceEvents.value + TraceEvent.ModelLoaded(
+                        timestampMs = System.currentTimeMillis(),
+                        archTag = loaded.archTag.ifBlank { "unknown" },
+                        isa = runtime?.isa ?: "unknown",
+                        threads = runtime?.threads ?: Runtime.getRuntime().availableProcessors()
+                    )
                 }
                 val modelMessageId = "local-model-${System.nanoTime()}"
                 _messages.add(
@@ -324,8 +343,11 @@ class ChatViewModel(
                     )
                 )
                 var output = ""
+                var tokenCount = 0
+                val startedAt = System.currentTimeMillis()
                 inference.generate(GenerateRequest(prompt = text)).collect { token ->
                     if (token.text.isEmpty()) return@collect
+                    tokenCount++
                     output += token.text
                     val idx = _messages.indexOfLast { it.id == modelMessageId }
                     if (idx >= 0) _messages[idx] = _messages[idx].copy(text = output)
@@ -334,11 +356,24 @@ class ChatViewModel(
                     val idx = _messages.indexOfLast { it.id == modelMessageId }
                     if (idx >= 0) _messages.removeAt(idx)
                     _error.value = "No response generated. Verify the model is compatible or select a different GGUF model."
+                } else {
+                    val durationMs = (System.currentTimeMillis() - startedAt).coerceAtLeast(MIN_DURATION_MS)
+                    _localTraceEvents.value = _localTraceEvents.value + TraceEvent.GenerateFinished(
+                        timestampMs = System.currentTimeMillis(),
+                        tokens = tokenCount,
+                        durationMs = durationMs,
+                        tokensPerSec = (tokenCount.toDouble() / durationMs) * MILLIS_PER_SECOND
+                    )
                 }
             } catch (_: CancellationException) {
                 // Cancelled by user — silent.
             } catch (t: Throwable) {
                 _error.value = t.message ?: "Local inference failed"
+                _localTraceEvents.value = _localTraceEvents.value + TraceEvent.Error(
+                    timestampMs = System.currentTimeMillis(),
+                    kind = "local_inference",
+                    message = _error.value ?: "Local inference failed"
+                )
             } finally {
                 _isLoading.value = false
                 _thinking.value = null
