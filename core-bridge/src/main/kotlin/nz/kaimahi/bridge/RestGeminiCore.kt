@@ -237,7 +237,7 @@ class RestGeminiCore(
         if (!file.exists()) return false
         val canonicalRoot = runCatching { localModelsDir.canonicalFile }.getOrNull() ?: return false
         val canonicalFile = runCatching { file.canonicalFile }.getOrNull() ?: return false
-        if (!canonicalFile.path.startsWith(canonicalRoot.path + "/")) return false
+        if (!canonicalFile.toPath().startsWith(canonicalRoot.toPath())) return false
         val deleted = canonicalFile.delete()
         if (deleted && prefs.localModelPath == canonicalFile.absolutePath) {
             prefs.localModelPath = null

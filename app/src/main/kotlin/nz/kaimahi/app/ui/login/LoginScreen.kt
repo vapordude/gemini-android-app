@@ -55,7 +55,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 
 private const val AISTUDIO_KEY_URL = "https://aistudio.google.com/app/apikey"
-private const val GOOGLE_BROWSER_SIGNIN_URL =
+private const val GOOGLE_BROWSER_SIGN_IN_URL =
     "https://accounts.google.com/signin/v2/identifier?continue=https%3A%2F%2Faistudio.google.com%2F"
 
 @Composable
@@ -269,7 +269,7 @@ fun LoginScreen(
                         )
                         Spacer(Modifier.height(16.dp))
                         OutlinedButton(
-                            onClick = { openUrl(context, GOOGLE_BROWSER_SIGNIN_URL) },
+                            onClick = { openUrl(context, GOOGLE_BROWSER_SIGN_IN_URL) },
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
