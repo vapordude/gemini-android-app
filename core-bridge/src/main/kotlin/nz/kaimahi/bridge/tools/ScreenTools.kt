@@ -22,6 +22,9 @@ import org.json.JSONObject
  *
  * The renderer reads ScreenRegistry + ScreenDataStore directly for live
  * updates; these tools are how the agent participates.
+ *
+ * Each `execute` uses a block body so early-return on validation
+ * failure is legal — expression-bodied try/catch wouldn't allow it.
  */
 
 class CreateScreenTool(private val registry: ScreenRegistry) : Tool {
@@ -38,17 +41,20 @@ class CreateScreenTool(private val registry: ScreenRegistry) : Tool {
         ),
     )
 
-    override suspend fun execute(call: ToolCall): ToolCallResult = try {
-        val specObj = call.arguments["spec"] as? Map<*, *>
-            ?: error("'spec' must be a JSON object")
-        val obj = JSONObject(specObj as Map<String, *>)
-        val parsed = ScreenSpecJson.fromJson(obj)
-            ?: return ToolOutput.error(call.id, "couldn't parse spec — needs at least id, title, widgets")
-        val slug = registry.save(parsed)
-        ToolOutput.clamp("Created screen '${parsed.title}' as $slug.", call.id)
-    } catch (e: Exception) {
-        if (e is kotlinx.coroutines.CancellationException) throw e
-        ToolOutput.error(call.id, e.message ?: "create_screen failed")
+    override suspend fun execute(call: ToolCall): ToolCallResult {
+        return try {
+            val specObj = call.arguments["spec"] as? Map<*, *>
+                ?: error("'spec' must be a JSON object")
+            @Suppress("UNCHECKED_CAST")
+            val obj = JSONObject(specObj as Map<String, *>)
+            val parsed = ScreenSpecJson.fromJson(obj)
+                ?: return ToolOutput.error(call.id, "couldn't parse spec — needs at least id, title, widgets")
+            val slug = registry.save(parsed)
+            ToolOutput.clamp("Created screen '${parsed.title}' as $slug.", call.id)
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            ToolOutput.error(call.id, e.message ?: "create_screen failed")
+        }
     }
 }
 
@@ -65,20 +71,26 @@ class UpdateScreenTool(private val registry: ScreenRegistry) : Tool {
         ),
     )
 
-    override suspend fun execute(call: ToolCall): ToolCallResult = try {
-        val specObj = call.arguments["spec"] as? Map<*, *>
-            ?: error("'spec' must be a JSON object")
-        val obj = JSONObject(specObj as Map<String, *>)
-        val parsed = ScreenSpecJson.fromJson(obj)
-            ?: return ToolOutput.error(call.id, "couldn't parse spec")
-        if (registry.get(parsed.id) == null) {
-            return ToolOutput.error(call.id, "no screen with id=${parsed.id}; use create_screen instead")
+    override suspend fun execute(call: ToolCall): ToolCallResult {
+        return try {
+            val specObj = call.arguments["spec"] as? Map<*, *>
+                ?: error("'spec' must be a JSON object")
+            @Suppress("UNCHECKED_CAST")
+            val obj = JSONObject(specObj as Map<String, *>)
+            val parsed = ScreenSpecJson.fromJson(obj)
+                ?: return ToolOutput.error(call.id, "couldn't parse spec")
+            if (registry.get(parsed.id) == null) {
+                return ToolOutput.error(
+                    call.id,
+                    "no screen with id=${parsed.id}; use create_screen instead",
+                )
+            }
+            registry.save(parsed)
+            ToolOutput.clamp("Updated screen ${parsed.id}.", call.id)
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            ToolOutput.error(call.id, e.message ?: "update_screen failed")
         }
-        registry.save(parsed)
-        ToolOutput.clamp("Updated screen ${parsed.id}.", call.id)
-    } catch (e: Exception) {
-        if (e is kotlinx.coroutines.CancellationException) throw e
-        ToolOutput.error(call.id, e.message ?: "update_screen failed")
     }
 }
 
@@ -91,14 +103,16 @@ class DeleteScreenTool(private val registry: ScreenRegistry) : Tool {
         parameters = stringParam("id", "Screen id to delete."),
     )
 
-    override suspend fun execute(call: ToolCall): ToolCallResult = try {
-        val id = call.arguments["id"] as? String ?: error("id is required")
-        val ok = registry.delete(id)
-        if (ok) ToolOutput.clamp("Deleted screen $id.", call.id)
-        else ToolOutput.error(call.id, "no screen with id=$id")
-    } catch (e: Exception) {
-        if (e is kotlinx.coroutines.CancellationException) throw e
-        ToolOutput.error(call.id, e.message ?: "delete_screen failed")
+    override suspend fun execute(call: ToolCall): ToolCallResult {
+        return try {
+            val id = call.arguments["id"] as? String ?: error("id is required")
+            val ok = registry.delete(id)
+            if (ok) ToolOutput.clamp("Deleted screen $id.", call.id)
+            else ToolOutput.error(call.id, "no screen with id=$id")
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            ToolOutput.error(call.id, e.message ?: "delete_screen failed")
+        }
     }
 }
 
@@ -112,25 +126,27 @@ class ListScreensTool(private val registry: ScreenRegistry) : Tool {
         parameters = objectParams(required = emptyList()),
     )
 
-    override suspend fun execute(call: ToolCall): ToolCallResult = try {
-        val arr = JSONArray()
-        for (s in registry.list()) {
-            val widgetCount = when (s) {
-                is nz.kaimahi.domain.screens.ScreenSpec.Stack -> s.widgets.size
+    override suspend fun execute(call: ToolCall): ToolCallResult {
+        return try {
+            val arr = JSONArray()
+            for (s in registry.list()) {
+                val widgetCount = when (s) {
+                    is nz.kaimahi.domain.screens.ScreenSpec.Stack -> s.widgets.size
+                }
+                arr.put(
+                    JSONObject()
+                        .put("id", s.id)
+                        .put("title", s.title)
+                        .put("icon", s.icon.name.lowercase())
+                        .put("createdBy", s.createdBy)
+                        .put("widgetCount", widgetCount)
+                )
             }
-            arr.put(
-                JSONObject()
-                    .put("id", s.id)
-                    .put("title", s.title)
-                    .put("icon", s.icon.name.lowercase())
-                    .put("createdBy", s.createdBy)
-                    .put("widgetCount", widgetCount)
-            )
+            ToolOutput.clamp(arr.toString(2), call.id)
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            ToolOutput.error(call.id, e.message ?: "list_screens failed")
         }
-        ToolOutput.clamp(arr.toString(2), call.id)
-    } catch (e: Exception) {
-        if (e is kotlinx.coroutines.CancellationException) throw e
-        ToolOutput.error(call.id, e.message ?: "list_screens failed")
     }
 }
 
@@ -143,14 +159,16 @@ class ReadScreenDataTool(private val registry: ScreenRegistry) : Tool {
         parameters = stringParam("screen_id", "Screen id."),
     )
 
-    override suspend fun execute(call: ToolCall): ToolCallResult = try {
-        val id = call.arguments["screen_id"] as? String ?: error("screen_id is required")
-        if (registry.get(id) == null) return ToolOutput.error(call.id, "no screen with id=$id")
-        val obj = registry.dataStore(id).load()
-        ToolOutput.clamp(obj.toString(2), call.id)
-    } catch (e: Exception) {
-        if (e is kotlinx.coroutines.CancellationException) throw e
-        ToolOutput.error(call.id, e.message ?: "read_screen_data failed")
+    override suspend fun execute(call: ToolCall): ToolCallResult {
+        return try {
+            val id = call.arguments["screen_id"] as? String ?: error("screen_id is required")
+            if (registry.get(id) == null) return ToolOutput.error(call.id, "no screen with id=$id")
+            val obj = registry.dataStore(id).load()
+            ToolOutput.clamp(obj.toString(2), call.id)
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            ToolOutput.error(call.id, e.message ?: "read_screen_data failed")
+        }
     }
 }
 
@@ -169,17 +187,19 @@ class WriteScreenDataTool(private val registry: ScreenRegistry) : Tool {
         ),
     )
 
-    override suspend fun execute(call: ToolCall): ToolCallResult = try {
-        val id = call.arguments["screen_id"] as? String ?: error("screen_id is required")
-        val key = call.arguments["key"] as? String ?: error("key is required")
-        val value = call.arguments["value"]
-        if (registry.get(id) == null) return ToolOutput.error(call.id, "no screen with id=$id")
-        val store = registry.dataStore(id)
-        store.put(key, normaliseForJson(value))
-        ToolOutput.clamp("wrote $id.$key", call.id)
-    } catch (e: Exception) {
-        if (e is kotlinx.coroutines.CancellationException) throw e
-        ToolOutput.error(call.id, e.message ?: "write_screen_data failed")
+    override suspend fun execute(call: ToolCall): ToolCallResult {
+        return try {
+            val id = call.arguments["screen_id"] as? String ?: error("screen_id is required")
+            val key = call.arguments["key"] as? String ?: error("key is required")
+            val value = call.arguments["value"]
+            if (registry.get(id) == null) return ToolOutput.error(call.id, "no screen with id=$id")
+            val store = registry.dataStore(id)
+            store.put(key, normaliseForJson(value))
+            ToolOutput.clamp("wrote $id.$key", call.id)
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            ToolOutput.error(call.id, e.message ?: "write_screen_data failed")
+        }
     }
 }
 
