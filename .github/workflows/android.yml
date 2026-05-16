@@ -44,7 +44,17 @@ jobs:
         run: chmod +x gradlew
 
       - name: Unit tests (core-bridge)
-        run: ./gradlew :core-bridge:testDebugUnitTest --stacktrace
+        run: ./gradlew :core-bridge:testDebugUnitTest --stacktrace --info
+
+      - name: Upload unit-test reports (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-bridge-test-reports
+          path: |
+            core-bridge/build/reports/tests/
+            core-bridge/build/test-results/
+          if-no-files-found: ignore
 
       - name: Assemble debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
