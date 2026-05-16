@@ -17,7 +17,4 @@ diag = ["diagnostics/diag"]
 # Throughput regression bench. `cargo run --release --example forward_throughput`
 # prints tokens/sec for a synthetic 4-layer model. Useful to compare before
 # and after kernel changes. Not a Criterion harness — keeps the workspace
-# dependency-free.
-[[example]]
-name = "forward_throughput"
-path = "benches/forward_throughput.rs"
+# dependency-free. Auto-discovered from `examples/`.

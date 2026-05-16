@@ -6,7 +6,7 @@
 //! bench runs in a couple of seconds on host. The point is regression
 //! detection, not absolute numbers.
 //!
-//! Run with: `cargo run --release --example forward_throughput`
+//! Run with: `cargo run --release -p model-runtime --example forward_throughput`
 
 use model_runtime::arch::lm::gemma4::{Gemma4Config, Gemma4Model, LayerType};
 use std::time::Instant;

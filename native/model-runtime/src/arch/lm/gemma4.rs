@@ -629,7 +629,7 @@ impl Gemma4Model {
         let logits = vec![0.0; cfg.vocab_size];
         let tokenizer = Tokenizer::from_gguf(&g.file).ok();
 
-        Ok(Self {
+        let model_built = Self {
             cfg,
             arch_tag,
             isa,
@@ -641,7 +641,50 @@ impl Gemma4Model {
             pos: 0,
             logits,
             tokenizer,
-        })
+        };
+
+        // D2 — per-layer arch resolution. Behind --features diag.
+        // Cheap (one event per layer), gates on the user's first
+        // on-device run so we can see exactly which layers got
+        // dispatched as full vs sliding and which alias to which.
+        #[cfg(feature = "diag")]
+        {
+            for i in 0..model_built.cfg.n_layers {
+                diagnostics::probe!(diagnostics::Probe::Gemma4Layer {
+                    idx: i,
+                    ty: match model_built
+                        .cfg
+                        .layer_types
+                        .get(i)
+                        .copied()
+                        .unwrap_or(LayerType::Sliding)
+                    {
+                        LayerType::Sliding => "sliding",
+                        LayerType::Full => "full",
+                    },
+                    head_dim: model_built.cfg.head_dim(i),
+                    rope_base: model_built.cfg.rope_base(i),
+                    n_rot: model_built.cfg.n_rot(i),
+                    window: model_built.cfg.window(i),
+                    owns_kv: model_built.cfg.owns_kv(i),
+                    kv_alias: model_built.kv_alias[i],
+                });
+            }
+            let kv_owning = (0..model_built.cfg.n_layers)
+                .filter(|&i| model_built.cfg.owns_kv(i))
+                .count();
+            diagnostics::probe!(diagnostics::Probe::Gemma4LoadSummary {
+                n_layers: model_built.cfg.n_layers,
+                hidden_size: model_built.cfg.hidden_size,
+                ple_dim: model_built.cfg.ple_dim,
+                kv_owning_layers: kv_owning,
+                kv_reusing_layers: model_built.cfg.n_layers - kv_owning,
+                final_logit_softcap: model_built.cfg.final_logit_softcapping,
+                tied_embeddings: model_built.cfg.tied_embeddings,
+            });
+        }
+
+        Ok(model_built)
     }
 
     pub fn tokenizer(&self) -> Option<&Tokenizer> {
@@ -873,6 +916,37 @@ fn gqa_attention(
 // ---------------------------------------------------------------------
 
 impl LanguageModel for Gemma4Model {
+    /// Forward pass over a single token.
+    ///
+    /// ## Shape-translation cheat-sheet — ggml → row-major
+    ///
+    /// llama.cpp's `gemma4.cpp` builds the graph with ggml's
+    /// `ggml_mul_mat(A, B)`, which semantically computes `B^T · A`. The
+    /// ggml weight tensors are stored with `ne = [in_features,
+    /// out_features]` (the column count comes first in ggml's
+    /// row-major-of-columns layout). When we read the GGUF, the
+    /// dimensions arrive in the same order: `dims[0] = in`, `dims[1] =
+    /// out`. Our `read_projection` builds a row-major `[out, in]`
+    /// weight matrix (`n = dims[1] = out`, `k = dims[0] = in`), which
+    /// is what `matvec_q4_k_row_major(w, n, k, x, y)` expects.
+    ///
+    /// Therefore every `cur = ggml_mul_mat(model.layers[il].wfoo, x)`
+    /// in `gemma4.cpp` becomes a single `w_foo.matvec(&x, &mut y)`
+    /// call here, with `y.len() = n` and `x.len() = k`. The
+    /// projections per layer:
+    ///
+    /// | gemma4.cpp                       | here                                 | shape  |
+    /// |----------------------------------|--------------------------------------|--------|
+    /// | `model.layers[il].wq`            | `layers[layer].w_q`                  | `[n_head*head_dim, hidden]` |
+    /// | `model.layers[il].wk`            | `layers[layer].w_k` (owning only)    | `[n_kv_heads*head_dim, hidden]` |
+    /// | `model.layers[il].wv`            | `layers[layer].w_v` (owning only)    | `[n_kv_heads*head_dim, hidden]` |
+    /// | `model.layers[il].wo`            | `layers[layer].w_o`                  | `[hidden, n_head*head_dim]` |
+    /// | `model.layers[il].ffn_gate`      | `layers[layer].w_gate`               | `[mlp_intermediate, hidden]` |
+    /// | `model.layers[il].ffn_up`        | `layers[layer].w_up`                 | `[mlp_intermediate, hidden]` |
+    /// | `model.layers[il].ffn_down`      | `layers[layer].w_down`               | `[hidden, mlp_intermediate]` |
+    /// | `per_layer_inp_gate`             | `per_layer_inp_gate`                 | `[ple_dim, hidden]` |
+    /// | `per_layer_proj`                 | `per_layer_proj`                     | `[hidden, ple_dim]` |
+    /// | `model.output` (or tok_embd)     | `compute_logits` → embed/output      | `[vocab, hidden]` |
     fn forward(&mut self, token: TokenId, kv: &mut KvCache) -> &[f32] {
         if !self.has_weights() {
             kv.seq_len = kv.seq_len.saturating_add(1);
@@ -925,7 +999,10 @@ impl LanguageModel for Gemma4Model {
                 cfg.rms_eps,
             );
 
-            // Q projection.
+            // Q projection. gemma4.cpp: `Qcur = ggml_mul_mat(wq, cur)`.
+            // ggml shape: wq=[hidden, n_head*head_dim], cur=[hidden,T];
+            // here T=1: `q = w_q @ h`, where w_q is row-major
+            // `[q_total, hidden]` (n=q_total, k=hidden).
             self.layers[layer]
                 .w_q
                 .matvec(&self.scratch.h, &mut self.scratch.q[..q_total]);
@@ -954,8 +1031,12 @@ impl LanguageModel for Gemma4Model {
                     .w_k
                     .as_ref()
                     .expect("owning layer missing w_k");
+                // K projection. gemma4.cpp: `Kcur = ggml_mul_mat(wk, cur)`.
+                // Row-major w_k is `[kv_total, hidden]`.
                 w_k.matvec(&self.scratch.h, &mut self.scratch.k[..kv_total]);
                 if let Some(w_v) = self.layers[layer].w_v.as_ref() {
+                    // V projection. gemma4.cpp: `Vcur = ggml_mul_mat(wv,
+                    // cur)`. Row-major w_v is `[kv_total, hidden]`.
                     w_v.matvec(&self.scratch.h, &mut self.scratch.v[..kv_total]);
                 } else {
                     // Gemma 4: V can fall back to K when wv is absent.
@@ -1004,7 +1085,9 @@ impl LanguageModel for Gemma4Model {
                 window,
             );
 
-            // O projection.
+            // O projection. gemma4.cpp: `cur = build_lora_mm(wo,
+            // attn_out)`. Row-major w_o is `[hidden, q_total]`; output
+            // is the attention contribution back into model width.
             self.layers[layer]
                 .w_o
                 .matvec(&self.scratch.attn_out[..q_total], &mut self.scratch.o);
@@ -1033,15 +1116,21 @@ impl LanguageModel for Gemma4Model {
                 &mut self.scratch.h,
                 cfg.rms_eps,
             );
+            // FFN gate: gemma4.cpp `gate = ggml_mul_mat(ffn_gate, cur)`.
+            // Row-major w_gate is `[mlp_intermediate, hidden]`.
             self.layers[layer]
                 .w_gate
                 .matvec(&self.scratch.h, &mut self.scratch.gate);
+            // FFN up: gemma4.cpp `up = ggml_mul_mat(ffn_up, cur)`.
             self.layers[layer]
                 .w_up
                 .matvec(&self.scratch.h, &mut self.scratch.up);
             for i in 0..cfg.mlp_intermediate {
                 self.scratch.swiglu[i] = gelu(self.scratch.gate[i]) * self.scratch.up[i];
             }
+            // FFN down: gemma4.cpp `cur = ggml_mul_mat(ffn_down,
+            // gelu(gate)*up)`. Row-major w_down is `[hidden,
+            // mlp_intermediate]`.
             self.layers[layer]
                 .w_down
                 .matvec(&self.scratch.swiglu, &mut self.scratch.ffn_out);
@@ -1063,6 +1152,9 @@ impl LanguageModel for Gemma4Model {
                     self.layers[layer].per_layer_proj.as_ref(),
                     self.layers[layer].per_layer_post_norm.as_ref(),
                 ) {
+                    // PLE input gate: gemma4.cpp
+                    // `cur = ggml_mul_mat(per_layer_inp_gate, cur)`.
+                    // Row-major `[ple_dim, hidden]`.
                     gate.matvec(&self.scratch.x, &mut self.scratch.ple_gate);
                     for v in self.scratch.ple_gate.iter_mut() {
                         *v = gelu(*v);
@@ -1072,6 +1164,9 @@ impl LanguageModel for Gemma4Model {
                     for i in 0..cfg.ple_dim {
                         self.scratch.ple_gate[i] *= self.scratch.ple_layer_input[ple_off + i];
                     }
+                    // PLE projection back to model width: gemma4.cpp
+                    // `cur = ggml_mul_mat(per_layer_proj, cur)`.
+                    // Row-major `[hidden, ple_dim]`.
                     proj.matvec(&self.scratch.ple_gate, &mut self.scratch.ple_proj_out);
                     let mut ple_normed = vec![0.0_f32; hidden];
                     rmsnorm_f32(

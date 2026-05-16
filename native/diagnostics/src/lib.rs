@@ -67,6 +67,32 @@ pub enum Probe {
         deletes: usize,
         ok: bool,
     },
+    /// Per-layer architecture resolution at load time. Emitted once per
+    /// layer when a Gemma 4 model is bound to weights — covers the
+    /// reviewer's "diagnostic probes" suggestion (per-layer type +
+    /// KV-share decisions + RoPE config).
+    Gemma4Layer {
+        idx: usize,
+        ty: &'static str, // "sliding" or "full"
+        head_dim: usize,
+        rope_base: f32,
+        n_rot: usize,
+        window: Option<usize>,
+        owns_kv: bool,
+        kv_alias: usize,
+    },
+    /// Per-load summary of Gemma 4 model shape — emitted once after
+    /// `Gemma4Model::load` finishes binding tensors. Cheap to read
+    /// from a CI log to confirm the model is what we expect.
+    Gemma4LoadSummary {
+        n_layers: usize,
+        hidden_size: usize,
+        ple_dim: usize,
+        kv_owning_layers: usize,
+        kv_reusing_layers: usize,
+        final_logit_softcap: Option<f32>,
+        tied_embeddings: bool,
+    },
 }
 
 #[cfg(feature = "diag")]
