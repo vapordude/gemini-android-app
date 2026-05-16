@@ -27,8 +27,10 @@ pub mod config;
 pub mod kv_cache;
 pub mod block;
 pub mod weights;
+pub mod loader;
 
 pub use config::Gemma4Config;
 pub use kv_cache::KvCache;
 pub use block::decoder_block_f32;
-pub use weights::LayerWeights;
+pub use weights::{LayerWeights, GlobalWeights};
+pub use loader::{load_global, load_layer, LoadError};
