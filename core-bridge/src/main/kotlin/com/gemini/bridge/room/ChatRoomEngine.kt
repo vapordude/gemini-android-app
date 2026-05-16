@@ -51,16 +51,11 @@ class ChatRoomEngine(
         val turn = pickRespondents(userText)
         for (seat in turn) {
             val core = coreFor(seat)
-            // Prime the seat's persona for this turn. Implementation note:
-            // for now we just inject the persona's systemPrompt as a turn
-            // preamble. Once GeminiCore exposes a setSystemPrompt() method
-            // the engine will use that instead of the inline prefix.
-            val primed = buildString {
-                append("[Persona: ").append(seat.persona.name).append("]\n")
-                append(seat.persona.systemPrompt).append("\n\n")
-                append(userText)
-            }
-            val r = runCatching { core.sendMessage(primed) }
+            // Tell the driver the seat's persona via the proper interface
+            // method; the user text stays untouched. The driver builds the
+            // final system instruction with the persona prepended.
+            runCatching { core.setSystemPrompt(seat.persona.systemPrompt) }
+            val r = runCatching { core.sendMessage(userText) }
                 .getOrElse { GeminiResult.Error(it.message ?: "send failed") }
             val text = when (r) {
                 is GeminiResult.Success -> r.response

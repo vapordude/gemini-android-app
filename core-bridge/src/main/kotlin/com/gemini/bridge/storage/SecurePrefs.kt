@@ -69,8 +69,13 @@ class SecurePrefs(context: Context) {
             }
         }.apply()
 
+    /**
+     * Stored as the [com.gemini.bridge.DriverMode] name. Default is
+     * `SAFETY_FIRST` so users are protected from accidentally leaking
+     * credentials/secrets/SSH keys to the remote API.
+     */
     var driverMode: String
-        get() = plain.getString(KEY_DRIVER_MODE, "REMOTE_ONLY") ?: "REMOTE_ONLY"
+        get() = plain.getString(KEY_DRIVER_MODE, "SAFETY_FIRST") ?: "SAFETY_FIRST"
         set(value) = plain.edit().putString(KEY_DRIVER_MODE, value).apply()
 
     var model: String?

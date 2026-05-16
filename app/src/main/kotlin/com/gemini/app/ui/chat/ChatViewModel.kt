@@ -5,8 +5,9 @@ import android.net.Uri
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.gemini.bridge.Attachment
 import com.gemini.bridge.RestGeminiCore
+import com.gemini.domain.Attachment
+import com.gemini.domain.GeminiCore
 import com.gemini.domain.GeminiEvent
 import com.gemini.domain.GeminiMessage
 import com.gemini.domain.GeminiResult
@@ -23,7 +24,17 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
+/**
+ * `core` owns settings, persistence, workspace, and Termux — none of which
+ * are routed across drivers. `messaging` is the [GeminiCore] surface
+ * (router or remote-only) the ViewModel sends turns through. When the
+ * router is wired, both `core.init` and `messaging.init` get called via
+ * the DriverRouter so credentials reach both drivers.
+ */
+class ChatViewModel(
+    private val core: RestGeminiCore,
+    private val messaging: GeminiCore = core,
+) : ViewModel() {
 
     private val _messages = mutableStateListOf<GeminiMessage>()
     val messages: List<GeminiMessage> = _messages
@@ -107,7 +118,7 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
 
     init {
         viewModelScope.launch {
-            core.events.collect { ev ->
+            messaging.events.collect { ev ->
                 when (ev) {
                     is GeminiEvent.MessageAdded -> _messages.add(ev.message)
                     is GeminiEvent.MessageUpdated -> {
@@ -130,7 +141,7 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
     fun initCore(config: Map<String, Any>) {
         viewModelScope.launch {
             _isLoading.value = true
-            when (val result = core.init(config)) {
+            when (val result = messaging.init(config)) {
                 is GeminiResult.Success -> {
                     _isReady.value = true
                     _model.value = core.currentModel()
@@ -217,8 +228,8 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
         sendJob = viewModelScope.launch {
             _isLoading.value = true
             try {
-                val result = if (payload.isEmpty()) core.sendMessage(text)
-                    else core.sendMessage(text, payload)
+                val result = if (payload.isEmpty()) messaging.sendMessage(text)
+                    else messaging.sendMessage(text, payload)
                 when (result) {
                     is GeminiResult.Success -> {}
                     is GeminiResult.Error -> _error.value = result.message
@@ -345,7 +356,7 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
         val decision = if (always) ToolDecision.AlwaysApprove else ToolDecision.Approve
         _pendingCall.value = null
         viewModelScope.launch {
-            core.resolveToolDecision(callId, decision)
+            messaging.resolveToolDecision(callId, decision)
             if (always) _autoApprove.value = true
         }
     }
@@ -353,13 +364,13 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
     fun reject(callId: String, reason: String = "user declined") {
         _pendingCall.value = null
         viewModelScope.launch {
-            core.resolveToolDecision(callId, ToolDecision.Reject(reason))
+            messaging.resolveToolDecision(callId, ToolDecision.Reject(reason))
         }
     }
 
     fun resetSession() {
         viewModelScope.launch {
-            core.resetSession()
+            messaging.resetSession()
             _messages.clear()
         }
     }
@@ -426,13 +437,13 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
                         }
                     }
                 }
-                core.resetSession()
+                messaging.resetSession()
                 _messages.clear()
                 // Inline call instead of sendMessage() to avoid re-entering
                 // auto-compress on the summary response.
                 _isLoading.value = true
                 try {
-                    when (val r = core.sendMessage(prompt)) {
+                    when (val r = messaging.sendMessage(prompt)) {
                         is GeminiResult.Success -> {}
                         is GeminiResult.Error -> _error.value = r.message
                     }

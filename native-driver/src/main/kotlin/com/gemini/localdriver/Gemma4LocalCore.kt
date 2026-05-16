@@ -28,7 +28,18 @@ class Gemma4LocalCore : GeminiCore {
     override val events: Flow<GeminiEvent> = _events.asSharedFlow()
 
     @Volatile private var handle: Long = 0L
-    @Volatile private var ready: Boolean = libraryAvailable
+    @Volatile private var ready: Boolean = false
+
+    /**
+     * True iff [init] has succeeded and [sendMessage] can be served by the
+     * native side. The [DriverRouter] queries this before routing sensitive
+     * prompts here; when it returns false the router refuses rather than
+     * silently falling back to remote.
+     */
+    fun isReady(): Boolean = ready && libraryAvailable
+
+    /** True iff `libgemma4.so` is present in the APK. Independent of [init]. */
+    fun isLibraryAvailable(): Boolean = libraryAvailable
 
     override suspend fun init(config: Map<String, Any>): GeminiResult {
         if (!libraryAvailable) {

@@ -19,6 +19,7 @@ import com.gemini.bridge.tools.WriteFileTool
 import com.gemini.bridge.storage.ChatStore
 import com.gemini.bridge.storage.SecurePrefs
 import com.gemini.bridge.workspace.Workspace
+import com.gemini.domain.Attachment
 import com.gemini.domain.GeminiCore
 import com.gemini.domain.GeminiEvent
 import com.gemini.domain.GeminiMessage
@@ -47,27 +48,6 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
-
-/**
- * Raw attachment bytes + MIME type for a multimodal user turn. Gemini accepts
- * inlineData parts of up to ~20 MB per request.
- */
-data class Attachment(
-    val bytes: ByteArray,
-    val mimeType: String,
-    // Optional local file the UI can render as a thumbnail. Not used by the
-    // REST call itself (which always sends `bytes` as base64 inlineData).
-    val localPath: String? = null
-) {
-    override fun equals(other: Any?) = other is Attachment &&
-        mimeType == other.mimeType && bytes.contentEquals(other.bytes) &&
-        localPath == other.localPath
-    override fun hashCode(): Int {
-        var h = 31 * mimeType.hashCode() + bytes.contentHashCode()
-        h = 31 * h + (localPath?.hashCode() ?: 0)
-        return h
-    }
-}
 
 /**
  * Gemini client with native function calling. The model declares what it
@@ -151,6 +131,13 @@ class RestGeminiCore(
     @Volatile private var discoveredModels: List<String> = AVAILABLE_MODELS
     private val tokenLimits = ConcurrentHashMap<String, Int>()
     @Volatile private var lastTokenUsage: Int = 0
+
+    /**
+     * Caller-supplied system-prompt override. Set via [setSystemPrompt];
+     * when non-null it's prepended to the built-in instruction so
+     * persona behaviour layers on top of the workspace/tool preamble.
+     */
+    @Volatile private var customSystemPrompt: String? = null
 
     init {
         // Restore non-sensitive prefs eagerly; the API key is injected via init().
@@ -406,7 +393,7 @@ class RestGeminiCore(
 
     override suspend fun sendMessage(text: String): GeminiResult = sendMessage(text, emptyList())
 
-    suspend fun sendMessage(text: String, attachments: List<Attachment>): GeminiResult = sendLock.withLock {
+    override suspend fun sendMessage(text: String, attachments: List<Attachment>): GeminiResult = sendLock.withLock {
         if (apiKey.isBlank() && accessToken.isBlank()) return GeminiResult.Error("API key or access token not configured")
 
         val preTurnSize = turns.size
@@ -491,6 +478,10 @@ class RestGeminiCore(
     }
 
     override suspend fun loadHistory(): List<GeminiMessage> = uiMessages.toList()
+
+    override suspend fun setSystemPrompt(prompt: String?) {
+        customSystemPrompt = prompt?.takeIf { it.isNotBlank() }
+    }
 
     // --- tool call flow ---
 
@@ -789,6 +780,9 @@ class RestGeminiCore(
                     "under /storage/emulated/0/ via Settings → Workspace."
         }
         val text = buildString {
+            customSystemPrompt?.let { persona ->
+                append(persona).append("\n\n---\n\n")
+            }
             append("You are Gemini running inside a native Android app.\n\n")
             append("Workspace: ").append(workspace.rootLabel()).append('\n')
             if (reachable != null) {
