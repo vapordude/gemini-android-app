@@ -81,6 +81,30 @@ gemini-2.5-\* list below a divider.
   reported newer values. Bumped to `0.3.0` / `3` to match the tag.
 - `CHANGELOG.md` had a pre-existing duplicate `## [0.2.0]` heading.
   Deduplicated as part of the 0.3.0 cut.
+- `MainActivity` now verifies a previously-selected local GGUF still
+  exists on disk before flipping into `LOCAL_AGENT` mode on cold
+  start. Without this, an upgrade where the file was deleted between
+  installs would land the user in local mode with no model, then
+  fail ungracefully on first send.
+
+### Known follow-ups (deferred, specced)
+
+- **OAuth redirect URI still says `com.google.gemini.android`** in
+  `appAuthRedirectScheme` + `REDIRECT_URI_APPAUTH`. Renaming requires
+  coordinated re-registration at Google's OAuth console; can't be
+  unilateral. See `docs/futures/internal-rename-gemini-to-kaimahi.md`
+  for the full plan (interior class renames + OAuth coordination).
+- **Interior class names** still carry `Gemini` prefix (`GeminiCore`,
+  `RestGeminiCore`, `GeminiMessage`, …). User-facing UI is clean;
+  the rename is a mechanical refactor PR scheduled post-0.3.0.
+- **Emdash-rs as production runtime** — currently a contract + Rust
+  skeleton; the production chat path still routes through cloud
+  Gemini by default. See `docs/futures/emdash-rs-sovereignty.md`.
+- **Agent runtime → native loop wiring** — `RustAgentRuntime.run()`
+  is a stub; multi-turn local tool use blocks on this. See
+  `docs/futures/agent-runtime-wiring.md`.
+- **Memory-store JNI bridge** — Rust DAG ↔ Kotlin MemoryBrowser
+  surface disconnected. See `docs/futures/memory-store-jni.md`.
 
 ### Added — Gemma 4 (E2B / E4B) on-device
 
