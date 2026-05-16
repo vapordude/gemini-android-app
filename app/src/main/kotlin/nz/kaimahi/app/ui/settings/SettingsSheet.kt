@@ -76,9 +76,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import java.util.Locale
 import nz.kaimahi.app.ui.chat.ChatViewModel
 import nz.kaimahi.app.ui.termux.openTermux
-import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
