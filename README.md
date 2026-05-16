@@ -1,26 +1,33 @@
-<h1>
-  <img src="docs/logo_gemini.png" alt="" height="32" align="top" />
-  Code on Android
-</h1>
+# Kaimahi
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9.24-7F52FF.svg?logo=kotlin&logoColor=white)](https://kotlinlang.org/)
+[![Rust](https://img.shields.io/badge/Rust-stable-DEA584.svg?logo=rust&logoColor=white)](https://rust-lang.org/)
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack_Compose-2024.06-4285F4.svg?logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
 [![Android API 26+](https://img.shields.io/badge/API-26%2B-3DDC84.svg?logo=android&logoColor=white)](https://developer.android.com/)
-[![Status](https://img.shields.io/badge/status-usable-brightgreen.svg)](#)
 
 > 🇬🇧 English · [🇫🇷 Version française](fr/README.md)
 
-A **native Gemini coding client for Android** — not a wrapper around the
-official Google app, not a thin webview. A real client that turns your
-phone into a pocket coding workstation: the model reads and writes files,
-runs shell commands (compiles, tests, starts servers), generates images,
-and holds context across hours of conversation. Written in Kotlin +
-Jetpack Compose.
+**Kaimahi** (*Te Reo Māori for "worker"*) is a pocket coding workstation
+for Android. Local on-device LLM + cloud LLM running side by side under
+one agent loop. The agent reads and writes files, runs shell commands,
+generates images, manages remote site deployments (via emdash-rs), and
+persists memory across sessions. Kotlin + Jetpack Compose UI on top of a
+from-scratch Rust runtime — no third-party inference libraries.
 
-<p align="center">
-  <img src="docs/screenshot.jpg" alt="Chat in action: function calling + tool approval" width="360" />
-</p>
+- Local agent + cloud agent **at the same time**. Auth both, fan out, or
+  pick per-turn.
+- **Topological + time-aware persistent memory** under
+  `filesDir/memory/`. Notes form a per-session DAG with typed edges
+  (`Follows`, `CausedBy`, `Contradicts`, `Supersedes`, `Refines`,
+  `References`), optional expiry windows, and recency-decayed recall.
+- Local OpenAPI 3.1 surface ([`native/openapi.yaml`](native/openapi.yaml))
+  with OpenAI-compat endpoints — point any existing tool at
+  `OPENAI_BASE_URL=http://127.0.0.1:<port>/v1`.
+- Content-neutral runtime. No allowlist, no fingerprinting, no refusal
+  layer. Architecture is read from GGUF metadata.
+- API failures (cloud or tool) flow back to the agent as structured
+  error events so it can adapt mid-turn.
 
 ## 🎯 What you can actually do with it
 
@@ -97,7 +104,7 @@ To build from source:
 ### Option 1: pre-built APK
 
 Download the latest APK from the
-[Releases page](https://github.com/aciderix/gemini-android-app/releases).
+[Releases page](https://github.com/vapordude/gemini-android-app/releases).
 Each tagged release publishes both `gemini-android-app-<tag>-debug.apk`
 and `gemini-android-app-<tag>-release.apk`. The release variant uses the
 configured release keystore when CI signing secrets are present, and
@@ -106,7 +113,7 @@ otherwise falls back to debug signing so the APK stays installable.
 ### Option 2: build from source
 
 ```bash
-git clone https://github.com/aciderix/gemini-android-app
+git clone https://github.com/vapordude/gemini-android-app
 cd gemini-android-app
 ./gradlew :app:assembleDebug
 adb install app/build/outputs/apk/debug/app-debug.apk
@@ -129,18 +136,42 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 ## 🧱 Architecture
 
-Multi-module Gradle project:
+Multi-module Gradle project. Existing cloud-Gemini path stays untouched;
+new modules add on-device inference, an agent loop, emdash management,
+and a local OpenAPI server.
 
-| Module           | Role                                                                  |
-|------------------|-----------------------------------------------------------------------|
-| `:app`           | Compose UI, ViewModels, Activity                                      |
-| `:core-bridge`   | REST Gemini client, tool registry, Termux IPC, SAF, prefs             |
-| `:domain`        | Pure types (`GeminiMessage`, `ToolSpec`, `GeminiEvent`…) — no Android |
-| `:ui-components` | Shared design tokens (theme, colours)                                 |
+| Module | Role |
+| --- | --- |
+| `:app` | Compose UI, ViewModels, Activity |
+| `:core-bridge` | REST Gemini client, tool registry, Termux IPC, SAF, prefs |
+| `:domain` | Pure types (`GeminiMessage`, `ToolSpec`, `GeminiEvent`, `AgentRuntime`, `InferenceEngine`, `TraceEvent`, `DeploymentConfig`…) — no Android |
+| `:ui-components` | Shared design tokens + `AppScreen` scaffold |
+| `:inference-bridge` | Kotlin facade over the native LM/image runtime |
+| `:agent-bridge` | Kotlin facade over the native agent state machine |
+| `:emdash-bridge` | Typed HTTP client + Compose screens for remote emdash-rs instances |
+| `native/` (Rust) | from-scratch tensor math, GGUF loader, agent loop, telemetry, hand-rolled HTTP/1.1 server. See `native/README.md`. |
 
-All network traffic flows through `RestGeminiCore`, which emits
-`GeminiEvent`s consumed by `ChatViewModel`. No DI framework, no Room:
-`SharedPreferences` + JSON files under `filesDir`.
+The cloud-Gemini path flows through `RestGeminiCore`. The on-device path
+goes through the `inference-bridge` and `agent-bridge` JNI surfaces,
+both implementing the contract in [`native/openapi.yaml`](native/openapi.yaml)
+([API surface guide](docs/API.md)). The same OpenAPI spec is served on
+127.0.0.1 so CLIs, editor plugins, and devops scripts can talk to the
+runtime as a drop-in OpenAI-compatible endpoint.
+
+No DI framework, no Room. `SharedPreferences` + JSON files under
+`filesDir`.
+
+### On-device runtime principles
+
+- **No external libs where possible.** The tensor core is hand-rolled.
+- **Content-neutral.** Weights are opaque; architecture comes from
+  GGUF metadata. No allowlist, no fingerprinting, no refusal layer.
+- **Non-extractive.** Local traces only, typed-enum fields. No
+  analytics, no remote logging.
+- **Architecture-agnostic.** Language models + diffusion models live
+  side by side under `native/model-runtime/src/arch/`. New
+  architectures slot in without core changes. NPU/GPU acceleration
+  plugs in via the `Delegate` trait. See [`docs/PORTING.md`](docs/PORTING.md).
 
 ## ⚙️ Advanced configuration
 
@@ -188,6 +219,26 @@ Tested with:
 don't support function calling — they'll work for pure chat but the
 tool stack won't be available.
 
+## 🔌 Local API (OpenAPI)
+
+The Rust runtime exposes a single OpenAPI 3.1 contract
+([`native/openapi.yaml`](native/openapi.yaml)) served on `127.0.0.1`:
+
+- **`native`** — canonical NDJSON surface (`/info`, `/models`,
+  `/generate`, `/agent/run`).
+- **`openai-compat`** — drop-in for existing tooling: `/v1/models`,
+  `/v1/chat/completions` (incl. streaming + tools + multimodal),
+  `/v1/completions`, `/v1/embeddings`, `/v1/images/generations`,
+  `/v1/images/edits`, `/v1/videos/generations` (501 until diffusion /
+  video arches ship).
+- **`health`** — `/healthz`, `/readyz`, `/metrics` (Prometheus text).
+- **`diagnostics`** — `/diag/probes`, `/diag/snapshot` (only present
+  in `--features diag` builds).
+- **`telemetry`** — `/traces` (always on, non-extractive).
+- **`emdash`** — local proxy to remote emdash-rs instances.
+
+Full surface guide: [`docs/API.md`](docs/API.md).
+
 ## 🤝 Contributing
 
 Contributions welcome:
@@ -219,11 +270,46 @@ valid tag such as `v1.0.0`.
 Distributed under the **Apache 2.0** license. See [`LICENSE`](LICENSE)
 for details.
 
-## 🙏 Credits
+## 📚 Documentation
 
-- **Inspiration**: [Gemini CLI](https://github.com/google-gemini/gemini-cli) by Google.
-- **Model**: [Gemini API](https://ai.google.dev/) by Google.
-- **Shell bridge**: [Termux](https://termux.dev/) — an open-source gem.
-- **UI**: [Jetpack Compose](https://developer.android.com/jetpack/compose) + Material 3.
+| File | What's in it |
+| --- | --- |
+| [`PRIVACY.md`](PRIVACY.md) | Four invariants, outbound-traffic table, rules for forkers. |
+| [`SECURITY.md`](SECURITY.md) | Reporting path, scope, coordinated-disclosure window. |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Five load-bearing contracts contributors must respect. |
+| [`MIHI.md`](MIHI.md) | Acknowledgement of upstream forks + foundations. |
+| [`CHANGELOG.md`](CHANGELOG.md) | What's shipped. |
+| [`docs/README.md`](docs/README.md) | Doc index — read-in-order + read-by-task. |
+| [`docs/AGENTIC.md`](docs/AGENTIC.md) | Agent loop, memory (topological + time-aware), training capture. |
+| [`docs/API.md`](docs/API.md) | Unified OpenAPI 3.1 surface — native, OpenAI-compat, health, diag, telemetry, emdash. |
+| [`docs/BRAND.md`](docs/BRAND.md) | Voice, palette (pounamu / kowhai / kauri), brand mark, badges. |
+| [`docs/PORTING.md`](docs/PORTING.md) | New model architecture, vendor NPU/GPU delegate, three upstream projects. |
+| [`docs/SCAFFOLDING.md`](docs/SCAFFOLDING.md) | Six common extension scaffolds for forkers. |
+| [`docs/SCREENS.md`](docs/SCREENS.md) | Canonical `AppScreen` shape. |
+| [`docs/STYLES.md`](docs/STYLES.md) | Per-token technical reference. |
+| [`native/README.md`](native/README.md) | Rust workspace crate map + OpenAPI tags. |
+| [`native/openapi.yaml`](native/openapi.yaml) | Source-of-truth API contract. |
 
-Project link: <https://github.com/aciderix/gemini-android-app>
+## 🛡️ Privacy
+
+**Kaimahi never extracts PII. Not from operators, not from collaborators,
+not from anyone.** Edge inference works without it. See
+**[`PRIVACY.md`](PRIVACY.md)** for the four invariants this codebase
+holds, the three categories of outbound traffic that are allowed, and
+the rules a forker has to keep to be allowed to keep the name.
+
+## 🪶 Mihi (acknowledgements)
+
+Kaimahi stands on shoulders. See [`MIHI.md`](MIHI.md) for the full
+acknowledgement; in short:
+
+- **Upstream forks**: the original `gemini-android-app` (aciderix), the
+  Gemini CLI by Google, [DeepAgent](https://github.com/RUC-NLPIR/DeepAgent)
+  for the agent state machine, and the EmDash CMS for the management
+  surface.
+- **Foundations**: [Gemini API](https://ai.google.dev/),
+  [Termux](https://termux.dev/), [Jetpack Compose](https://developer.android.com/jetpack/compose),
+  Material 3, the GGUF file format community, and the broader Rust
+  systems-programming ecosystem we deliberately keep at arm's length.
+
+Project link: <https://github.com/vapordude/gemini-android-app>

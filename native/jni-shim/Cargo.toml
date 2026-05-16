@@ -1,0 +1,20 @@
+[package]
+name = "jni-shim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "kaimahi_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+model-runtime = { path = "../model-runtime" }
+agent-core = { path = "../agent-core" }
+emdash-client = { path = "../emdash-client" }
+telemetry = { path = "../telemetry" }
+local-server = { path = "../local-server" }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { version = "0.21", default-features = false }

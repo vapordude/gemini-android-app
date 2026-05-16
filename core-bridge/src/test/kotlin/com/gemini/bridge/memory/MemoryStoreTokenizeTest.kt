@@ -1,4 +1,4 @@
-package com.gemini.bridge.memory
+package nz.kaimahi.bridge.memory
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

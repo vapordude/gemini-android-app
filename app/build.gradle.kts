@@ -20,7 +20,7 @@ val hasReleaseSigning = listOf(
 ).all { !it.isNullOrBlank() } && file(releaseStoreFilePath!!).exists()
 
 android {
-    namespace = "com.gemini.app"
+    namespace = "nz.kaimahi.app"
     compileSdk = 34
 
     defaultConfig {
@@ -86,6 +86,9 @@ dependencies {
     implementation(project(":domain"))
     implementation(project(":ui-components"))
     implementation(project(":native-driver"))
+    implementation(project(":inference-bridge"))
+    implementation(project(":agent-bridge"))
+    implementation(project(":emdash-bridge"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

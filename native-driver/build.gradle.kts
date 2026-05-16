@@ -6,7 +6,7 @@ plugins {
 android {
     // NOT `com.gemini.native` -- "native" is a Java reserved keyword and
     // AGP-generated BuildConfig.java would fail javac.
-    namespace = "com.gemini.localdriver"
+    namespace = "nz.kaimahi.localdriver"
     compileSdk = 34
 
     defaultConfig {

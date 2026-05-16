@@ -1,0 +1,15 @@
+[package]
+name = "model-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tensor-core = { path = "../tensor-core" }
+gguf-loader = { path = "../gguf-loader" }
+diagnostics = { path = "../diagnostics" }
+
+[features]
+default = []
+diag = ["diagnostics/diag"]

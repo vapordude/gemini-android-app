@@ -1,25 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Mirror of styles.md tokens. Keep in sync with Theme.kt. -->
-    <color name="aistudio_bg_dark">#131314</color>
-    <color name="aistudio_surface_dark">#1E1F20</color>
-    <color name="aistudio_surface_hi_dark">#282A2C</color>
-    <color name="aistudio_line_dark">#2F3133</color>
-    <color name="aistudio_line_strong_dark">#3C3D3F</color>
+    <!-- Mirror of docs/STYLES.md + BRAND.md tokens. Compose drives the
+         in-app palette; these resources are only for window/status/nav
+         background and the launcher canvas. Keep in sync with Theme.kt. -->
+    <color name="kaimahi_bg_dark">#0E1416</color>
+    <color name="kaimahi_bg_light">#FAFBFB</color>
 
-    <color name="aistudio_bg_light">#FFFFFF</color>
-    <color name="aistudio_surface_light">#F8F9FA</color>
-
-    <!-- Accent: Google Blue 300 on dark, Blue 700 on light. -->
-    <color name="aistudio_accent">#8AB4F8</color>
-    <color name="aistudio_accent_light">#0B57D0</color>
-
-    <!-- Gemini four-color spark (2025 brand refresh). -->
-    <color name="gemini_spark_blue">#4285F4</color>
-    <color name="gemini_spark_red">#EA4335</color>
-    <color name="gemini_spark_yellow">#FBBC05</color>
-    <color name="gemini_spark_green">#34A853</color>
-
-    <!-- Launcher background — keeps the dark canvas. -->
-    <color name="ic_launcher_background">#131314</color>
+    <!-- Launcher background — same as dark canvas. -->
+    <color name="ic_launcher_background">#0E1416</color>
 </resources>

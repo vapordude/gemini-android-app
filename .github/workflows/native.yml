@@ -1,0 +1,76 @@
+name: Native (Rust)
+
+on:
+  push:
+    branches: [main, "claude/**"]
+    paths:
+      - "native/**"
+      - ".github/workflows/native.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "native/**"
+      - ".github/workflows/native.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: native
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup component add rustfmt clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            native/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('native/Cargo.lock', 'native/**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build
+        run: cargo build --workspace --release
+
+      - name: Test
+        run: cargo test --workspace --lib
+
+  android-cross:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: native
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust + Android targets
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup target add aarch64-linux-android x86_64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Set up Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+
+      - name: Cross-compile jni-shim
+        run: |
+          cargo ndk -t arm64-v8a -t x86_64 build --release -p jni-shim
