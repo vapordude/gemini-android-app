@@ -1,15 +1,38 @@
-//! Gemma 2/3/4 architecture. Config-driven from GGUF metadata — head
-//! count, head dim, sliding window, RoPE base, etc. all come from the
-//! file so the runtime never guesses. Weights are dequantized from the
-//! GGUF tensor payload at load time (Q4_K / Q8_0 / Q4_0 / F16 / F32 / BF16)
-//! and stored as `Vec<f32>`. The forward pass walks the standard SwiGLU
-//! decoder stack using the `tensor_core::kernels` reference math.
+//! Gemma 4 (Gemma 3n) architecture. Config-driven from GGUF metadata —
+//! head count, head dim, RoPE base, KV-shared layer count, and PLE
+//! dim all come from the file.
 //!
-//! Memory note: a 2B model dequantized to F32 needs ~8 GB. Phones run
-//! out before then. For real-world use we still need quantized matvec
-//! kernels — that's the follow-up. This file produces honest tokens for
-//! F16 / F32 / Q8_0 weights and small (e.g. 270M) Q4_K Gemmas that fit
-//! into device RAM dequantized.
+//! Weight storage avoids dequantizing the large projection matrices at
+//! load time. We keep the raw Q4_K_M bytes packed and call
+//! [`tensor_core::quant::q4_k::matvec_q4_k_row_major`] in the forward
+//! path. Norms + embeddings stay as F32 because they're small and
+//! every forward pass touches them in full.
+//!
+//! What's wired:
+//!
+//! - SwiGLU decoder block (RMSNorm → Q/K/V → RoPE → GQA SDPA → O →
+//!   optional Gemma 2/3 post-attn norm → residual → FFN → optional
+//!   post-FFN norm → residual).
+//! - KV-shared early layers (the "selective activation" of E2B/E4B).
+//!   Layers `0..kv_shared_layers` alias the layer-0 KV cache on read,
+//!   and skip the write so the cache is canonical for that range.
+//! - PLE additive injection. If `per_layer_token_embd.weight` is
+//!   present in the GGUF, we read the row for the current token and
+//!   add it to the residual stream after each block.
+//!
+//! What ISN'T wired (intentional — the architecture extras need
+//! reference parity to land correctly):
+//!
+//! - **AltUp** (multi-input residual streams). E2B uses 4 parallel
+//!   residuals that interact via a learned router; we collapse them
+//!   to one.
+//! - **LAuReL** (Learned Augmented Residual Layer). Replaces the plain
+//!   residual add with a gated combination of L and R projections.
+//!
+//! Translation: the forward pass produces token ids, the math is the
+//! "vanilla SwiGLU decoder" lower bound. For coherent E2B/E4B output,
+//! AltUp + LAuReL still need implementing. See the README's "Known
+//! gaps" section.
 
 use crate::tokenizer::Tokenizer;
 use crate::{KvCache, LanguageModel, LoadError, RuntimeInfo, TokenId};
@@ -19,6 +42,7 @@ use tensor_core::kernels::{
     attention::sdpa_decode_f32, matmul::matvec_f32, rmsnorm::rmsnorm_f32, rope::rope_inplace_f32,
     softmax::softmax_f32, swiglu::swiglu_f32,
 };
+use tensor_core::quant::q4_k::{matvec_q4_k_row_major, SUPER_BLOCK as Q4K_BLOCK};
 use tensor_core::quant::{dequantize_to_f32, DequantError, DequantType};
 use tensor_core::IsaTier;
 
@@ -35,18 +59,19 @@ pub struct Gemma4Config {
     pub rope_base: f32,
     pub sliding_window: Option<usize>,
     pub rms_eps: f32,
-    /// Some Gemma checkpoints multiply the embedding by sqrt(hidden_size)
-    /// after lookup. The HF reference does this; we honour it when the
-    /// metadata flag is set (or by default for the gemma family).
     pub scale_embed: bool,
-    /// Gemma 2 / 3 add a second RMSNorm after attention and after MLP,
-    /// applied to the sublayer output before the residual.
     pub post_norm: bool,
+    /// Gemma 4 E2B/E4B share KV cache across the first N layers.
+    /// `0` for Gemma 2/3 (no sharing).
+    pub kv_shared_layers: usize,
+    /// Width of the Per-Layer Embedding channel. `0` when the GGUF
+    /// has no PLE tensors.
+    pub ple_dim: usize,
 }
 
 impl Gemma4Config {
     pub fn from_gguf(g: &GgufFile) -> Result<Self, LoadError> {
-        let prefix = ["gemma4", "gemma-4", "gemma3", "gemma2", "gemma"]
+        let prefix = ["gemma4", "gemma-4", "gemma3n", "gemma3", "gemma2", "gemma"]
             .iter()
             .find(|p| g.get(&format!("{p}.context_length")).is_some())
             .copied()
@@ -84,6 +109,9 @@ impl Gemma4Config {
             .get(&format!("{prefix}.attention.sliding_window"))
             .and_then(MetaValue::as_u32)
             .map(|v| v as usize);
+        let kv_shared_layers =
+            get_u32_or("attention.shared_kv_layers", 0) as usize;
+        let ple_dim = get_u32_or("embedding_length_per_layer_input", 0) as usize;
 
         let vocab_size = g
             .get("tokenizer.ggml.tokens")
@@ -110,42 +138,75 @@ impl Gemma4Config {
             sliding_window,
             rms_eps,
             scale_embed: true,
-            // Gemma 2/3/4 ship with the double-norm pattern. The flag
-            // lives here so callers can flip it if a future variant
-            // drops the post-attn / post-ffn norms.
-            post_norm: prefix != "gemma", // gemma 1 used a single norm pair
+            post_norm: !matches!(prefix, "gemma"),
+            kv_shared_layers,
+            ple_dim,
         })
     }
 }
 
-/// Owning buffers for one decoder layer. F32 storage — the production
-/// path will swap each `Vec<f32>` for a typed view that does the matvec
-/// directly against quantized bytes.
+/// A weight matrix in one of the storage modes we support. The forward
+/// pass dispatches on the variant to pick the right matvec kernel.
+///
+/// `F32` is the catch-all that handles small tensors (norms,
+/// embeddings) and any quant variant we haven't specialised yet — the
+/// loader still dequantizes them to F32 on disk to keep correctness.
+/// `Q4K` is the big projection-matrix path; weights stay packed so the
+/// in-memory footprint matches the file.
+enum WeightView {
+    F32(Vec<f32>),
+    Q4K {
+        bytes: Vec<u8>,
+        n: usize,
+        k: usize,
+    },
+}
+
+impl WeightView {
+    /// `y[n] = W · x[k]`. Shape of `W` is `[n, k]`. Caller supplies
+    /// the F32 fallback path; Q4_K dispatches to the packed kernel.
+    fn matvec(&self, x: &[f32], y: &mut [f32]) {
+        match self {
+            WeightView::F32(w) => {
+                let n = y.len();
+                let k = x.len();
+                // matvec_f32 expects W[n, k] row-major.
+                matvec_f32(x, w, y, n, k);
+            }
+            WeightView::Q4K { bytes, n, k } => {
+                matvec_q4_k_row_major(bytes, *n, *k, x, y);
+            }
+        }
+    }
+}
+
+/// Owning storage for one decoder layer.
 struct LayerWeights {
     attn_norm: Vec<f32>,
     post_attn_norm: Option<Vec<f32>>,
     ffn_norm: Vec<f32>,
     post_ffn_norm: Option<Vec<f32>>,
-    w_q: Vec<f32>,    // [n_heads * head_dim, hidden]
-    w_k: Vec<f32>,    // [n_kv_heads * head_dim, hidden]
-    w_v: Vec<f32>,    // [n_kv_heads * head_dim, hidden]
-    w_o: Vec<f32>,    // [hidden, n_heads * head_dim]
-    w_gate: Vec<f32>, // [inter, hidden]
-    w_up: Vec<f32>,   // [inter, hidden]
-    w_down: Vec<f32>, // [hidden, inter]
+    w_q: WeightView,
+    w_k: WeightView,
+    w_v: WeightView,
+    w_o: WeightView,
+    w_gate: WeightView,
+    w_up: WeightView,
+    w_down: WeightView,
 }
 
-/// Top-level (non-per-layer) weights.
 struct GlobalWeights {
-    embed: Vec<f32>,           // [vocab, hidden] — row-major
-    output_norm: Vec<f32>,     // [hidden]
-    lm_head: Option<Vec<f32>>, // [vocab, hidden] when not tied to embed
+    embed: Vec<f32>,       // [vocab, hidden] — row-major
+    output_norm: Vec<f32>, // [hidden]
+    /// `[vocab, hidden]` when not tied. Falls back to `embed` at logits time.
+    lm_head: Option<WeightView>,
+    /// Optional `[vocab, n_layers, ple_dim]` table. When present the
+    /// forward path reads `[current_token_id, layer_idx, :]` and adds
+    /// it (via `w_repair`, when also present) to the residual.
+    ple_table: Option<Vec<f32>>,
 }
 
-/// One layer's persistent KV cache (concatenated per head, contiguous).
 struct LayerKv {
-    /// `[max_seq, n_kv_heads * head_dim]`. Stored as a flat Vec for
-    /// pointer-friendly slicing into individual head rows.
     keys: Vec<f32>,
     values: Vec<f32>,
 }
@@ -156,30 +217,27 @@ pub struct Gemma4Model {
     isa: IsaTier,
     global: GlobalWeights,
     layers: Vec<LayerWeights>,
-    /// Per-layer KV cache. Indexed by `(layer, position, kv_head, dim)`.
+    /// One slot per layer, but for `i < kv_shared_layers` the slot
+    /// points at the layer-0 cache via [`Self::physical_layer`].
     kv: Vec<LayerKv>,
-    /// Reusable scratch buffers — avoids reallocating per token.
     scratch: ForwardScratch,
-    /// Token position in the current session. Reset when the caller asks.
     pos: usize,
     logits: Vec<f32>,
-    /// Optional tokenizer, kept here so callers that don't need to
-    /// build one out of band can reach it via [`tokenizer`].
     tokenizer: Option<Tokenizer>,
 }
 
 struct ForwardScratch {
-    x: Vec<f32>,        // [hidden]
-    h: Vec<f32>,        // [hidden]
-    q: Vec<f32>,        // [n_heads * head_dim]
-    k: Vec<f32>,        // [n_kv_heads * head_dim]
-    v: Vec<f32>,        // [n_kv_heads * head_dim]
-    attn_out: Vec<f32>, // [n_heads * head_dim]
-    o: Vec<f32>,        // [hidden]
-    gate: Vec<f32>,     // [inter]
-    up: Vec<f32>,       // [inter]
-    swiglu: Vec<f32>,   // [inter]
-    ffn_out: Vec<f32>,  // [hidden]
+    x: Vec<f32>,
+    h: Vec<f32>,
+    q: Vec<f32>,
+    k: Vec<f32>,
+    v: Vec<f32>,
+    attn_out: Vec<f32>,
+    o: Vec<f32>,
+    gate: Vec<f32>,
+    up: Vec<f32>,
+    swiglu: Vec<f32>,
+    ffn_out: Vec<f32>,
 }
 
 impl ForwardScratch {
@@ -209,6 +267,39 @@ fn dequant_type(t: GgmlType) -> Result<DequantType, LoadError> {
     )))
 }
 
+/// Load a projection matrix in its native layout. Q4_K_M weights stay
+/// packed (small in-memory footprint, dispatch through
+/// [`matvec_q4_k_row_major`]); everything else dequantizes to F32.
+fn read_projection(g: &GgufBytes, name: &str) -> Result<WeightView, LoadError> {
+    let info = g
+        .file
+        .tensor(name)
+        .ok_or_else(|| LoadError::MissingMetadata(Box::leak(name.to_string().into_boxed_str())))?;
+    let bytes = g
+        .tensor_bytes(name)
+        .ok_or(LoadError::MissingMetadata("tensor bytes"))?;
+    let dims: Vec<usize> = info.dims.iter().map(|d| *d as usize).collect();
+    // GGUF stores Linear weights as [in, out] little-endian dim order
+    // — `dims[0]` is the inner (k), `dims[1]` is the outer (n). The
+    // packed Q4_K kernel expects rows of length k laid out per output.
+    if dims.len() == 2 && info.ggml_type == GgmlType::Q4_K {
+        let k = dims[0];
+        let n = dims[1];
+        if k % Q4K_BLOCK == 0 {
+            return Ok(WeightView::Q4K {
+                bytes: bytes.to_vec(),
+                n,
+                k,
+            });
+        }
+    }
+    // Fallback: dequantize to F32. Small tensors land here naturally.
+    let ty = dequant_type(info.ggml_type)?;
+    let numel: usize = dims.iter().product();
+    let f32 = dequantize_to_f32(ty, bytes, numel).map_err(map_dequant)?;
+    Ok(WeightView::F32(f32))
+}
+
 fn read_tensor(g: &GgufBytes, name: &str) -> Result<Vec<f32>, LoadError> {
     let info = g
         .file
@@ -222,11 +313,23 @@ fn read_tensor(g: &GgufBytes, name: &str) -> Result<Vec<f32>, LoadError> {
     dequantize_to_f32(ty, bytes, numel).map_err(map_dequant)
 }
 
-fn read_optional(g: &GgufBytes, name: &str) -> Result<Option<Vec<f32>>, LoadError> {
+fn read_optional_f32(g: &GgufBytes, name: &str) -> Result<Option<Vec<f32>>, LoadError> {
     if g.file.tensor(name).is_none() {
         return Ok(None);
     }
     read_tensor(g, name).map(Some)
+}
+
+fn read_first_f32(
+    g: &GgufBytes,
+    candidates: &[&str],
+) -> Result<Option<Vec<f32>>, LoadError> {
+    for name in candidates {
+        if let Some(v) = read_optional_f32(g, name)? {
+            return Ok(Some(v));
+        }
+    }
+    Ok(None)
 }
 
 fn map_dequant(e: DequantError) -> LoadError {
@@ -234,29 +337,24 @@ fn map_dequant(e: DequantError) -> LoadError {
 }
 
 impl Gemma4Model {
-    /// Backwards-compatible: parses metadata only, no weight binding.
-    /// Used by the model-runtime smoke test and any caller that just
-    /// wants to see whether the GGUF file is structurally Gemma.
     pub fn from_gguf(g: &GgufFile) -> Result<Self, LoadError> {
         let cfg = Gemma4Config::from_gguf(g)?;
         let arch_tag = g.arch_tag().unwrap_or("gemma").to_string();
         let isa = isa::detect();
         let logits = vec![0.0; cfg.vocab_size];
         let scratch = ForwardScratch::new(&cfg);
-        let global = GlobalWeights {
-            embed: Vec::new(),
-            output_norm: Vec::new(),
-            lm_head: None,
-        };
-        let layers = Vec::new();
-        let kv = Vec::new();
         Ok(Self {
             cfg,
             arch_tag,
             isa,
-            global,
-            layers,
-            kv,
+            global: GlobalWeights {
+                embed: Vec::new(),
+                output_norm: Vec::new(),
+                lm_head: None,
+                ple_table: None,
+            },
+            layers: Vec::new(),
+            kv: Vec::new(),
             scratch,
             pos: 0,
             logits,
@@ -264,49 +362,58 @@ impl Gemma4Model {
         })
     }
 
-    /// Load the whole model — config, tokenizer, and every weight tensor
-    /// the forward pass needs. Returns a model ready to call `forward`.
     pub fn load(g: &GgufBytes) -> Result<Self, LoadError> {
         let cfg = Gemma4Config::from_gguf(&g.file)?;
         let arch_tag = g.file.arch_tag().unwrap_or("gemma").to_string();
         let isa = isa::detect();
 
-        // Global tensors. The exact key set is the GGUF convention used
-        // by llama.cpp: `token_embd.weight`, `output_norm.weight`,
-        // `output.weight` (optional, tied embeddings drop it).
         let embed = read_tensor(g, "token_embd.weight")?;
         let output_norm = read_tensor(g, "output_norm.weight")?;
-        let lm_head = read_optional(g, "output.weight")?;
+        let lm_head = if g.file.tensor("output.weight").is_some() {
+            Some(read_projection(g, "output.weight")?)
+        } else {
+            None
+        };
+        // PLE table. The Gemma 4 GGUF convention names this
+        // `per_layer_token_embd.weight`; older drafts used
+        // `model.ple_embeddings`. Falls back to None when absent (Gemma
+        // 2/3) — the inject path becomes a no-op.
+        let ple_table = read_first_f32(
+            g,
+            &["per_layer_token_embd.weight", "model.ple_embeddings"],
+        )?;
         let global = GlobalWeights {
             embed,
             output_norm,
             lm_head,
+            ple_table,
         };
 
-        // Per-layer tensors.
         let mut layers = Vec::with_capacity(cfg.n_layers);
         for i in 0..cfg.n_layers {
             let p = |suffix: &str| format!("blk.{i}.{suffix}");
             let attn_norm = read_tensor(g, &p("attn_norm.weight"))?;
             let post_attn_norm = if cfg.post_norm {
-                read_optional(g, &p("post_attention_norm.weight"))?
+                read_optional_f32(g, &p("post_attention_norm.weight"))?
             } else {
                 None
             };
             let ffn_norm = read_tensor(g, &p("ffn_norm.weight"))?;
             let post_ffn_norm = if cfg.post_norm {
-                read_optional(g, &p("post_ffw_norm.weight"))?
-                    .or(read_optional(g, &p("post_ffn_norm.weight"))?)
+                read_first_f32(
+                    g,
+                    &[&p("post_ffw_norm.weight"), &p("post_ffn_norm.weight")],
+                )?
             } else {
                 None
             };
-            let w_q = read_tensor(g, &p("attn_q.weight"))?;
-            let w_k = read_tensor(g, &p("attn_k.weight"))?;
-            let w_v = read_tensor(g, &p("attn_v.weight"))?;
-            let w_o = read_tensor(g, &p("attn_output.weight"))?;
-            let w_gate = read_tensor(g, &p("ffn_gate.weight"))?;
-            let w_up = read_tensor(g, &p("ffn_up.weight"))?;
-            let w_down = read_tensor(g, &p("ffn_down.weight"))?;
+            let w_q = read_projection(g, &p("attn_q.weight"))?;
+            let w_k = read_projection(g, &p("attn_k.weight"))?;
+            let w_v = read_projection(g, &p("attn_v.weight"))?;
+            let w_o = read_projection(g, &p("attn_output.weight"))?;
+            let w_gate = read_projection(g, &p("ffn_gate.weight"))?;
+            let w_up = read_projection(g, &p("ffn_up.weight"))?;
+            let w_down = read_projection(g, &p("ffn_down.weight"))?;
             layers.push(LayerWeights {
                 attn_norm,
                 post_attn_norm,
@@ -322,11 +429,24 @@ impl Gemma4Model {
             });
         }
 
+        // KV cache: physically owned only by layer 0 for the first
+        // `kv_shared_layers` (E2B/E4B) — the shared layers' slots are
+        // empty Vecs to make that explicit.
         let kv_total = cfg.n_kv_heads * cfg.head_dim;
+        let shared = cfg.kv_shared_layers.min(cfg.n_layers);
         let kv = (0..cfg.n_layers)
-            .map(|_| LayerKv {
-                keys: vec![0.0; cfg.context_length * kv_total],
-                values: vec![0.0; cfg.context_length * kv_total],
+            .map(|i| {
+                if i > 0 && i < shared {
+                    LayerKv {
+                        keys: Vec::new(),
+                        values: Vec::new(),
+                    }
+                } else {
+                    LayerKv {
+                        keys: vec![0.0; cfg.context_length * kv_total],
+                        values: vec![0.0; cfg.context_length * kv_total],
+                    }
+                }
             })
             .collect();
 
@@ -352,15 +472,22 @@ impl Gemma4Model {
     pub fn tokenizer(&self) -> Option<&Tokenizer> {
         self.tokenizer.as_ref()
     }
-
     pub fn config(&self) -> &Gemma4Config {
         &self.cfg
     }
 
-    /// True iff the model was loaded with real weights (vs the
-    /// metadata-only `from_gguf` path).
     fn has_weights(&self) -> bool {
         !self.global.embed.is_empty() && !self.layers.is_empty()
+    }
+
+    /// Map a layer index to the physical KV slot. Shared layers all
+    /// resolve to slot 0; everything else maps to itself.
+    fn physical_layer(&self, layer: usize) -> usize {
+        if layer < self.cfg.kv_shared_layers {
+            0
+        } else {
+            layer
+        }
     }
 
     fn embed_token_into(
@@ -382,9 +509,35 @@ impl Gemma4Model {
         }
     }
 
-    /// Compute the output logits given the current pos's residual stream.
-    /// Final-layer RMSNorm in place, then matvec with the lm_head (or
-    /// the tied embedding matrix when lm_head is absent).
+    /// Read the PLE row for `(token_id, layer_idx)` and add it to the
+    /// residual. Width compatibility: the PLE row is `ple_dim` long;
+    /// we broadcast/repeat across `hidden` to land an additive
+    /// contribution. Without a learned `w_repair` matrix this is the
+    /// most honest minimal injection — when AltUp/LAuReL implement
+    /// the real path it'll replace this.
+    fn ple_inject(&self, token: TokenId, layer: usize, x: &mut [f32]) {
+        let Some(table) = self.global.ple_table.as_ref() else {
+            return;
+        };
+        let ple_dim = self.cfg.ple_dim;
+        if ple_dim == 0 {
+            return;
+        }
+        let hidden = self.cfg.hidden_size;
+        let row_off =
+            (token as usize * self.cfg.n_layers + layer) * ple_dim;
+        if row_off + ple_dim > table.len() {
+            return;
+        }
+        let row = &table[row_off..row_off + ple_dim];
+        // Distribute the PLE contribution across the hidden vector
+        // by tiling — the real Gemma 4 path projects through
+        // `per_layer_proj.weight` which we don't load yet.
+        for h in 0..hidden {
+            x[h] += row[h % ple_dim];
+        }
+    }
+
     fn compute_logits(&mut self) {
         let hidden = self.cfg.hidden_size;
         let mut norm = vec![0.0f32; hidden];
@@ -394,15 +547,25 @@ impl Gemma4Model {
             &mut norm,
             self.cfg.rms_eps,
         );
-        let head = self.global.lm_head.as_ref().unwrap_or(&self.global.embed);
-        matvec_f32(&norm, head, &mut self.logits, self.cfg.vocab_size, hidden);
+        // Tied embedding fallback: dot-product against the embed table.
+        match self.global.lm_head.as_ref() {
+            Some(head) => head.matvec(&norm, &mut self.logits),
+            None => {
+                let embed = &self.global.embed;
+                for v in 0..self.cfg.vocab_size {
+                    let row = &embed[v * hidden..(v + 1) * hidden];
+                    let mut acc = 0.0_f32;
+                    for i in 0..hidden {
+                        acc += norm[i] * row[i];
+                    }
+                    self.logits[v] = acc;
+                }
+            }
+        }
     }
 }
 
-/// SDPA wrapper for grouped-query attention. The query has `n_heads`,
-/// the cache has `n_kv_heads`; query head `h` reads kv-head
-/// `h * n_kv_heads / n_heads`.
-#[allow(clippy::too_many_arguments)] // single internal helper; collapsing this into a struct would obscure the shapes
+#[allow(clippy::too_many_arguments)]
 fn gqa_attention(
     q: &[f32],
     k_cache: &[f32],
@@ -418,8 +581,6 @@ fn gqa_attention(
     for h in 0..n_heads {
         let kv_h = h * n_kv_heads / n_heads;
         let q_h = &q[h * head_dim..(h + 1) * head_dim];
-        // Each KV head spans seq_len rows, each row laid out [n_kv_heads * head_dim].
-        // For head kv_h: pick the [kv_h*head_dim..(kv_h+1)*head_dim] slice in every row.
         let mut k_head = vec![0.0f32; seq_len * head_dim];
         let mut v_head = vec![0.0f32; seq_len * head_dim];
         for t in 0..seq_len {
@@ -437,17 +598,11 @@ fn gqa_attention(
 
 impl LanguageModel for Gemma4Model {
     fn forward(&mut self, token: TokenId, kv: &mut KvCache) -> &[f32] {
-        // The model maintains its own per-layer KV cache; the caller's
-        // KvCache only tracks position so the agent loop sees a real
-        // counter. Without weights we still bump the position so cancel
-        // / reset works, but the logits stay zero.
         if !self.has_weights() {
             kv.seq_len = kv.seq_len.saturating_add(1);
             return &self.logits;
         }
         if self.pos >= self.cfg.context_length {
-            // Out of context — return a flat distribution so the sampler
-            // sees no signal and the caller can detect "stop".
             self.logits.fill(0.0);
             return &self.logits;
         }
@@ -457,7 +612,6 @@ impl LanguageModel for Gemma4Model {
         let kv_total = self.cfg.n_kv_heads * self.cfg.head_dim;
         let head_dim = self.cfg.head_dim;
 
-        // x = embed(token) * sqrt(hidden) (Gemma)
         Self::embed_token_into(
             &self.global.embed,
             hidden,
@@ -471,7 +625,6 @@ impl LanguageModel for Gemma4Model {
 
         for layer in 0..self.cfg.n_layers {
             let cfg = &self.cfg;
-            // h = rmsnorm(x, attn_norm)
             rmsnorm_f32(
                 &self.scratch.x,
                 &self.layers[layer].attn_norm,
@@ -479,30 +632,10 @@ impl LanguageModel for Gemma4Model {
                 cfg.rms_eps,
             );
 
-            // Q, K, V projections.
-            matvec_f32(
-                &self.scratch.h,
-                &self.layers[layer].w_q,
-                &mut self.scratch.q,
-                q_total,
-                hidden,
-            );
-            matvec_f32(
-                &self.scratch.h,
-                &self.layers[layer].w_k,
-                &mut self.scratch.k,
-                kv_total,
-                hidden,
-            );
-            matvec_f32(
-                &self.scratch.h,
-                &self.layers[layer].w_v,
-                &mut self.scratch.v,
-                kv_total,
-                hidden,
-            );
+            self.layers[layer].w_q.matvec(&self.scratch.h, &mut self.scratch.q);
+            self.layers[layer].w_k.matvec(&self.scratch.h, &mut self.scratch.k);
+            self.layers[layer].w_v.matvec(&self.scratch.h, &mut self.scratch.v);
 
-            // RoPE on Q (per-head) and K (per-head).
             for h in 0..cfg.n_heads {
                 let qh = &mut self.scratch.q[h * head_dim..(h + 1) * head_dim];
                 rope_inplace_f32(qh, pos, cfg.rope_base);
@@ -512,20 +645,21 @@ impl LanguageModel for Gemma4Model {
                 rope_inplace_f32(kh, pos, cfg.rope_base);
             }
 
-            // Append to per-layer KV cache.
-            {
-                let cache = &mut self.kv[layer];
+            // KV append. Shared-layer writes route to physical slot 0;
+            // non-shared layers own their own slot.
+            let phys = self.physical_layer(layer);
+            // Layers > 0 in the shared range skip the write — only
+            // layer 0 populates the canonical cache.
+            let do_write = phys == layer || layer == 0;
+            if do_write {
+                let cache = &mut self.kv[phys];
                 let off = pos * kv_total;
                 cache.keys[off..off + kv_total].copy_from_slice(&self.scratch.k);
                 cache.values[off..off + kv_total].copy_from_slice(&self.scratch.v);
             }
 
-            // Grouped attention over keys[..kv_seq], values[..kv_seq].
-            // Gemma 3 alternates a sliding window across odd layers; we
-            // honour the metadata-declared window on all of them, which
-            // matches the conservative "every layer windowed" reading.
             let window = cfg.sliding_window;
-            let cache = &self.kv[layer];
+            let cache = &self.kv[phys];
             gqa_attention(
                 &self.scratch.q,
                 &cache.keys[..kv_seq * kv_total],
@@ -538,17 +672,10 @@ impl LanguageModel for Gemma4Model {
                 window,
             );
 
-            // O projection.
-            matvec_f32(
-                &self.scratch.attn_out,
-                &self.layers[layer].w_o,
-                &mut self.scratch.o,
-                hidden,
-                q_total,
-            );
+            self.layers[layer]
+                .w_o
+                .matvec(&self.scratch.attn_out, &mut self.scratch.o);
 
-            // Gemma 2/3 post-attention norm, applied to the sublayer
-            // output before the residual add.
             if let Some(post) = self.layers[layer].post_attn_norm.as_ref() {
                 let mut tmp = vec![0.0f32; hidden];
                 rmsnorm_f32(&self.scratch.o, post, &mut tmp, cfg.rms_eps);
@@ -561,39 +688,22 @@ impl LanguageModel for Gemma4Model {
                 }
             }
 
-            // FFN sublayer.
             rmsnorm_f32(
                 &self.scratch.x,
                 &self.layers[layer].ffn_norm,
                 &mut self.scratch.h,
                 cfg.rms_eps,
             );
-            matvec_f32(
-                &self.scratch.h,
-                &self.layers[layer].w_gate,
-                &mut self.scratch.gate,
-                inter,
-                hidden,
-            );
-            matvec_f32(
-                &self.scratch.h,
-                &self.layers[layer].w_up,
-                &mut self.scratch.up,
-                inter,
-                hidden,
-            );
+            self.layers[layer].w_gate.matvec(&self.scratch.h, &mut self.scratch.gate);
+            self.layers[layer].w_up.matvec(&self.scratch.h, &mut self.scratch.up);
             swiglu_f32(
                 &self.scratch.gate,
                 &self.scratch.up,
                 &mut self.scratch.swiglu,
             );
-            matvec_f32(
-                &self.scratch.swiglu,
-                &self.layers[layer].w_down,
-                &mut self.scratch.ffn_out,
-                hidden,
-                inter,
-            );
+            self.layers[layer]
+                .w_down
+                .matvec(&self.scratch.swiglu, &mut self.scratch.ffn_out);
 
             if let Some(post) = self.layers[layer].post_ffn_norm.as_ref() {
                 let mut tmp = vec![0.0f32; hidden];
@@ -606,20 +716,25 @@ impl LanguageModel for Gemma4Model {
                     *xi += *fi;
                 }
             }
+
+            // PLE injection after each block. No-op when ple_table is
+            // absent / ple_dim is 0.
+            self.ple_inject(token, layer, &mut self.scratch.x);
         }
 
         self.compute_logits();
         self.pos += 1;
         kv.seq_len = self.pos;
+        // softmax_f32 is referenced by the kernels module but we
+        // don't apply it here — the sampler runs softmax over the
+        // logits when temperature > 0.
+        let _ = softmax_f32::<>;
         &self.logits
     }
 
     fn reset(&mut self, kv: &mut KvCache) {
         kv.seq_len = 0;
         self.pos = 0;
-        // KV cache slots are reused; no need to zero them — `kv_seq` in
-        // forward() bounds the read window so stale data past `pos` is
-        // never visible.
     }
 
     fn info(&self) -> RuntimeInfo {
@@ -634,7 +749,7 @@ impl LanguageModel for Gemma4Model {
     }
 }
 
-/// Greedy argmax over `logits` — picks the most likely next token.
+/// Greedy argmax over `logits`.
 pub fn argmax(logits: &[f32]) -> TokenId {
     let mut best = 0u32;
     let mut best_v = f32::NEG_INFINITY;
@@ -647,22 +762,18 @@ pub fn argmax(logits: &[f32]) -> TokenId {
     best
 }
 
-/// Temperature + top-k sampling. `seed` advances per call via a tiny
-/// xorshift so repeated runs with the same seed reproduce. Returns
-/// `argmax` when `temperature` is zero.
+/// Temperature + top-k sampling. Returns argmax when temperature ≤ 0.
 pub fn sample(logits: &[f32], temperature: f32, top_k: usize, rng: &mut SamplerState) -> TokenId {
     if temperature <= 0.0 {
         return argmax(logits);
     }
     let inv_t = 1.0 / temperature;
-    // top_k by partial sort: collect (id, logit), keep largest k.
     let mut pairs: Vec<(u32, f32)> = logits
         .iter()
         .enumerate()
         .map(|(i, &v)| (i as u32, v * inv_t))
         .collect();
     let k = top_k.max(1).min(pairs.len());
-    // Partial selection: largest k via repeated swap of the max into pos i.
     for i in 0..k {
         let mut best = i;
         for j in (i + 1)..pairs.len() {
@@ -688,7 +799,7 @@ pub fn sample(logits: &[f32], temperature: f32, top_k: usize, rng: &mut SamplerS
     pairs[k - 1].0
 }
 
-/// Tiny xorshift64* — deterministic, no allocations, no dependencies.
+/// Tiny xorshift64* — deterministic.
 pub struct SamplerState {
     state: u64,
 }
@@ -696,7 +807,11 @@ pub struct SamplerState {
 impl SamplerState {
     pub fn new(seed: u64) -> Self {
         Self {
-            state: if seed == 0 { 0x9E3779B97F4A7C15 } else { seed },
+            state: if seed == 0 {
+                0x9E3779B97F4A7C15
+            } else {
+                seed
+            },
         }
     }
     fn next_u64(&mut self) -> u64 {
@@ -708,7 +823,6 @@ impl SamplerState {
         x.wrapping_mul(0x2545F4914F6CDD1D)
     }
     pub fn next_f32(&mut self) -> f32 {
-        // 24 high bits → [0, 1)
         (self.next_u64() >> 40) as f32 / (1u32 << 24) as f32
     }
 }
