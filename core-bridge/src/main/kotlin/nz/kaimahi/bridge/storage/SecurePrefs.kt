@@ -62,6 +62,24 @@ class SecurePrefs(context: Context) {
             if (value.isNullOrBlank()) remove(KEY_LOCAL_MODEL_PATH) else putString(KEY_LOCAL_MODEL_PATH, value)
         }.apply()
 
+    var homeTreeUri: String?
+        get() = plain.getString(KEY_HOME_TREE_URI, null)
+        set(value) = plain.edit().apply {
+            if (value.isNullOrBlank()) remove(KEY_HOME_TREE_URI) else putString(KEY_HOME_TREE_URI, value)
+        }.apply()
+
+    var documentsTreeUri: String?
+        get() = plain.getString(KEY_DOCUMENTS_TREE_URI, null)
+        set(value) = plain.edit().apply {
+            if (value.isNullOrBlank()) remove(KEY_DOCUMENTS_TREE_URI) else putString(KEY_DOCUMENTS_TREE_URI, value)
+        }.apply()
+
+    var downloadsTreeUri: String?
+        get() = plain.getString(KEY_DOWNLOADS_TREE_URI, null)
+        set(value) = plain.edit().apply {
+            if (value.isNullOrBlank()) remove(KEY_DOWNLOADS_TREE_URI) else putString(KEY_DOWNLOADS_TREE_URI, value)
+        }.apply()
+
     var autoApprove: Boolean
         get() = plain.getBoolean(KEY_AUTO_APPROVE, false)
         set(value) = plain.edit().putBoolean(KEY_AUTO_APPROVE, value).apply()
@@ -95,6 +113,9 @@ class SecurePrefs(context: Context) {
         const val KEY_IMAGEN_MODEL = "imagen_model"
         const val KEY_WORKSPACE = "workspace_uri"
         const val KEY_LOCAL_MODEL_PATH = "local_model_path"
+        const val KEY_HOME_TREE_URI = "home_tree_uri"
+        const val KEY_DOCUMENTS_TREE_URI = "documents_tree_uri"
+        const val KEY_DOWNLOADS_TREE_URI = "downloads_tree_uri"
         const val KEY_AUTO_APPROVE = "auto_approve"
         const val KEY_TERMUX_GUIDE_SHOWN = "termux_guide_shown"
         const val KEY_AUTO_COMPRESS = "auto_compress_enabled"

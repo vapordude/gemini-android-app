@@ -404,9 +404,9 @@ class RestGeminiCore(
         pending.remove(callId)?.complete(decision)
     }
 
-    override suspend fun sendMessage(text: String): GeminiResult = sendMessage(text, emptyList())
+    override suspend fun sendMessage(text: String): GeminiResult = sendMessage(text, emptyList<Attachment>())
 
-    suspend fun sendMessage(text: String, attachments: List<Attachment>): GeminiResult = sendLock.withLock {
+    override suspend fun sendMessage(text: String, attachments: List<Attachment>): GeminiResult = sendLock.withLock {
         if (apiKey.isBlank() && accessToken.isBlank()) return GeminiResult.Error("API key or access token not configured")
 
         val preTurnSize = turns.size
