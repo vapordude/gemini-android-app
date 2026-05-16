@@ -5,9 +5,9 @@ import android.net.Uri
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import nz.kaimahi.bridge.Attachment
 import nz.kaimahi.bridge.LocalModelFile
 import nz.kaimahi.bridge.RestGeminiCore
+import nz.kaimahi.domain.Attachment
 import nz.kaimahi.domain.GeminiEvent
 import nz.kaimahi.domain.GeminiMessage
 import nz.kaimahi.domain.GeminiResult
