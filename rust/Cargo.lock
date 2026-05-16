@@ -50,3 +50,11 @@ dependencies = [
 [[package]]
 name = "gemma4-tokenizer"
 version = "0.0.1"
+
+[[package]]
+name = "gemma4-vision"
+version = "0.0.1"
+dependencies = [
+ "gemma4-core",
+ "gemma4-ops",
+]

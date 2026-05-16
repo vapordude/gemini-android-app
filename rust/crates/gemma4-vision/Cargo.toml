@@ -1,0 +1,13 @@
+[package]
+name = "gemma4-vision"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[dependencies]
+gemma4-core = { path = "../gemma4-core" }
+gemma4-ops = { path = "../gemma4-ops" }
+
+[lib]
+name = "gemma4_vision"
+path = "src/lib.rs"
