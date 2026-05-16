@@ -1,10 +1,10 @@
-package nz.kaimahi.bridge.tools
+package com.gemini.bridge.tools
 
-import nz.kaimahi.bridge.workspace.Workspace
-import nz.kaimahi.domain.ToolCall
-import nz.kaimahi.domain.ToolCallResult
-import nz.kaimahi.domain.ToolCategory
-import nz.kaimahi.domain.ToolSpec
+import com.gemini.bridge.workspace.Workspace
+import com.gemini.domain.ToolCall
+import com.gemini.domain.ToolCallResult
+import com.gemini.domain.ToolCategory
+import com.gemini.domain.ToolSpec
 
 class ReadFileTool(private val ws: Workspace) : Tool {
     override val spec = ToolSpec(
@@ -15,10 +15,13 @@ class ReadFileTool(private val ws: Workspace) : Tool {
         parameters = stringParam("path", "Relative path inside the workspace")
     )
 
-    override suspend fun execute(call: ToolCall): ToolCallResult = runCatching {
+    override suspend fun execute(call: ToolCall): ToolCallResult = try {
         val path = call.arguments["path"] as? String ?: error("path is required")
         ToolOutput.clamp(ws.read(path), call.id)
-    }.getOrElse { ToolOutput.error(call.id, it.message ?: "read failed") }
+    } catch (e: Exception) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        ToolOutput.error(call.id, e.message ?: "read failed")
+    }
 }
 
 class WriteFileTool(private val ws: Workspace) : Tool {
@@ -34,16 +37,19 @@ class WriteFileTool(private val ws: Workspace) : Tool {
         )
     )
 
-    override suspend fun execute(call: ToolCall): ToolCallResult = runCatching {
+    override suspend fun execute(call: ToolCall): ToolCallResult = try {
         val path = call.arguments["path"] as? String ?: error("path is required")
         val content = call.arguments["content"] as? String ?: error("content is required")
-        val before = runCatching { ws.read(path) }.getOrNull()
+        val before = try { ws.read(path) } catch (e: Exception) { null }
         val entry = ws.write(path, content)
         val diff = Diff.of(before.orEmpty(), content, entry.path)
         val header = if (before == null) "Created ${entry.path} (${entry.size} B)"
                      else "Updated ${entry.path} (${entry.size} B)"
         ToolOutput.clamp("$header\n$diff", call.id)
-    }.getOrElse { ToolOutput.error(call.id, it.message ?: "write failed") }
+    } catch (e: Exception) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        ToolOutput.error(call.id, e.message ?: "write failed")
+    }
 }
 
 class EditFileTool(private val ws: Workspace) : Tool {
@@ -62,7 +68,7 @@ class EditFileTool(private val ws: Workspace) : Tool {
         )
     )
 
-    override suspend fun execute(call: ToolCall): ToolCallResult = runCatching {
+    override suspend fun execute(call: ToolCall): ToolCallResult = try {
         val path = call.arguments["path"] as? String ?: error("path is required")
         val old = call.arguments["old"] as? String ?: error("old is required")
         val new = call.arguments["new"] as? String ?: error("new is required")
@@ -76,7 +82,10 @@ class EditFileTool(private val ws: Workspace) : Tool {
         ws.write(path, updated)
         val diff = Diff.of(current, updated, path)
         ToolOutput.clamp("Replaced $count occurrence(s) in $path\n$diff", call.id)
-    }.getOrElse { ToolOutput.error(call.id, it.message ?: "edit failed") }
+    } catch (e: Exception) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        ToolOutput.error(call.id, e.message ?: "edit failed")
+    }
 }
 
 class ListDirTool(private val ws: Workspace) : Tool {
@@ -91,7 +100,7 @@ class ListDirTool(private val ws: Workspace) : Tool {
         )
     )
 
-    override suspend fun execute(call: ToolCall): ToolCallResult = runCatching {
+    override suspend fun execute(call: ToolCall): ToolCallResult = try {
         val path = (call.arguments["path"] as? String).orEmpty()
         val entries = ws.list(path)
         val rendered = if (entries.isEmpty()) "(empty)"
@@ -100,7 +109,10 @@ class ListDirTool(private val ws: Workspace) : Tool {
             "${it.name}$suffix"
         }
         ToolOutput.clamp(rendered, call.id)
-    }.getOrElse { ToolOutput.error(call.id, it.message ?: "list failed") }
+    } catch (e: Exception) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        ToolOutput.error(call.id, e.message ?: "list failed")
+    }
 }
 
 class DeleteFileTool(private val ws: Workspace) : Tool {
@@ -112,12 +124,15 @@ class DeleteFileTool(private val ws: Workspace) : Tool {
         parameters = stringParam("path", "Relative path to delete")
     )
 
-    override suspend fun execute(call: ToolCall): ToolCallResult = runCatching {
+    override suspend fun execute(call: ToolCall): ToolCallResult = try {
         val path = call.arguments["path"] as? String ?: error("path is required")
         val ok = ws.delete(path)
         if (ok) ToolOutput.clamp("Deleted $path", call.id)
         else ToolOutput.error(call.id, "Failed to delete $path")
-    }.getOrElse { ToolOutput.error(call.id, it.message ?: "delete failed") }
+    } catch (e: Exception) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        ToolOutput.error(call.id, e.message ?: "delete failed")
+    }
 }
 
 // ---- Gemini parameter-schema helpers ----

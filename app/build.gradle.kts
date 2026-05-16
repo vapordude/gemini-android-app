@@ -3,28 +3,12 @@ plugins {
     alias(libs.plugins.kotlin.android)
 }
 
-fun propertyOrEnv(name: String): String? = providers.gradleProperty(name)
-    .orElse(providers.environmentVariable(name))
-    .orNull
-    ?.takeIf { it.isNotBlank() }
-
-val releaseStoreFilePath = propertyOrEnv("ANDROID_RELEASE_STORE_FILE")
-val releaseStorePassword = propertyOrEnv("ANDROID_RELEASE_STORE_PASSWORD")
-val releaseKeyAlias = propertyOrEnv("ANDROID_RELEASE_KEY_ALIAS")
-val releaseKeyPassword = propertyOrEnv("ANDROID_RELEASE_KEY_PASSWORD")
-val hasReleaseSigning = listOf(
-    releaseStoreFilePath,
-    releaseStorePassword,
-    releaseKeyAlias,
-    releaseKeyPassword,
-).all { !it.isNullOrBlank() } && file(releaseStoreFilePath!!).exists()
-
 android {
     namespace = "nz.kaimahi.app"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.google.gemini.android"
+        applicationId = "nz.kaimahi.app"
         minSdk = 26
         targetSdk = 34
         versionCode = 1
@@ -33,21 +17,6 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
-        }
-
-        // AppAuth's library merge requires this placeholder; our OAuth redirect
-        // URI uses this custom scheme (com.google.gemini.android:/oauth2redirect).
-        manifestPlaceholders += mapOf("appAuthRedirectScheme" to "com.google.gemini.android")
-    }
-
-    signingConfigs {
-        if (hasReleaseSigning) {
-            create("release") {
-                storeFile = file(releaseStoreFilePath!!)
-                storePassword = releaseStorePassword
-                keyAlias = releaseKeyAlias
-                keyPassword = releaseKeyPassword
-            }
         }
     }
 
@@ -58,7 +27,9 @@ android {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+            // Debug-sign release until a proper keystore/CI secret is wired up,
+            // so the APK uploaded by the workflow can actually be installed.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {
@@ -85,7 +56,6 @@ dependencies {
     implementation(project(":core-bridge"))
     implementation(project(":domain"))
     implementation(project(":ui-components"))
-    implementation(project(":native-driver"))
     implementation(project(":inference-bridge"))
     implementation(project(":agent-bridge"))
     implementation(project(":emdash-bridge"))
@@ -104,8 +74,6 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.play.services.auth)
-    implementation(libs.appauth)
-    implementation(libs.androidx.browser)
 
     debugImplementation(libs.compose.ui.tooling)
 }
