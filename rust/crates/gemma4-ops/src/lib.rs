@@ -17,6 +17,7 @@ pub mod softmax;
 pub mod swiglu;
 pub mod attention;
 pub mod sampler;
+pub mod parity;
 
 // Re-exports — flat surface keeps the call sites short.
 pub use matmul::{matmul_f32, matmul_bf16_acc_f32};

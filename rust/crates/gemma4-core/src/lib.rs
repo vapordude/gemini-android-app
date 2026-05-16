@@ -16,6 +16,8 @@ pub mod tensor;
 pub mod dtype;
 pub mod alloc;
 pub mod mmap;
+pub mod safetensors;
 
 pub use tensor::{Tensor, TensorMut, Shape};
 pub use dtype::{Dtype, bf16_to_f32, f32_to_bf16, f16_to_f32, f32_to_f16};
+pub use safetensors::SafeTensors;
