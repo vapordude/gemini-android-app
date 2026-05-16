@@ -32,11 +32,46 @@ class SecurePrefs(context: Context) {
             if (value.isNullOrBlank()) remove(KEY_API) else putString(KEY_API, value)
         }.apply()
 
+    /**
+     * Legacy single-token accessor. New code reads [oauthTokens]; this remains
+     * so callers that just need a Bearer string keep working while the migration
+     * is in flight.
+     */
     var accessToken: String?
         get() = encrypted.getString(KEY_ACCESS_TOKEN, null)
         set(value) = encrypted.edit().apply {
             if (value.isNullOrBlank()) remove(KEY_ACCESS_TOKEN) else putString(KEY_ACCESS_TOKEN, value)
         }.apply()
+
+    /**
+     * Full OAuth credential set, matching gemini-cli's `oauth_creds.json`. The
+     * refresh token is the durable credential; access tokens expire every hour.
+     * `projectId` is the Code Assist project resolved at first `loadCodeAssist`.
+     */
+    var oauthTokens: OAuthTokens?
+        get() {
+            val access = encrypted.getString(KEY_ACCESS_TOKEN, null) ?: return null
+            val refresh = encrypted.getString(KEY_REFRESH_TOKEN, null) ?: return null
+            val expiry = encrypted.getLong(KEY_TOKEN_EXPIRY, 0L)
+            val project = encrypted.getString(KEY_PROJECT_ID, null)
+            return OAuthTokens(access, refresh, expiry, project)
+        }
+        set(value) = encrypted.edit().apply {
+            if (value == null) {
+                remove(KEY_ACCESS_TOKEN); remove(KEY_REFRESH_TOKEN)
+                remove(KEY_TOKEN_EXPIRY); remove(KEY_PROJECT_ID)
+            } else {
+                putString(KEY_ACCESS_TOKEN, value.accessToken)
+                putString(KEY_REFRESH_TOKEN, value.refreshToken)
+                putLong(KEY_TOKEN_EXPIRY, value.expiryEpochMs)
+                if (value.projectId.isNullOrBlank()) remove(KEY_PROJECT_ID)
+                else putString(KEY_PROJECT_ID, value.projectId)
+            }
+        }.apply()
+
+    var driverMode: String
+        get() = plain.getString(KEY_DRIVER_MODE, "REMOTE_ONLY") ?: "REMOTE_ONLY"
+        set(value) = plain.edit().putString(KEY_DRIVER_MODE, value).apply()
 
     var model: String?
         get() = plain.getString(KEY_MODEL, null)
@@ -85,6 +120,9 @@ class SecurePrefs(context: Context) {
     private companion object {
         const val KEY_API = "api_key"
         const val KEY_ACCESS_TOKEN = "access_token"
+        const val KEY_REFRESH_TOKEN = "refresh_token"
+        const val KEY_TOKEN_EXPIRY = "token_expiry_epoch_ms"
+        const val KEY_PROJECT_ID = "code_assist_project_id"
         const val KEY_MODEL = "model"
         const val KEY_IMAGEN_MODEL = "imagen_model"
         const val KEY_WORKSPACE = "workspace_uri"
@@ -93,5 +131,22 @@ class SecurePrefs(context: Context) {
         const val KEY_AUTO_COMPRESS = "auto_compress_enabled"
         const val KEY_AUTO_COMPRESS_THRESHOLD = "auto_compress_threshold"
         const val KEY_AUTO_SAVE = "auto_save_enabled"
+        const val KEY_DRIVER_MODE = "driver_mode"
     }
+}
+
+/**
+ * Mirrors gemini-cli's `oauth_creds.json` shape: access + refresh + absolute
+ * expiry. `projectId` is resolved from `loadCodeAssist` and cached so we don't
+ * re-onboard every cold start.
+ */
+data class OAuthTokens(
+    val accessToken: String,
+    val refreshToken: String,
+    val expiryEpochMs: Long,
+    val projectId: String?,
+) {
+    /** True when the access token will expire within [skewMs] milliseconds. */
+    fun expiresWithin(skewMs: Long = 5 * 60 * 1000L): Boolean =
+        System.currentTimeMillis() + skewMs >= expiryEpochMs
 }

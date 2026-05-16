@@ -38,7 +38,20 @@ class MainActivity : ComponentActivity() {
             GeminiTheme(darkTheme = darkTheme) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     val appContext = LocalContext.current.applicationContext
-                    val core = remember { RestGeminiCore(appContext) }
+                    val core = remember {
+                        val instance = RestGeminiCore(appContext)
+                        val authService = com.gemini.app.ui.login.GeminiCliAuthService(appContext)
+                        // Wire the PKCE refresh hook so OAuth 401s (token
+                        // expired) self-recover without dropping the user
+                        // back to the login screen.
+                        instance.onTokenRefreshRequested = refresh@{
+                            val saved = instance.persistedOAuthTokens() ?: return@refresh null
+                            val refreshed = authService.refresh(saved) ?: return@refresh null
+                            com.gemini.bridge.storage.SecurePrefs(appContext).oauthTokens = refreshed
+                            refreshed
+                        }
+                        instance
+                    }
                     val factory = remember {
                         object : ViewModelProvider.Factory {
                             @Suppress("UNCHECKED_CAST")

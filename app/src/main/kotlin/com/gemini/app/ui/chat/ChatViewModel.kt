@@ -173,25 +173,24 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
 
     fun tryAutoLogin(context: android.content.Context) {
         val savedApi = core.persistedApiKey()
-        val savedToken = core.persistedAccessToken()
+        val savedOAuth = core.persistedOAuthTokens()
 
         if (!savedApi.isNullOrBlank()) {
             initCore(mapOf("api_key" to savedApi, "remember" to true))
-        } else if (!savedToken.isNullOrBlank()) {
+        } else if (savedOAuth != null) {
             viewModelScope.launch {
-                val authService = com.gemini.app.ui.login.GoogleAuthService(context)
-                val account = authService.getLastSignedInAccount()
-                if (account != null) {
-                    val freshToken = authService.getAccessToken(account)
-                    if (freshToken != null) {
-                        initCore(mapOf("access_token" to freshToken, "remember" to true))
-                    } else {
-                        // Let it fail or default to UI if token fails
-                        initCore(mapOf("access_token" to savedToken, "remember" to true))
-                    }
-                } else {
-                    initCore(mapOf("access_token" to savedToken, "remember" to true))
-                }
+                val authService = com.gemini.app.ui.login.GeminiCliAuthService(context)
+                val fresh = runCatching { authService.refreshIfNeeded(savedOAuth) }
+                    .getOrDefault(savedOAuth)
+                initCore(
+                    mapOf(
+                        "access_token" to fresh.accessToken,
+                        "refresh_token" to fresh.refreshToken,
+                        "token_expiry" to fresh.expiryEpochMs,
+                        "project_id" to (fresh.projectId ?: ""),
+                        "remember" to true,
+                    )
+                )
             }
         }
     }

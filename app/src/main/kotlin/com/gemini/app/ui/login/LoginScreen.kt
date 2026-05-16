@@ -64,23 +64,32 @@ fun LoginScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    val authService = remember { GoogleAuthService(context) }
+    val authService = remember { GeminiCliAuthService(context) }
 
     var apiKey by remember { mutableStateOf("") }
     var selectedTabIndex by remember { mutableStateOf(0) }
     var isGoogleLoading by remember { mutableStateOf(false) }
 
+    // PKCE flow: launch the consent Intent from AppAuth, then exchange the
+    // returned authorization code for access + refresh tokens. The result map
+    // hands the full credential set to ChatViewModel for persistence.
     val googleSignInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        val account = authService.parseSignInResult(result.data)
-        if (account != null) {
+        val data = result.data
+        if (data != null) {
             isGoogleLoading = true
             coroutineScope.launch {
-                val token = authService.getAccessToken(account)
+                val tokens = authService.handleAuthResponse(data)
                 isGoogleLoading = false
-                if (token != null) {
-                    onLoginSuccess(mapOf("access_token" to token))
+                if (tokens != null) {
+                    onLoginSuccess(
+                        mapOf(
+                            "access_token" to tokens.accessToken,
+                            "refresh_token" to tokens.refreshToken,
+                            "token_expiry" to tokens.expiryEpochMs,
+                        )
+                    )
                 }
             }
         }
@@ -258,10 +267,10 @@ fun LoginScreen(
                         )
                 ) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("Sign in with Google", style = MaterialTheme.typography.titleMedium)
+                        Text("Sign in with Google (gemini-cli)", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "Use your Google Account to authenticate directly. This requires access to your cloud platform and generative language API scopes.",
+                            "Same OAuth flow as the official Gemini CLI — PKCE + loopback redirect against the Code Assist API. Personal Google accounts unlock free-tier 2.5-Pro.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -277,7 +286,7 @@ fun LoginScreen(
                             )
                         } else {
                             Button(
-                                onClick = { googleSignInLauncher.launch(authService.getSignInIntent()) },
+                                onClick = { googleSignInLauncher.launch(authService.buildAuthIntent()) },
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Icon(Icons.Default.AccountCircle, contentDescription = null)

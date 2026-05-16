@@ -12,6 +12,8 @@ documentfile = "1.0.1"
 securityCrypto = "1.1.0-alpha06"
 coroutines = "1.8.1"
 playServicesAuth = "21.5.1"
+appauth = "0.11.1"
+browser = "1.8.0"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -32,6 +34,8 @@ compose-material-icons-extended = { module = "androidx.compose.material:material
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 play-services-auth = { module = "com.google.android.gms:play-services-auth", version.ref = "playServicesAuth" }
+appauth = { module = "net.openid:appauth", version.ref = "appauth" }
+androidx-browser = { module = "androidx.browser:browser", version.ref = "browser" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
