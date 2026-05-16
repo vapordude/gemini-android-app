@@ -45,5 +45,7 @@ private fun openUrl(context: Context, url: String) {
             Intent(Intent.ACTION_VIEW, Uri.parse(url))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         )
+    }.onFailure {
+        Toast.makeText(context, "Could not open link", Toast.LENGTH_SHORT).show()
     }
 }

@@ -129,7 +129,7 @@ fun LoginScreen(
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "Native Android client for the Gemini API - cloud OAuth + local model files",
+                "Native Android client for the Gemini API - cloud OAuth & local model files",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
