@@ -65,7 +65,7 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
     private val _imagenModel = MutableStateFlow(core.imagenModel())
     val imagenModel: StateFlow<String> = _imagenModel.asStateFlow()
 
-    private val _localModels = MutableStateFlow(core.listLocalModels())
+    private val _localModels = MutableStateFlow<List<LocalModelFile>>(emptyList())
     val localModels: StateFlow<List<LocalModelFile>> = _localModels.asStateFlow()
 
     private val _selectedLocalModelPath = MutableStateFlow(core.selectedLocalModelPath())
@@ -132,6 +132,7 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
                 }
             }
         }
+        viewModelScope.launch { refreshLocalModelsNow() }
     }
 
     fun initCore(config: Map<String, Any>) {
@@ -467,13 +468,7 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
     }
 
     fun refreshLocalModels() {
-        _localModels.value = core.listLocalModels()
-        val selected = core.selectedLocalModelPath()
-        _selectedLocalModelPath.value = selected
-        if (!selected.isNullOrBlank() && _localModels.value.none { it.path == selected }) {
-            core.setSelectedLocalModelPath(null)
-            _selectedLocalModelPath.value = null
-        }
+        viewModelScope.launch { refreshLocalModelsNow() }
     }
 
     fun selectLocalModel(path: String?) {
@@ -486,7 +481,7 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
         viewModelScope.launch {
             core.importLocalModel(uri)
                 .onSuccess {
-                    refreshLocalModels()
+                    refreshLocalModelsNow()
                 }
                 .onFailure {
                     _error.value = it.message ?: "Could not import model file"
@@ -495,12 +490,24 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
     }
 
     fun deleteLocalModel(path: String) {
-        val deleted = core.removeLocalModel(path)
-        if (!deleted) {
-            _error.value = "Could not delete model file"
-            return
+        viewModelScope.launch {
+            val deleted = core.removeLocalModel(path)
+            if (!deleted) {
+                _error.value = "Could not delete model file"
+                return@launch
+            }
+            refreshLocalModelsNow()
         }
-        refreshLocalModels()
+    }
+
+    private suspend fun refreshLocalModelsNow() {
+        _localModels.value = core.listLocalModels()
+        val selected = core.selectedLocalModelPath()
+        _selectedLocalModelPath.value = selected
+        if (!selected.isNullOrBlank() && _localModels.value.none { it.path == selected }) {
+            core.setSelectedLocalModelPath(null)
+            _selectedLocalModelPath.value = null
+        }
     }
 }
 

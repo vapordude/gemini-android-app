@@ -195,9 +195,9 @@ class RestGeminiCore(
     fun setSelectedLocalModelPath(path: String?) {
         prefs.localModelPath = path
     }
-    fun listLocalModels(): List<LocalModelFile> =
-        if (!localModelsDir.exists()) emptyList()
-        else localModelsDir.listFiles()?.toList().orEmpty()
+    suspend fun listLocalModels(): List<LocalModelFile> = withContext(Dispatchers.IO) {
+        if (!localModelsDir.exists()) return@withContext emptyList()
+        localModelsDir.listFiles()?.toList().orEmpty()
             .filter { it.isFile }
             .sortedByDescending { it.lastModified() }
             .map {
@@ -208,6 +208,7 @@ class RestGeminiCore(
                     modifiedAtMs = it.lastModified()
                 )
             }
+    }
 
     suspend fun importLocalModel(uri: Uri): Result<LocalModelFile> = withContext(Dispatchers.IO) {
         runCatching {
@@ -232,17 +233,17 @@ class RestGeminiCore(
         }
     }
 
-    fun removeLocalModel(path: String): Boolean {
+    suspend fun removeLocalModel(path: String): Boolean = withContext(Dispatchers.IO) {
         val file = File(path)
-        if (!file.exists()) return false
-        val canonicalRoot = runCatching { localModelsDir.canonicalFile }.getOrNull() ?: return false
-        val canonicalFile = runCatching { file.canonicalFile }.getOrNull() ?: return false
-        if (!canonicalFile.toPath().startsWith(canonicalRoot.toPath())) return false
+        if (!file.exists()) return@withContext false
+        val canonicalRoot = runCatching { localModelsDir.canonicalFile }.getOrNull() ?: return@withContext false
+        val canonicalFile = runCatching { file.canonicalFile }.getOrNull() ?: return@withContext false
+        if (!canonicalFile.toPath().startsWith(canonicalRoot.toPath())) return@withContext false
         val deleted = canonicalFile.delete()
         if (deleted && prefs.localModelPath == canonicalFile.absolutePath) {
             prefs.localModelPath = null
         }
-        return deleted
+        deleted
     }
 
     fun isTermuxGuideShown(): Boolean = prefs.termuxGuideShown
