@@ -112,9 +112,9 @@ pub fn load(path: &Path) -> Result<LoadedModel, LoadError> {
     });
 
     match (family.as_str(), arch.as_str()) {
-        ("lm", "gemma4" | "gemma-4" | "gemma" | "gemma2" | "gemma3") => Ok(
-            LoadedModel::Language(Box::new(arch::lm::gemma4::Gemma4Model::load(&gguf)?)),
-        ),
+        ("lm", "gemma4" | "gemma-4" | "gemma" | "gemma2" | "gemma3") => Ok(LoadedModel::Language(
+            Box::new(arch::lm::gemma4::Gemma4Model::load(&gguf)?),
+        )),
         ("diffusion", a) => Err(LoadError::UnknownArchitecture(format!(
             "diffusion arch '{a}' not yet implemented (see arch/diffusion/)"
         ))),

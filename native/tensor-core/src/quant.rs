@@ -75,7 +75,10 @@ pub fn dequantize_to_f32(
         DequantType::F32 => {
             let expected = numel * 4;
             if src.len() < expected {
-                return Err(DequantError::BadLength { expected, got: src.len() });
+                return Err(DequantError::BadLength {
+                    expected,
+                    got: src.len(),
+                });
             }
             let mut out = Vec::with_capacity(numel);
             for i in 0..numel {
@@ -87,7 +90,10 @@ pub fn dequantize_to_f32(
         DequantType::F16 => {
             let expected = numel * 2;
             if src.len() < expected {
-                return Err(DequantError::BadLength { expected, got: src.len() });
+                return Err(DequantError::BadLength {
+                    expected,
+                    got: src.len(),
+                });
             }
             let mut out = Vec::with_capacity(numel);
             for i in 0..numel {
@@ -99,7 +105,10 @@ pub fn dequantize_to_f32(
         DequantType::BF16 => {
             let expected = numel * 2;
             if src.len() < expected {
-                return Err(DequantError::BadLength { expected, got: src.len() });
+                return Err(DequantError::BadLength {
+                    expected,
+                    got: src.len(),
+                });
             }
             let mut out = Vec::with_capacity(numel);
             for i in 0..numel {
@@ -118,7 +127,10 @@ pub fn dequantize_to_f32(
             let blocks = numel / q8_0::BLOCK;
             let expected = blocks * q8_0::BYTES_PER_BLOCK;
             if src.len() < expected {
-                return Err(DequantError::BadLength { expected, got: src.len() });
+                return Err(DequantError::BadLength {
+                    expected,
+                    got: src.len(),
+                });
             }
             let mut out = vec![0.0f32; numel];
             q8_0::dequantize(&src[..expected], &mut out);
@@ -134,7 +146,10 @@ pub fn dequantize_to_f32(
             let blocks = numel / q4_0::BLOCK;
             let expected = blocks * q4_0::BYTES_PER_BLOCK;
             if src.len() < expected {
-                return Err(DequantError::BadLength { expected, got: src.len() });
+                return Err(DequantError::BadLength {
+                    expected,
+                    got: src.len(),
+                });
             }
             let mut out = vec![0.0f32; numel];
             q4_0::dequantize(&src[..expected], &mut out);
@@ -150,7 +165,10 @@ pub fn dequantize_to_f32(
             let supers = numel / q4_k::SUPER_BLOCK;
             let expected = supers * q4_k::BYTES_PER_SUPER_BLOCK;
             if src.len() < expected {
-                return Err(DequantError::BadLength { expected, got: src.len() });
+                return Err(DequantError::BadLength {
+                    expected,
+                    got: src.len(),
+                });
             }
             let mut out = vec![0.0f32; numel];
             q4_k::dequantize(&src[..expected], &mut out);

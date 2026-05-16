@@ -126,10 +126,10 @@ struct LayerWeights {
     post_attn_norm: Option<Vec<f32>>,
     ffn_norm: Vec<f32>,
     post_ffn_norm: Option<Vec<f32>>,
-    w_q: Vec<f32>, // [n_heads * head_dim, hidden]
-    w_k: Vec<f32>, // [n_kv_heads * head_dim, hidden]
-    w_v: Vec<f32>, // [n_kv_heads * head_dim, hidden]
-    w_o: Vec<f32>, // [hidden, n_heads * head_dim]
+    w_q: Vec<f32>,    // [n_heads * head_dim, hidden]
+    w_k: Vec<f32>,    // [n_kv_heads * head_dim, hidden]
+    w_v: Vec<f32>,    // [n_kv_heads * head_dim, hidden]
+    w_o: Vec<f32>,    // [hidden, n_heads * head_dim]
     w_gate: Vec<f32>, // [inter, hidden]
     w_up: Vec<f32>,   // [inter, hidden]
     w_down: Vec<f32>, // [hidden, inter]
@@ -388,7 +388,12 @@ impl Gemma4Model {
     fn compute_logits(&mut self) {
         let hidden = self.cfg.hidden_size;
         let mut norm = vec![0.0f32; hidden];
-        rmsnorm_f32(&self.scratch.x, &self.global.output_norm, &mut norm, self.cfg.rms_eps);
+        rmsnorm_f32(
+            &self.scratch.x,
+            &self.global.output_norm,
+            &mut norm,
+            self.cfg.rms_eps,
+        );
         let head = self.global.lm_head.as_ref().unwrap_or(&self.global.embed);
         matvec_f32(&norm, head, &mut self.logits, self.cfg.vocab_size, hidden);
     }
@@ -397,6 +402,7 @@ impl Gemma4Model {
 /// SDPA wrapper for grouped-query attention. The query has `n_heads`,
 /// the cache has `n_kv_heads`; query head `h` reads kv-head
 /// `h * n_kv_heads / n_heads`.
+#[allow(clippy::too_many_arguments)] // single internal helper; collapsing this into a struct would obscure the shapes
 fn gqa_attention(
     q: &[f32],
     k_cache: &[f32],
@@ -417,9 +423,11 @@ fn gqa_attention(
         let mut k_head = vec![0.0f32; seq_len * head_dim];
         let mut v_head = vec![0.0f32; seq_len * head_dim];
         for t in 0..seq_len {
-            let row = &k_cache[t * kv_total + kv_h * head_dim..t * kv_total + (kv_h + 1) * head_dim];
+            let row =
+                &k_cache[t * kv_total + kv_h * head_dim..t * kv_total + (kv_h + 1) * head_dim];
             k_head[t * head_dim..(t + 1) * head_dim].copy_from_slice(row);
-            let row = &v_cache[t * kv_total + kv_h * head_dim..t * kv_total + (kv_h + 1) * head_dim];
+            let row =
+                &v_cache[t * kv_total + kv_h * head_dim..t * kv_total + (kv_h + 1) * head_dim];
             v_head[t * head_dim..(t + 1) * head_dim].copy_from_slice(row);
         }
         let out_h = &mut out[h * head_dim..(h + 1) * head_dim];
@@ -544,12 +552,12 @@ impl LanguageModel for Gemma4Model {
             if let Some(post) = self.layers[layer].post_attn_norm.as_ref() {
                 let mut tmp = vec![0.0f32; hidden];
                 rmsnorm_f32(&self.scratch.o, post, &mut tmp, cfg.rms_eps);
-                for i in 0..hidden {
-                    self.scratch.x[i] += tmp[i];
+                for (xi, ti) in self.scratch.x.iter_mut().zip(tmp.iter()) {
+                    *xi += *ti;
                 }
             } else {
-                for i in 0..hidden {
-                    self.scratch.x[i] += self.scratch.o[i];
+                for (xi, oi) in self.scratch.x.iter_mut().zip(self.scratch.o.iter()) {
+                    *xi += *oi;
                 }
             }
 
@@ -574,7 +582,11 @@ impl LanguageModel for Gemma4Model {
                 inter,
                 hidden,
             );
-            swiglu_f32(&self.scratch.gate, &self.scratch.up, &mut self.scratch.swiglu);
+            swiglu_f32(
+                &self.scratch.gate,
+                &self.scratch.up,
+                &mut self.scratch.swiglu,
+            );
             matvec_f32(
                 &self.scratch.swiglu,
                 &self.layers[layer].w_down,
@@ -586,12 +598,12 @@ impl LanguageModel for Gemma4Model {
             if let Some(post) = self.layers[layer].post_ffn_norm.as_ref() {
                 let mut tmp = vec![0.0f32; hidden];
                 rmsnorm_f32(&self.scratch.ffn_out, post, &mut tmp, cfg.rms_eps);
-                for i in 0..hidden {
-                    self.scratch.x[i] += tmp[i];
+                for (xi, ti) in self.scratch.x.iter_mut().zip(tmp.iter()) {
+                    *xi += *ti;
                 }
             } else {
-                for i in 0..hidden {
-                    self.scratch.x[i] += self.scratch.ffn_out[i];
+                for (xi, fi) in self.scratch.x.iter_mut().zip(self.scratch.ffn_out.iter()) {
+                    *xi += *fi;
                 }
             }
         }
