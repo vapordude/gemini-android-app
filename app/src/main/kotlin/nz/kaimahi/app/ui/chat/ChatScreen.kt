@@ -668,9 +668,7 @@ private fun ChatList(
                 )
             }
         }
-        if (agentMarkers.isNotEmpty()) item("agent-markers") {
-            AgentMarkerStrip(agentMarkers)
-        }
+        agentMarkerItems(agentMarkers)
         if (thinking != null) item("thinking") { ThinkingBubble(thinking) }
         if (error != null) item("error") {
             ErrorBubble(error, onRetry = onRetry, onDismiss = onDismissError)

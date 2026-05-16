@@ -180,7 +180,15 @@ class RestGeminiCore(
 
     private val _events = MutableSharedFlow<GeminiEvent>(
         replay = 0,
-        extraBufferCapacity = 64,
+        // Bumped from 64 → 256 to give marker pairs headroom under
+        // burst-y tool dispatch. A single LM turn that fires many
+        // tool calls in sequence (e.g. read 20 files + grep) emits
+        // two marker events per call (Running → Done). At 64 capacity
+        // with DROP_OLDEST it was possible — though rare — for a
+        // Running event to be dropped while its Done event survived,
+        // leaving an orphan ✓ row with no preceding context. 256 is
+        // well above any realistic burst.
+        extraBufferCapacity = 256,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
     override val events: SharedFlow<GeminiEvent> = _events.asSharedFlow()
@@ -677,7 +685,17 @@ class RestGeminiCore(
         val args = summariseArgs(call.arguments)
         val outcome = if (result.ok) {
             val output = result.output.takeIf { it.isNotBlank() } ?: "ok"
-            if (output.length > 2000) output.substring(0, 2000) + "\n…" else output
+            if (output.length > 2000) {
+                // Surface the truncation explicitly so the user
+                // doesn't mistake the preview for what the model saw.
+                // The full output stays in the tool-result bubble
+                // that lands separately in the chat.
+                output.substring(0, 2000) +
+                    "\n…\n(truncated for the marker view — full output is " +
+                    "in the tool-result bubble below.)"
+            } else {
+                output
+            }
         } else {
             result.output.ifBlank { "failed" }
         }

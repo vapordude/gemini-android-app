@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Check
@@ -59,6 +61,30 @@ import nz.kaimahi.domain.AgentMarkerStatus
  * status enum drives the trailing indicator (spinner/check/cross) so
  * the user can scan the strip and see at a glance which steps are
  * done.
+ */
+/**
+ * Emit one LazyColumn item per marker, each with a stable id key so
+ * the LazyColumn actually virtualises long lists (50+ markers in a
+ * heavy local-agent session) instead of recomposing the whole strip
+ * on every state change. Call this from inside a LazyListScope block.
+ */
+fun LazyListScope.agentMarkerItems(markers: List<AgentMarker>) {
+    if (markers.isEmpty()) return
+    items(markers, key = { it.id }) { marker ->
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp),
+        ) {
+            AgentMarkerRow(marker)
+        }
+    }
+}
+
+/**
+ * Standalone strip rendering for non-LazyColumn contexts (previews,
+ * sheets, etc.). Inside the chat list, prefer [agentMarkerItems] so
+ * each row gets its own virtualised LazyColumn item.
  */
 @Composable
 fun AgentMarkerStrip(
