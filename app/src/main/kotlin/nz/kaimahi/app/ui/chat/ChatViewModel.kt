@@ -183,13 +183,21 @@ class ChatViewModel(
                         // Upsert by id. New markers append, status changes
                         // replace in place so the UI doesn't flicker the
                         // row out and back in when a Running marker
-                        // transitions to Done.
+                        // transitions to Done. Cap accumulation at
+                        // MAX_AGENT_MARKERS so a long session doesn't
+                        // grow unbounded — the oldest markers drop off
+                        // the start of the list.
                         val current = _agentMarkers.value
                         val idx = current.indexOfFirst { it.id == ev.marker.id }
-                        _agentMarkers.value = if (idx >= 0) {
+                        val updated = if (idx >= 0) {
                             current.toMutableList().apply { this[idx] = ev.marker }
                         } else {
                             current + ev.marker
+                        }
+                        _agentMarkers.value = if (updated.size > MAX_AGENT_MARKERS) {
+                            updated.takeLast(MAX_AGENT_MARKERS)
+                        } else {
+                            updated
                         }
                     }
                     is GeminiEvent.MarkerCleared -> {
@@ -827,6 +835,15 @@ class ChatViewModel(
 }
 
 private const val MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024
+
+/**
+ * Soft cap on accumulated agent activity markers within a chat
+ * session. Beyond this, the oldest markers drop off so the LazyColumn
+ * doesn't carry an unbounded list across hundreds of tool-call
+ * cycles. 50 covers any single dense turn plus a few rounds of
+ * context — for full session replay, use the trace export.
+ */
+private const val MAX_AGENT_MARKERS = 50
 
 data class PendingAttachment(
     val id: String,

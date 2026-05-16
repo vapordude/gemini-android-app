@@ -186,6 +186,18 @@ fun ChatScreen(
         }
     }
 
+    // Auto-clear errors after a few seconds so they don't accumulate
+    // as noise. The user can dismiss earlier; retry is still available
+    // via the retry button on the error bubble itself. 8s is long
+    // enough to read a typical error and decide, short enough that
+    // the chat doesn't carry stale state forward indefinitely.
+    LaunchedEffect(error) {
+        if (error != null) {
+            kotlinx.coroutines.delay(8000L)
+            viewModel.clearError()
+        }
+    }
+
     // Only auto-scroll when the user is already near the bottom — otherwise
     // they get yanked out of whatever they were reading. The streamed text of
     // the last message grows without changing `messages.size`, so include it
