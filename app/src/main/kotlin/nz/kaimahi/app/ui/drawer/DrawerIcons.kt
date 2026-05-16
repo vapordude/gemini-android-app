@@ -1,6 +1,7 @@
 package nz.kaimahi.app.ui.drawer
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.ChatBubbleOutline
@@ -20,6 +21,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
  */
 internal object DrawerIcons {
     val Chat: ImageVector = Icons.Filled.ChatBubbleOutline
+    val FrontPage: ImageVector = Icons.AutoMirrored.Filled.Article
     val Todo: ImageVector = Icons.Filled.Checklist
     val Memory: ImageVector = Icons.Filled.AccountTree
     val Trace: ImageVector = Icons.Filled.Insights

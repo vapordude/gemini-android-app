@@ -42,7 +42,9 @@ import nz.kaimahi.app.ui.local.DeploymentConfigsScreen
 import nz.kaimahi.app.ui.local.TraceViewerScreen
 import nz.kaimahi.app.ui.login.LoginScreen
 import nz.kaimahi.app.ui.memory.MemoryBrowserHost
+import nz.kaimahi.app.ui.research.DailyFrontPageScreen
 import nz.kaimahi.app.ui.settings.ThemeMode
+import nz.kaimahi.bridge.research.FeedTopic
 import nz.kaimahi.bridge.RestGeminiCore
 import nz.kaimahi.bridge.storage.ChatStore
 import nz.kaimahi.domain.EmdashProfile
@@ -188,6 +190,18 @@ private fun KaimahiApp(
                 onThemeChange = onThemeChange,
                 onOpenLocalTraces = { destination = KaimahiDestination.TraceViewer },
                 onOpenDeploymentConfigs = { destination = KaimahiDestination.Deployments },
+            )
+            KaimahiDestination.DailyFrontPage -> DailyFrontPageScreen(
+                dateLine = "Today",
+                summaryLine = "Feed coming soon",
+                items = emptyList(),
+                activeTopic = FeedTopic.All,
+                availableTopics = FeedTopic.values().toList(),
+                onDrawerOpen = openDrawer,
+                onRefresh = {},
+                onTopicSelected = {},
+                onItemClick = {},
+                onItemStarToggle = {},
             )
             KaimahiDestination.DailyTodo -> DailyTodoHost(onDrawerOpen = openDrawer)
             KaimahiDestination.MemoryBrowser -> MemoryBrowserHost(

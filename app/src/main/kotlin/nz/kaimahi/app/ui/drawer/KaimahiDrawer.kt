@@ -52,6 +52,7 @@ import nz.kaimahi.ui.LocalKaimahiColors
  */
 enum class KaimahiDestination {
     Chat,
+    DailyFrontPage,
     DailyTodo,
     MemoryBrowser,
     TraceViewer,
@@ -225,6 +226,12 @@ fun KaimahiDrawerContent(
                 icon = DrawerIcons.Chat,
                 active = activeDestination == KaimahiDestination.Chat,
                 onClick = { onDestinationSelected(KaimahiDestination.Chat) },
+            )
+            DrawerItem(
+                label = "Daily front page",
+                icon = DrawerIcons.FrontPage,
+                active = activeDestination == KaimahiDestination.DailyFrontPage,
+                onClick = { onDestinationSelected(KaimahiDestination.DailyFrontPage) },
             )
             DrawerItem(
                 label = "Daily todo",
