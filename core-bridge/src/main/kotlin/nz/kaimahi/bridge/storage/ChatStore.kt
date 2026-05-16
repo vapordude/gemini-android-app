@@ -26,7 +26,12 @@ class ChatStore(context: Context) {
         val messages: List<GeminiMessage>
     )
 
-    data class Entry(val name: String, val updatedAt: Long, val messageCount: Int)
+    data class Entry(
+        val name: String,
+        val updatedAt: Long,
+        val messageCount: Int,
+        val archived: Boolean = false,
+    )
 
     fun list(): List<Entry> = root.listFiles()
         ?.filter { it.isFile && it.name.endsWith(".json") }
@@ -36,12 +41,44 @@ class ChatStore(context: Context) {
                 Entry(
                     name = f.nameWithoutExtension,
                     updatedAt = f.lastModified(),
-                    messageCount = root.optJSONArray("messages")?.length() ?: 0
+                    messageCount = root.optJSONArray("messages")?.length() ?: 0,
+                    archived = root.optBoolean("archived", false),
                 )
             }.getOrNull()
         }
         ?.sortedByDescending { it.updatedAt }
         ?: emptyList()
+
+    /** Active (non-archived) projects, newest first. */
+    fun listActive(): List<Entry> = list().filter { !it.archived }
+
+    /** Archived projects, newest first. */
+    fun listArchived(): List<Entry> = list().filter { it.archived }
+
+    /** Flip the archive flag on a saved chat. Returns true if the chat existed. */
+    fun setArchived(name: String, archived: Boolean): Boolean {
+        val safe = slug(name)
+        val f = File(root, "$safe.json")
+        if (!f.exists()) return false
+        val obj = runCatching { JSONObject(f.readText()) }.getOrNull() ?: return false
+        obj.put("archived", archived)
+        runCatching { f.writeText(obj.toString()) }
+        return true
+    }
+
+    /** Rename a saved chat. Returns true on success. */
+    fun rename(oldName: String, newName: String): Boolean {
+        val from = slug(oldName)
+        val to = slug(newName)
+        if (from.isBlank() || to.isBlank() || from == to) return false
+        val src = File(root, "$from.json")
+        val dst = File(root, "$to.json")
+        if (!src.exists() || dst.exists()) return false
+        val obj = runCatching { JSONObject(src.readText()) }.getOrNull() ?: return false
+        obj.put("name", to)
+        runCatching { dst.writeText(obj.toString()) }
+        return src.delete()
+    }
 
     fun save(name: String, snapshot: Snapshot) {
         val safe = slug(name)
