@@ -50,10 +50,13 @@ from-scratch Rust runtime — no third-party inference libraries.
   - **Continue with Google.** Play Services account picker, in-app OAuth.
   - **Skip — local model only.** No Google account at all. Use an
     imported GGUF file and stay offline.
-- **Run a local GGUF model on-device.** Import a Gemma 2/3 GGUF
-  (F16/F32/Q4_K/Q4_0/Q8_0/BF16 supported) under Settings → Local model;
-  the Rust runtime dequantizes the weights, runs a SwiGLU decoder pass,
-  samples tokens, and streams them into the chat. See "Known gaps"
+- **Run a local Gemma 4 GGUF on-device.** Import an E2B or E4B Q4_K_M
+  GGUF (Gemma 4 is the first Apache-licensed Gemma family) under
+  Settings → Local model. Weights stay packed — the runtime dispatches
+  `matvec_q4_k_row_major` directly on the Q4_K bytes, so peak RAM is
+  the file size (~1.5 GB for E2B, ~3 GB for E4B), not 8× that. Q4_K /
+  Q4_0 / Q8_0 / F16 / F32 / BF16 are all parsed; small tensors keep
+  F32 storage, projection weights stay quantized. See "Known gaps"
   below for what this does **not** yet do.
 - **Local-first cold start.** If a local model is already selected, the
   app skips the login screen and comes up in local-agent mode.
@@ -85,10 +88,13 @@ from-scratch Rust runtime — no third-party inference libraries.
     expiry and re-onboards if `loadCodeAssist` reports the user
     isn't onboarded yet.
 - **Local inference** through `libkaimahi_native.so` (built from
-  `native/`): GGUF parser, F32/F16/BF16/Q4_0/Q4_K/Q8_0 dequant, SwiGLU
-  decoder pass, RoPE + GQA SDPA, sampler (greedy / temperature + top-k).
-  Tokens stream over a JNI callback into the same chat bubble as the
-  cloud path.
+  `native/`): GGUF parser; packed Q4_K_M matvec kernel; the Gemma 4
+  forward pass (per-layer SWA-vs-full attention dispatch, selective
+  KV-share, per-head Q/K/weight-less-V RMSNorm, `gelu_pytorch_tanh`
+  FFN, PLE injection, final logit softcap); RoPE with proportional
+  rotation on full-attention layers; sampler (greedy / temperature +
+  top-k). Tokens stream over a JNI callback into the same chat bubble
+  as the cloud path.
 - **Function calling** with 9 built-in tools:
   `read_file`, `write_file`, `edit_file`, `delete_file`,
   `list_directory`, `glob_files`, `grep`, `run_shell_command`
@@ -222,20 +228,30 @@ No DI framework, no Room. `SharedPreferences` + JSON files under
 
 Honest about where the current build is wobbly:
 
-- **Gemma forward pass — math wiring is in, parity is not.** The
-  decoder shape is right (RMSNorm → Q/K/V → RoPE → GQA SDPA → O →
-  optional post-attn-norm → residual → SwiGLU FFN → optional
-  post-ffn-norm → residual → final norm → lm_head) and 37+ tensor
-  tests pass against synthetic fixtures, but no PyTorch parity harness
-  validates the output for a real Gemma checkpoint. Expect plausible
-  shape, not necessarily plausible content. Gemma 3's
-  alternating-window attention and per-layer RoPE base are currently
-  approximated by a single window + base applied uniformly.
-- **Memory footprint at load time.** Every weight tensor is dequantized
-  to F32 in RAM when the model loads. Gemma 270M fits (~1 GB). Gemma
-  2B does not (~8 GB). The follow-up is a quantized matvec kernel that
-  reads Q4_K / Q8_0 bytes directly. Until that lands, stick to small
-  GGUF files on-device.
+- **Gemma 4 forward-pass parity is unverified end-to-end.** The math
+  is a line-by-line port of `llama.cpp/src/models/gemma4.cpp` (every
+  `ggml_mul_mat` mapped to a row-major `matvec` with inline shape
+  comments) and the per-piece kernels are unit-tested, but no PyTorch
+  / reference parity harness has compared a full prompt → next-token
+  distribution against a baseline yet. First-token on-device is the
+  current ground truth.
+- **Only Gemma 4 is supported on-device.** Gemma 2 / 3 GGUFs still
+  parse and tokenize, but their forward pass was retired with the
+  port. Their architectures differ enough (no PLE, no
+  per-layer-heterogeneous head_dim, no selective KV-share, different
+  RoPE schedule) that wedging them through the Gemma 4 path produces
+  garbage. If you need Gemma 3 back, the previous SwiGLU decoder lives
+  in git history at `v0.2.0`.
+- **SIMD intrinsics aren't wired.** Scalar Rust matvec only. On a
+  Cortex-A76 expect ~0.05–0.3 tok/s for E2B at Q4_K_M. The NEON path
+  is the highest-leverage follow-up.
+- **`use_double_wide_mlp=true`** (E2B) is treated as the standard
+  split-tensor FFN layout — confirmed against the GGUF converter
+  scripts. If a future fine-tune ships fused gate+up under a
+  non-standard tensor name the loader will throw `MissingMetadata`
+  with the exact name it asked for.
+- **MoE path (`enable_moe_block=true`)** raises a clear error at load
+  time — that layout ships in the 26B-A4B variant, not E2B/E4B.
 - **Local tool use.** The agent loop drives tools only when the model
   is cloud-Gemini. The local Gemma path streams tokens but doesn't yet
   invoke `read_file`, shell commands, etc.
@@ -313,9 +329,10 @@ Tested with:
 - `gemini-2.0-flash`
 - `gemini-1.5-pro` / `gemini-1.5-flash`
 
-**Gemma** models (`gemma-2-*`, `gemma-3-*`) appear in the picker but
-don't support function calling — they'll work for pure chat but the
-tool stack won't be available.
+**Gemma** models (`gemma-2-*`, `gemma-3-*`, `gemma-4-*`) appear in the
+picker but don't support function calling — they'll work for pure chat
+but the tool stack won't be available. On-device Gemma 4 (E2B / E4B
+GGUFs) is the only locally-runnable family right now; see "Known gaps".
 
 ## 🔌 Local API (OpenAPI)
 

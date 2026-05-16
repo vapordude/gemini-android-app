@@ -24,7 +24,7 @@ on 127.0.0.1.
 | --- | --- |
 | `tensor-core` | Pure-Rust tensor math + `Delegate` trait for NPU/GPU. Only crate with unsafe SIMD. |
 | `gguf-loader` | Pure-Rust GGUF v3 parser. Tokenizer, per-tensor type, arch params all from metadata. |
-| `model-runtime` | Architecture-agnostic LM + image runtime. `arch/lm/`, `arch/diffusion/` families. |
+| `model-runtime` | Architecture-agnostic LM + image runtime. `arch/lm/gemma4` is the only LM today — Gemma 4 E2B / E4B ported from `llama.cpp/src/models/gemma4.cpp`. `arch/lm/`, `arch/diffusion/` families. |
 | `agent-core` | Ported DeepAgent marker-driven state machine, generic over `InferenceBackend`. |
 | `emdash-core` | Shared types (PortableText AST, schemas, RequestContext). |
 | `emdash-client` | Typed HTTP/JSON client over remote `/_emdash/api/*`. |
@@ -72,7 +72,8 @@ See `../docs/PORTING.md` for the full porting guide.
 cargo test --workspace --lib
 ```
 
-66 unit tests today across quant codecs, kernels, GGUF parsing,
-tokenizer (incl. Gemma special tokens), agent loop with structured
-errors, topological + time-aware memory, dual-backend policy, training
-capture, telemetry, the local HTTP server, and diagnostics.
+86+ unit tests today across quant codecs (incl. Q4_K matvec parity vs
+dequant+matmul), kernels, GGUF parsing, tokenizer (incl. Gemma special
+tokens), agent loop with structured errors, topological + time-aware
+memory, dual-backend policy, training capture, telemetry, the local
+HTTP server, and diagnostics.
