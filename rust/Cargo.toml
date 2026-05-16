@@ -1,0 +1,31 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/gemma4-core",
+    "crates/gemma4-ops",
+    "crates/gemma4-quant",
+    "crates/gemma4-model",
+    "crates/gemma4-tokenizer",
+    "crates/gemma4-vision",
+    "crates/gemma4-audio",
+    "crates/gemma4-driver",
+    "crates/gemma4-jni",
+]
+
+# Workspace lints + profile. Every member crate forbids external dependencies
+# (only path-deps on sibling crates are allowed) so the inference engine ships
+# with zero third-party code — the math is exclusively ours.
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+[profile.release-android]
+inherits = "release"
+# Smaller binary for shipping per-ABI .so files into the APK.
+opt-level = "s"

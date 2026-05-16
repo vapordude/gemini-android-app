@@ -42,7 +42,8 @@ class MemoryStore(context: Context) {
                     val key = obj.optString("key")
                     when (op) {
                         "set" -> out[key] = obj.optString("value")
-                        "del" -> out.remove(key)
+                        "del" -> { out.remove(key); Unit }
+                        else -> Unit
                     }
                 }
             }
@@ -181,15 +182,24 @@ class MemoryStore(context: Context) {
         val n = header.optInt("N", 0)
         val df = mutableMapOf<String, Int>()
         header.optJSONObject("df")?.let { obj ->
-            for (key in obj.keys()) df[key] = obj.optInt(key, 0)
+            val it = obj.keys()
+            while (it.hasNext()) {
+                val key = it.next()
+                df[key] = obj.optInt(key, 0)
+            }
         }
         val byDoc = mutableMapOf<String, Map<String, Int>>()
         for (i in 1 until lines.size) {
             val obj = runCatching { JSONObject(lines[i]) }.getOrNull() ?: continue
-            val id = obj.optString("id").ifBlank { continue }
+            val id = obj.optString("id")
+            if (id.isBlank()) continue
             val tfMap = mutableMapOf<String, Int>()
             obj.optJSONObject("tf")?.let { tfObj ->
-                for (key in tfObj.keys()) tfMap[key] = tfObj.optInt(key, 0)
+                val it = tfObj.keys()
+                while (it.hasNext()) {
+                    val key = it.next()
+                    tfMap[key] = tfObj.optInt(key, 0)
+                }
             }
             byDoc[id] = tfMap
         }
@@ -206,16 +216,18 @@ class MemoryStore(context: Context) {
             byDoc[f.nameWithoutExtension] = tf
             for (t in tf.keys) df[t] = (df[t] ?: 0) + 1
         }
+        val dfObj = JSONObject().also { o -> for ((k, v) in df) o.put(k, v) }
         val header = JSONObject().apply {
             put("v", 1)
             put("N", docs.size)
-            put("df", JSONObject(df.mapValues { it.value }))
+            put("df", dfObj)
         }
         val sb = StringBuilder().append(header).append('\n')
         for ((id, tf) in byDoc) {
+            val tfObj = JSONObject().also { o -> for ((k, v) in tf) o.put(k, v) }
             val rec = JSONObject().apply {
                 put("id", id)
-                put("tf", JSONObject(tf.mapValues { it.value }))
+                put("tf", tfObj)
             }
             sb.append(rec).append('\n')
         }

@@ -1,0 +1,13 @@
+[package]
+name = "gemma4-core"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+# NO third-party dependencies. Pure `core` + `std`. This is a non-negotiable
+# constraint of the math-first design: every line of inference math is ours.
+[dependencies]
+
+[lib]
+name = "gemma4_core"
+path = "src/lib.rs"
