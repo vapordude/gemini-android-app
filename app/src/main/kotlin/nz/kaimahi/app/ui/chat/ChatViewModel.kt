@@ -316,11 +316,12 @@ class ChatViewModel(
                         )
                     }
                     localLoadedModelPath = loaded.path
+                    val runtime = runCatching { inference.info() }.getOrNull()
                     _localTraceEvents.value = _localTraceEvents.value + TraceEvent.ModelLoaded(
                         timestampMs = System.currentTimeMillis(),
-                        archTag = loaded.name.substringAfterLast('.').ifBlank { "gguf" },
-                        isa = "unknown",
-                        threads = Runtime.getRuntime().availableProcessors()
+                        archTag = loaded.archTag.ifBlank { "unknown" },
+                        isa = runtime?.isa ?: "unknown",
+                        threads = runtime?.threads ?: Runtime.getRuntime().availableProcessors()
                     )
                 }
                 val modelMessageId = "local-model-${System.nanoTime()}"
@@ -334,9 +335,11 @@ class ChatViewModel(
                     )
                 )
                 var output = ""
+                var tokenCount = 0
                 val startedAt = System.currentTimeMillis()
                 inference.generate(GenerateRequest(prompt = text)).collect { token ->
                     if (token.text.isEmpty()) return@collect
+                    tokenCount++
                     output += token.text
                     val idx = _messages.indexOfLast { it.id == modelMessageId }
                     if (idx >= 0) _messages[idx] = _messages[idx].copy(text = output)
@@ -347,7 +350,6 @@ class ChatViewModel(
                     _error.value = "No response generated. Verify the model is compatible or select a different GGUF model."
                 } else {
                     val durationMs = (System.currentTimeMillis() - startedAt).coerceAtLeast(1L)
-                    val tokenCount = output.trim().split(Regex("\\s+")).count { it.isNotBlank() }
                     _localTraceEvents.value = _localTraceEvents.value + TraceEvent.GenerateFinished(
                         timestampMs = System.currentTimeMillis(),
                         tokens = tokenCount,
