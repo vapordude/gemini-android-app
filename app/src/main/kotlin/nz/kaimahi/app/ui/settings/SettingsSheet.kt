@@ -352,7 +352,7 @@ fun SettingsSheet(
                 onToggle = { toggle("Local model") }
             ) {
                 Text(
-                    "Import a GGUF from Android storage into app-local files for the local runtime/sandbox.",
+                    "Import a GGUF model file from Android storage for local offline use.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

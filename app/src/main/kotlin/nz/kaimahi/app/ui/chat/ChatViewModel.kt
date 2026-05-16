@@ -498,6 +498,7 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
         val deleted = core.removeLocalModel(path)
         if (!deleted) {
             _error.value = "Could not delete model file"
+            return
         }
         refreshLocalModels()
     }
