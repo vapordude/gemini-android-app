@@ -345,18 +345,30 @@ class ChatViewModel(
         val attachments = _pendingAttachments.value
         if (text.isBlank() && attachments.isEmpty()) return
         if (sendJob?.isActive == true) return
+        // Split text-document attachments from binary (image) attachments.
+        // Text gets folded into the prompt; binary goes through the
+        // existing inlineData API payload.
+        val (textDocs, binaries) = attachments.partition { it.mimeType.startsWith("text/") }
+        val effectiveText = if (textDocs.isEmpty()) text else buildString {
+            for (doc in textDocs) {
+                append("## Attached: ").append(doc.displayName).append("\n\n")
+                append(doc.bytes.toString(Charsets.UTF_8).trimEnd())
+                append("\n\n---\n\n")
+            }
+            append(text)
+        }
         if (_inferenceMode.value == InferenceMode.LOCAL_AGENT) {
-            sendLocalMessage(text, attachments)
+            sendLocalMessage(effectiveText, binaries)
             return
         }
-        lastUserPrompt = text
-        val payload = attachments.map { Attachment(it.bytes, it.mimeType, it.localPath) }
+        lastUserPrompt = effectiveText
+        val payload = binaries.map { Attachment(it.bytes, it.mimeType, it.localPath) }
         _pendingAttachments.value = emptyList()
         sendJob = viewModelScope.launch {
             _isLoading.value = true
             try {
-                val result = if (payload.isEmpty()) core.sendMessage(text)
-                    else core.sendMessage(text, payload)
+                val result = if (payload.isEmpty()) core.sendMessage(effectiveText)
+                    else core.sendMessage(effectiveText, payload)
                 when (result) {
                     is GeminiResult.Success -> {}
                     is GeminiResult.Error -> _error.value = result.message
@@ -511,6 +523,43 @@ class ChatViewModel(
             }
             if (loaded.bytes.size > MAX_ATTACHMENT_BYTES) {
                 _error.value = "Image too large (max 15 MB)"
+                return@launch
+            }
+            _pendingAttachments.value = _pendingAttachments.value + loaded
+        }
+    }
+
+    /**
+     * Attach a text document — markdown, plain text, source code, RST,
+     * design specs. Read as UTF-8 and folded into the next outgoing
+     * message text as a clearly-delimited block, so the model sees the
+     * actual content rather than a binary file reference. Works
+     * uniformly across cloud Gemini and local-agent paths because
+     * everything ends up as prompt text.
+     *
+     * Image-of-document attachments should go through
+     * [attachImageFromUri] instead — modern multimodal models do OCR
+     * natively, so a screenshot of a design doc is just an image.
+     */
+    fun attachDocumentFromUri(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            val loaded = withContext(Dispatchers.IO) { readAttachment(context, uri) }
+            if (loaded == null) {
+                _error.value = "Could not read the selected document"
+                return@launch
+            }
+            if (loaded.bytes.size > MAX_ATTACHMENT_BYTES) {
+                _error.value = "Document too large (max 15 MB)"
+                return@launch
+            }
+            // Validate that the bytes are actually decodable as text.
+            // Binary garbage gets rejected here so we never try to fold
+            // it into a prompt.
+            val decoded = runCatching { loaded.bytes.toString(Charsets.UTF_8) }.getOrNull()
+            if (decoded == null || decoded.any { it.code == 0 }) {
+                _error.value = "That doesn't look like a text document. For images of " +
+                    "designs or screenshots, use the image attachment instead — the model " +
+                    "reads them natively."
                 return@launch
             }
             _pendingAttachments.value = _pendingAttachments.value + loaded
