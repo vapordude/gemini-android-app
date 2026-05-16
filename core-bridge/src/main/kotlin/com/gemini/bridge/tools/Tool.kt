@@ -11,6 +11,7 @@ interface Tool {
 
 class ToolRegistry(private val tools: MutableMap<String, Tool> = mutableMapOf()) {
     fun register(tool: Tool) { tools[tool.spec.name] = tool }
+    fun unregister(name: String) { tools.remove(name) }
     fun specs(): List<ToolSpec> = tools.values.map { it.spec }
     fun get(name: String): Tool? = tools[name]
     fun all(): Collection<Tool> = tools.values

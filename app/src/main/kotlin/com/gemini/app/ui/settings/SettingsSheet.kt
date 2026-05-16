@@ -418,6 +418,15 @@ fun SettingsSheet(
             }
 
             SettingsAccordion(
+                title = "Patch kernel",
+                icon = Icons.Default.Security,
+                expanded = "Patch kernel" in expanded,
+                onToggle = { toggle("Patch kernel") }
+            ) {
+                PatchKernelSection(viewModel)
+            }
+
+            SettingsAccordion(
                 title = "Tool approvals",
                 icon = Icons.Default.Security,
                 expanded = "Tool approvals" in expanded,
@@ -1158,6 +1167,47 @@ private fun StorageScopeRow(viewModel: ChatViewModel, scope: String, label: Stri
             OutlinedButton(onClick = { launcher.launch(null) }) { Text("Grant") }
         } else {
             OutlinedButton(onClick = { viewModel.grantUserScope(scope, null) }) { Text("Revoke") }
+        }
+    }
+}
+
+@Composable
+private fun PatchKernelSection(viewModel: ChatViewModel) {
+    var url by remember { mutableStateOf(viewModel.patchKernelUrl()) }
+    var token by remember { mutableStateOf(viewModel.patchKernelToken()) }
+    Text(
+        "Optional sidecar that gives the agent surgical patching, multi-file " +
+            "atomic batches, symbol search, and chunked writes. Runs separately " +
+            "(typically in Termux on port 7979). Empty URL disables the kernel.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Spacer(Modifier.height(8.dp))
+    OutlinedTextField(
+        value = url,
+        onValueChange = { url = it },
+        label = { Text("Kernel URL") },
+        placeholder = { Text("http://127.0.0.1:7979") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(Modifier.height(8.dp))
+    OutlinedTextField(
+        value = token,
+        onValueChange = { token = it },
+        label = { Text("Auth token (optional)") },
+        singleLine = true,
+        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(Modifier.height(8.dp))
+    Row {
+        Button(onClick = { viewModel.setPatchKernel(url, token) }) {
+            Text("Save & probe")
+        }
+        Spacer(Modifier.width(8.dp))
+        OutlinedButton(onClick = { viewModel.setPatchKernel("", "") }) {
+            Text("Disable")
         }
     }
 }

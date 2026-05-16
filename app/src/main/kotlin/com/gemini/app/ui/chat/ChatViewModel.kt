@@ -435,6 +435,24 @@ class ChatViewModel(
         }
     }
 
+    /** Current Patch Kernel URL/token from prefs. Empty url disables the kernel. */
+    fun patchKernelUrl(): String =
+        com.gemini.bridge.storage.SecurePrefs(coreContext()).patchKernelUrl.orEmpty()
+    fun patchKernelToken(): String =
+        com.gemini.bridge.storage.SecurePrefs(coreContext()).patchKernelAuthToken.orEmpty()
+
+    /**
+     * Persist the kernel URL/token and re-probe reachability. After this
+     * runs, the [com.gemini.bridge.RestGeminiCore] tool registry reflects
+     * whether the kernel's tool family is exposed to the model.
+     */
+    fun setPatchKernel(url: String, token: String) {
+        val prefs = com.gemini.bridge.storage.SecurePrefs(coreContext())
+        prefs.patchKernelUrl = url.trim().ifBlank { null }
+        prefs.patchKernelAuthToken = token.trim().ifBlank { null }
+        viewModelScope.launch { core.refreshPatchKernelTools() }
+    }
+
     /** Returns the granted SAF URI for [scope], or null if not granted. */
     fun grantedScope(scope: String): String? {
         val prefs = com.gemini.bridge.storage.SecurePrefs(coreContext())

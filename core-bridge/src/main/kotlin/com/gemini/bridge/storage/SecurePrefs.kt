@@ -122,6 +122,26 @@ class SecurePrefs(context: Context) {
             if (value.isNullOrBlank()) remove(KEY_DOWN_URI) else putString(KEY_DOWN_URI, value)
         }.apply()
 
+    /**
+     * Base URL for the **Patch Kernel** sidecar. Empty means "off" — the
+     * kernel tools are then not registered and the agent uses only the
+     * built-in file/shell tools. Default points at the local Termux
+     * install (`http://127.0.0.1:7979`).
+     */
+    var patchKernelUrl: String?
+        get() = plain.getString(KEY_KERNEL_URL, "http://127.0.0.1:7979")
+        set(value) = plain.edit().apply {
+            if (value.isNullOrBlank()) remove(KEY_KERNEL_URL) else putString(KEY_KERNEL_URL, value)
+        }.apply()
+
+    /** Optional bearer token for the Patch Kernel (`MCP_AUTH_TOKEN` on the
+     *  kernel side). Encrypted because it may grant write access. */
+    var patchKernelAuthToken: String?
+        get() = encrypted.getString(KEY_KERNEL_TOKEN, null)
+        set(value) = encrypted.edit().apply {
+            if (value.isNullOrBlank()) remove(KEY_KERNEL_TOKEN) else putString(KEY_KERNEL_TOKEN, value)
+        }.apply()
+
     var autoApprove: Boolean
         get() = plain.getBoolean(KEY_AUTO_APPROVE, false)
         set(value) = plain.edit().putBoolean(KEY_AUTO_APPROVE, value).apply()
@@ -166,6 +186,8 @@ class SecurePrefs(context: Context) {
         const val KEY_HOME_URI = "home_tree_uri"
         const val KEY_DOCS_URI = "documents_tree_uri"
         const val KEY_DOWN_URI = "downloads_tree_uri"
+        const val KEY_KERNEL_URL = "patch_kernel_url"
+        const val KEY_KERNEL_TOKEN = "patch_kernel_auth_token"
     }
 }
 

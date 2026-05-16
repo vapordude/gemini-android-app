@@ -95,6 +95,47 @@ class RestGeminiCore(
         register(com.gemini.bridge.tools.ListUserFilesTool(this@RestGeminiCore.appContext, prefs))
     }
 
+    /**
+     * Re-evaluate whether the external Patch Kernel sidecar is reachable
+     * and register / unregister its tools accordingly. Called from
+     * `init()` after credentials land and any time the user updates the
+     * kernel URL/token in Settings.
+     *
+     * Suspends because the reachability probe is a blocking HTTP HEAD/GET
+     * on the calling thread; runs on Dispatchers.IO.
+     */
+    suspend fun refreshPatchKernelTools() = withContext(Dispatchers.IO) {
+        val url = prefs.patchKernelUrl
+        if (url.isNullOrBlank()) {
+            // Kernel disabled — make sure none of its tools are exposed.
+            unregisterKernelTools(); return@withContext
+        }
+        val client = com.gemini.bridge.patchkernel.PatchKernelClient(
+            baseUrl = url,
+            authToken = prefs.patchKernelAuthToken,
+        )
+        if (!client.isReachable()) {
+            unregisterKernelTools(); return@withContext
+        }
+        // Idempotent: ToolRegistry.register replaces by name, so calling it
+        // again on a reachable kernel just refreshes the bound client.
+        registry.register(com.gemini.bridge.tools.KernelReadWindowTool(client))
+        registry.register(com.gemini.bridge.tools.KernelPatchFileTool(client))
+        registry.register(com.gemini.bridge.tools.KernelMultiPatchTool(client))
+        registry.register(com.gemini.bridge.tools.KernelSearchSymbolsTool(client))
+        registry.register(com.gemini.bridge.tools.KernelChunkWriteTool(client))
+        registry.register(com.gemini.bridge.tools.KernelGitStatusTool(client))
+        registry.register(com.gemini.bridge.tools.KernelGitDiffTool(client))
+    }
+
+    private fun unregisterKernelTools() {
+        listOf(
+            "kernel_read_window", "kernel_patch_file", "kernel_multi_patch",
+            "kernel_search_symbols", "kernel_chunk_write", "kernel_git_status",
+            "kernel_git_diff",
+        ).forEach { registry.unregister(it) }
+    }
+
     private var apiKey: String = ""
     private var accessToken: String = ""
     /** OAuth refresh token — present only in CodeAssistOAuth mode. */
@@ -228,6 +269,10 @@ class RestGeminiCore(
             }
         }
         prefs.model = model
+        // Best-effort hook up to the external Patch Kernel sidecar. If it
+        // isn't running, refreshPatchKernelTools cleans up its tool surface
+        // so the model never sees half-registered kernel tools.
+        runCatching { refreshPatchKernelTools() }
         return GeminiResult.Success("Ready")
     }
 

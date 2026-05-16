@@ -8,6 +8,8 @@ publish = false
 gemma4-core = { path = "../gemma4-core" }
 gemma4-ops = { path = "../gemma4-ops" }
 gemma4-model = { path = "../gemma4-model" }
+gemma4-tokenizer = { path = "../gemma4-tokenizer" }
+gemma4-driver = { path = "../gemma4-driver" }
 
 [lib]
 name = "gemma4"
