@@ -12,7 +12,7 @@ object KaimahiBrand {
     const val TAGLINE: String = "Your local AI worker"
     const val FAMILY: String = "Cathedral AI"
     const val LOCALE_LINE: String = "Cathedral AI · Aotearoa"
-    const val VERSION: String = "v1.0.0"
+    const val VERSION: String = "v0.3.0"
     const val WHAKATAUKI_REO: String =
         "He aha te mea nui o te ao? He tāngata, he tāngata, he tāngata."
     const val WHAKATAUKI_EN: String =
