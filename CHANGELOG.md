@@ -7,7 +7,75 @@ ratchets independently and is currently `0.2.0`.
 
 ## [Unreleased]
 
-_Nothing pending. The 0.2.0 cut covers the current state of `main`._
+### Added — Gemma 4 (E2B / E4B) on-device
+
+- **Real Gemma 4 forward pass** ported line-by-line from
+  `llama.cpp/src/models/gemma4.cpp`. Replaces the SwiGLU decoder that
+  was approximating Gemma 2 / 3 in 0.2.0. Implements:
+  - **Per-layer attention type** (`LayerType::{Sliding, Full}`) with
+    different `head_dim` (256 / 512), RoPE base (10k / 1M), and
+    partial rotary factor (`0.25` on full layers only). 5:1 pattern
+    with the last layer always full.
+  - **Selective KV-share** via `build_kv_alias()`: the last
+    `num_kv_shared_layers` layers (E2B = 20, E4B = 18) reuse the most
+    recent KV-owning predecessor of the same attention type.
+  - **Per-head RMSNorm** on Q (`attn_q_norm`), K (`attn_k_norm`,
+    owning layers only), and weight-less RMS on V. V falls back to K
+    when `wv` is absent.
+  - **`gelu_pytorch_tanh` FFN** with parallel gate / up, separate
+    `attn_post_norm` and `ffn_post_norm` residuals.
+  - **PLE (Per-Layer Embeddings) injection**: precomputed once per
+    token from `per_layer_tok_embd` + `per_layer_model_proj` +
+    `per_layer_proj_norm`; per-layer `gate → GELU → multiply by PLE
+    row → projection → post_norm → additive residual`.
+  - **Final logit softcap** (`tanh(x / 30) * 30`).
+- **Packed Q4_K_M matvec** (`tensor-core::quant::q4_k::matvec_q4_k_row_major`)
+  that operates directly on the 144-byte super-block layout — no
+  dequant-to-F32 detour. Peak load RAM is now ≈ file size for Q4_K_M
+  models instead of 8× file size. Parity-tested against
+  dequant-then-matmul.
+- **`WeightView` enum** in `model-runtime/arch/lm/gemma4`: `Q4K {
+  bytes, n, k }` for projection matrices; `F32` only for small
+  tensors (norms, embeddings).
+- **Diagnostics**: two new `Probe` variants emitted at load time
+  behind `--features diag` — `Gemma4Layer` (one event per layer
+  recording `(idx, ty, head_dim, rope_base, n_rot, window, owns_kv,
+  kv_alias)`) and `Gemma4LoadSummary` (one event per model with shape
+  totals). Compiles to nothing in release builds.
+- **Inline shape-translation comments** at every projection matvec
+  site mapping `ggml_mul_mat(model.layers[il].w*, …)` from
+  `gemma4.cpp` to the row-major `w_*.matvec(...)` call here. A
+  top-level rustdoc table on `Gemma4Model::forward` documents the
+  ggml `ne = [in, out]` → GGUF `dims = [in, out]` → our row-major
+  `[out, in]` translation.
+- **Throughput regression example** at
+  `model-runtime/examples/forward_throughput.rs` (`cargo run --release
+  -p model-runtime --example forward_throughput`).
+
+### Changed
+
+- **`Gemma4Config`** moved off the 0.2.0 shape to one that reads
+  `num_kv_shared_layers`, `hidden_size_per_layer_input`,
+  `layer_types[]`, `final_logit_softcapping`, and per-layer-type
+  `head_dim` / `rope_base` from GGUF metadata. Dispatcher methods
+  `head_dim(layer)`, `rope_base(layer)`, `n_rot(layer)`,
+  `window(layer)`, `owns_kv(layer)` replace single scalars.
+
+### Known gaps (intentional, this cut)
+
+- **End-to-end parity vs HuggingFace Gemma 4 is unverified.** Kernels
+  are unit-tested; full prompt → next-token distribution hasn't been
+  compared against a reference yet. First on-device run is the
+  current ground truth.
+- **Gemma 2 / 3 on-device is no longer supported.** Their forward
+  pass was retired with the port. The previous SwiGLU decoder lives
+  at git tag `v0.2.0` if anyone needs it back.
+- **MoE path (26B-A4B layout)** errors clearly at load. Not in
+  E2B/E4B.
+- **SIMD intrinsics not wired** — scalar matvec only. Cortex-A76
+  estimate: 0.05–0.3 tok/s for E2B Q4_K_M.
+
+## [0.2.0] — 2026-05-16
 
 ## [0.2.0] — 2026-05-16
 
