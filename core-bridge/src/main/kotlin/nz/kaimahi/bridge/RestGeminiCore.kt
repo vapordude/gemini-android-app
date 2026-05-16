@@ -159,6 +159,21 @@ class RestGeminiCore(
 
     override fun availableTools(): List<ToolSpec> = registry.specs()
 
+    /** Tools list for the local agent loop — same registry as the cloud
+     *  path uses for function calling, so users see one consistent tool
+     *  surface regardless of which model drives the turn. */
+    fun localToolSpecs(): List<ToolSpec> = registry.specs()
+
+    /** Workspace label for the local agent's system prompt. Returns null
+     *  if no workspace has been picked yet. */
+    fun workspaceLabel(): String? =
+        runCatching { workspace.rootLabel() }.getOrNull()?.takeIf { it.isNotBlank() }
+
+    /** Run one tool call through the same approval + execution pipeline
+     *  the cloud function-calling path uses. Local agent loops route
+     *  every call through here so destructive tools gate the same way. */
+    suspend fun runLocalAgentTool(call: ToolCall): ToolCallResult = runSingleCall(call)
+
     override suspend fun init(config: Map<String, Any>): GeminiResult {
         val rememberKey = (config["remember"] as? Boolean) ?: true
         apiKey = (config["api_key"] ?: config["apiKey"] ?: "").toString().trim()
