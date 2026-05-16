@@ -322,9 +322,17 @@ unit-tested, but not yet compared against a HuggingFace reference.
   with the exact name it asked for.
 - **MoE path (`enable_moe_block=true`)** raises a clear error at load
   time — that layout ships in the 26B-A4B variant, not E2B/E4B.
-- **Local tool use.** The agent loop drives tools only when the model
-  is cloud-Gemini. The local Gemma path streams tokens but doesn't yet
-  invoke `read_file`, shell commands, etc.
+- **Local tool grammar is marker-based, not native function calling.**
+  The on-device Gemma model drives the same tool registry the cloud
+  path uses (read_file / write_file / edit_file / list_directory /
+  glob_files / grep / run_shell_command). It emits
+  `[CALL]name(json)[/CALL]` in its output stream; the host parses,
+  runs (with the same approval dialog the cloud path uses for
+  destructive tools), and feeds back `[RESULT id=X ok=true]…[/RESULT]`
+  in the next turn. Works on smaller models without a fine-tuned
+  function-calling head, at the cost of being more brittle than a
+  native protocol — if the model writes the markers wrong, the parser
+  treats it as prose. The fallback is the standard cloud path.
 - **Local multimodal.** Vision encoder isn't wired on-device. Image
   attachments only work on the cloud path.
 - **Code Assist response shape.** The Code Assist client matches the

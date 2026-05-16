@@ -395,13 +395,46 @@ class ChatViewModel(
                 var output = ""
                 var tokenCount = 0
                 val startedAt = System.currentTimeMillis()
-                inference.generate(GenerateRequest(prompt = text)).collect { token ->
-                    if (token.text.isEmpty()) return@collect
-                    tokenCount++
-                    output += token.text
-                    val idx = _messages.indexOfLast { it.id == modelMessageId }
-                    if (idx >= 0) _messages[idx] = _messages[idx].copy(text = output)
-                }
+
+                val loop = nz.kaimahi.bridge.agent.LocalAgentLoop(
+                    tools = core.localToolSpecs(),
+                    streamer = nz.kaimahi.bridge.agent.LocalAgentLoop.TokenStreamer { prompt ->
+                        kotlinx.coroutines.flow.flow {
+                            inference.generate(GenerateRequest(prompt = prompt)).collect { token ->
+                                if (token.text.isNotEmpty()) {
+                                    tokenCount++
+                                    emit(token.text)
+                                }
+                            }
+                        }
+                    },
+                    runner = nz.kaimahi.bridge.agent.LocalAgentLoop.ToolRunner { call ->
+                        core.runLocalAgentTool(call)
+                    },
+                    workspaceLabel = core.workspaceLabel(),
+                    modelName = localLoadedModelPath?.substringAfterLast('/'),
+                )
+                loop.run(
+                    userMessage = text,
+                    sink = nz.kaimahi.bridge.agent.LocalAgentLoop.Sink(
+                        onAssistantText = { delta ->
+                            output += delta
+                            val idx = _messages.indexOfLast { it.id == modelMessageId }
+                            if (idx >= 0) _messages[idx] = _messages[idx].copy(text = output)
+                        },
+                        onIterationLimit = {
+                            output += "\n\n_(reached the agent's iteration limit — ask me to continue if you want me to keep going)_"
+                            val idx = _messages.indexOfLast { it.id == modelMessageId }
+                            if (idx >= 0) _messages[idx] = _messages[idx].copy(text = output)
+                        },
+                        onTruncated = {
+                            output += "\n\n_(stream cut off mid-tool-call — that one's on me, try again?)_"
+                            val idx = _messages.indexOfLast { it.id == modelMessageId }
+                            if (idx >= 0) _messages[idx] = _messages[idx].copy(text = output)
+                        },
+                    ),
+                )
+
                 if (output.isBlank()) {
                     val idx = _messages.indexOfLast { it.id == modelMessageId }
                     if (idx >= 0) _messages.removeAt(idx)
