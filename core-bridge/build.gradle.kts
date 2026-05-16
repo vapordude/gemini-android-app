@@ -30,6 +30,10 @@ dependencies {
     implementation(libs.androidx.documentfile)
     implementation(libs.androidx.security.crypto)
     implementation(libs.kotlinx.coroutines.android)
+    // AppAuth handles the OAuth dance for the gemini-cli flow. Lives here
+    // (not in :app) so RestGeminiCore can refresh tokens without bouncing
+    // through the UI layer.
+    implementation(libs.appauth)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.core)
