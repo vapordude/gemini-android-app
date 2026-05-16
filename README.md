@@ -105,10 +105,7 @@ To build from source:
 
 Download the latest APK from the
 [Releases page](https://github.com/vapordude/gemini-android-app/releases).
-Each tagged release publishes both `gemini-android-app-<tag>-debug.apk`
-and `gemini-android-app-<tag>-release.apk`. The release variant uses the
-configured release keystore when CI signing secrets are present, and
-otherwise falls back to debug signing so the APK stays installable.
+Both debug-signed and release-signed APKs are published on each tag.
 
 ### Option 2: build from source
 
@@ -261,9 +258,6 @@ Useful commands:
 ./gradlew :app:lint                 # Android lint
 ./gradlew :core-bridge:test         # unit tests
 ```
-
-Manual releases should use the GitHub Actions **Release** workflow with a
-valid tag such as `v1.0.0`.
 
 ## 📄 License
 

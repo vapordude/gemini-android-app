@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.foundation.border
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -51,11 +52,14 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import nz.kaimahi.app.R
+import nz.kaimahi.app.ui.termux.startGeminiCliLoginInTermux
 import nz.kaimahi.ui.LocalKaimahiColors
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 
 private const val AISTUDIO_KEY_URL = "https://aistudio.google.com/app/apikey"
+private const val GOOGLE_OAUTH_BROWSER_ENTRY_URL =
+    "https://accounts.google.com/signin/v2/identifier?continue=https%3A%2F%2Faistudio.google.com%2F"
 
 @Composable
 fun LoginScreen(
@@ -64,32 +68,23 @@ fun LoginScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    val authService = remember { GeminiCliAuthService(context) }
+    val authService = remember { GoogleAuthService(context) }
 
     var apiKey by remember { mutableStateOf("") }
     var selectedTabIndex by remember { mutableStateOf(0) }
     var isGoogleLoading by remember { mutableStateOf(false) }
 
-    // PKCE flow: launch the consent Intent from AppAuth, then exchange the
-    // returned authorization code for access + refresh tokens. The result map
-    // hands the full credential set to ChatViewModel for persistence.
     val googleSignInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        val data = result.data
-        if (data != null) {
+        val account = authService.parseSignInResult(result.data)
+        if (account != null) {
             isGoogleLoading = true
             coroutineScope.launch {
-                val tokens = authService.handleAuthResponse(data)
+                val token = authService.getAccessToken(account)
                 isGoogleLoading = false
-                if (tokens != null) {
-                    onLoginSuccess(
-                        mapOf(
-                            "access_token" to tokens.accessToken,
-                            "refresh_token" to tokens.refreshToken,
-                            "token_expiry" to tokens.expiryEpochMs,
-                        )
-                    )
+                if (token != null) {
+                    onLoginSuccess(mapOf("access_token" to token))
                 }
             }
         }
@@ -134,7 +129,7 @@ fun LoginScreen(
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "Native Android client for the Gemini API",
+                "Native Android client for the Gemini API - cloud OAuth & local model files",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
@@ -267,14 +262,33 @@ fun LoginScreen(
                         )
                 ) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("Sign in with Google (gemini-cli)", style = MaterialTheme.typography.titleMedium)
+                        Text("Sign in with Google", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "Same OAuth flow as the official Gemini CLI — PKCE + secure app callback against the Code Assist API. Personal Google accounts unlock free-tier 2.5-Pro.",
+                            "OAuth can start in your browser first, then continue in-app. " +
+                                "The app requests cloud-platform + generative-language scopes.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(Modifier.height(16.dp))
+                        OutlinedButton(
+                            onClick = { openUrl(context, GOOGLE_OAUTH_BROWSER_ENTRY_URL) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Open Google OAuth in browser")
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = { startGeminiCliLoginInTermux(context) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Terminal, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Terminal: start `gemini login`")
+                        }
+                        Spacer(Modifier.height(8.dp))
 
                         if (isLoading || isGoogleLoading) {
                             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -286,12 +300,12 @@ fun LoginScreen(
                             )
                         } else {
                             Button(
-                                onClick = { googleSignInLauncher.launch(authService.buildAuthIntent()) },
+                                onClick = { googleSignInLauncher.launch(authService.getSignInIntent()) },
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Icon(Icons.Default.AccountCircle, contentDescription = null)
                                 Spacer(Modifier.width(8.dp))
-                                Text(stringResource(R.string.login_sign_in_google))
+                                Text("Continue OAuth in app")
                             }
                         }
                     }

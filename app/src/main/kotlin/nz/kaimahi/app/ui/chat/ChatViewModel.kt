@@ -5,9 +5,9 @@ import android.net.Uri
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import nz.kaimahi.bridge.Attachment
+import nz.kaimahi.bridge.LocalModelFile
 import nz.kaimahi.bridge.RestGeminiCore
-import nz.kaimahi.domain.Attachment
-import nz.kaimahi.domain.GeminiCore
 import nz.kaimahi.domain.GeminiEvent
 import nz.kaimahi.domain.GeminiMessage
 import nz.kaimahi.domain.GeminiResult
@@ -24,17 +24,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-/**
- * `core` owns settings, persistence, workspace, and Termux — none of which
- * are routed across drivers. `messaging` is the [GeminiCore] surface
- * (router or remote-only) the ViewModel sends turns through. When the
- * router is wired, both `core.init` and `messaging.init` get called via
- * the DriverRouter so credentials reach both drivers.
- */
-class ChatViewModel(
-    private val core: RestGeminiCore,
-    private val messaging: GeminiCore = core,
-) : ViewModel() {
+class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
 
     private val _messages = mutableStateListOf<GeminiMessage>()
     val messages: List<GeminiMessage> = _messages
@@ -74,6 +64,12 @@ class ChatViewModel(
 
     private val _imagenModel = MutableStateFlow(core.imagenModel())
     val imagenModel: StateFlow<String> = _imagenModel.asStateFlow()
+
+    private val _localModels = MutableStateFlow<List<LocalModelFile>>(emptyList())
+    val localModels: StateFlow<List<LocalModelFile>> = _localModels.asStateFlow()
+
+    private val _selectedLocalModelPath = MutableStateFlow(core.selectedLocalModelPath())
+    val selectedLocalModelPath: StateFlow<String?> = _selectedLocalModelPath.asStateFlow()
 
     private val _thinking = MutableStateFlow<String?>(null)
     val thinking: StateFlow<String?> = _thinking.asStateFlow()
@@ -118,7 +114,7 @@ class ChatViewModel(
 
     init {
         viewModelScope.launch {
-            messaging.events.collect { ev ->
+            core.events.collect { ev ->
                 when (ev) {
                     is GeminiEvent.MessageAdded -> _messages.add(ev.message)
                     is GeminiEvent.MessageUpdated -> {
@@ -136,12 +132,13 @@ class ChatViewModel(
                 }
             }
         }
+        viewModelScope.launch { refreshLocalModelsNow() }
     }
 
     fun initCore(config: Map<String, Any>) {
         viewModelScope.launch {
             _isLoading.value = true
-            when (val result = messaging.init(config)) {
+            when (val result = core.init(config)) {
                 is GeminiResult.Success -> {
                     _isReady.value = true
                     _model.value = core.currentModel()
@@ -184,24 +181,25 @@ class ChatViewModel(
 
     fun tryAutoLogin(context: android.content.Context) {
         val savedApi = core.persistedApiKey()
-        val savedOAuth = core.persistedOAuthTokens()
+        val savedToken = core.persistedAccessToken()
 
         if (!savedApi.isNullOrBlank()) {
             initCore(mapOf("api_key" to savedApi, "remember" to true))
-        } else if (savedOAuth != null) {
+        } else if (!savedToken.isNullOrBlank()) {
             viewModelScope.launch {
-                val authService = nz.kaimahi.app.ui.login.GeminiCliAuthService(context)
-                val fresh = runCatching { authService.refreshIfNeeded(savedOAuth) }
-                    .getOrDefault(savedOAuth)
-                initCore(
-                    mapOf(
-                        "access_token" to fresh.accessToken,
-                        "refresh_token" to fresh.refreshToken,
-                        "token_expiry" to fresh.expiryEpochMs,
-                        "project_id" to (fresh.projectId ?: ""),
-                        "remember" to true,
-                    )
-                )
+                val authService = nz.kaimahi.app.ui.login.GoogleAuthService(context)
+                val account = authService.getLastSignedInAccount()
+                if (account != null) {
+                    val freshToken = authService.getAccessToken(account)
+                    if (freshToken != null) {
+                        initCore(mapOf("access_token" to freshToken, "remember" to true))
+                    } else {
+                        // Let it fail or default to UI if token fails
+                        initCore(mapOf("access_token" to savedToken, "remember" to true))
+                    }
+                } else {
+                    initCore(mapOf("access_token" to savedToken, "remember" to true))
+                }
             }
         }
     }
@@ -228,8 +226,8 @@ class ChatViewModel(
         sendJob = viewModelScope.launch {
             _isLoading.value = true
             try {
-                val result = if (payload.isEmpty()) messaging.sendMessage(text)
-                    else messaging.sendMessage(text, payload)
+                val result = if (payload.isEmpty()) core.sendMessage(text)
+                    else core.sendMessage(text, payload)
                 when (result) {
                     is GeminiResult.Success -> {}
                     is GeminiResult.Error -> _error.value = result.message
@@ -356,7 +354,7 @@ class ChatViewModel(
         val decision = if (always) ToolDecision.AlwaysApprove else ToolDecision.Approve
         _pendingCall.value = null
         viewModelScope.launch {
-            messaging.resolveToolDecision(callId, decision)
+            core.resolveToolDecision(callId, decision)
             if (always) _autoApprove.value = true
         }
     }
@@ -364,13 +362,13 @@ class ChatViewModel(
     fun reject(callId: String, reason: String = "user declined") {
         _pendingCall.value = null
         viewModelScope.launch {
-            messaging.resolveToolDecision(callId, ToolDecision.Reject(reason))
+            core.resolveToolDecision(callId, ToolDecision.Reject(reason))
         }
     }
 
     fun resetSession() {
         viewModelScope.launch {
-            messaging.resetSession()
+            core.resetSession()
             _messages.clear()
         }
     }
@@ -406,66 +404,6 @@ class ChatViewModel(
         }
     }
 
-    /**
-     * Record a SAF tree URI for one of the standard user scopes
-     * (`"home"` / `"documents"` / `"downloads"`). Takes persistable read
-     * permission so subsequent app launches can read the granted tree
-     * without re-prompting. Pass `null` [uri] to revoke.
-     *
-     * Wired to the [nz.kaimahi.bridge.tools.ListUserFilesTool] via
-     * [nz.kaimahi.bridge.storage.SecurePrefs].
-     */
-    fun grantUserScope(scope: String, uri: String?) {
-        val prefs = nz.kaimahi.bridge.storage.SecurePrefs(coreContext())
-        val resolver = coreContext().contentResolver
-        val parsed = uri?.let { android.net.Uri.parse(it) }
-        if (parsed != null) {
-            runCatching {
-                resolver.takePersistableUriPermission(
-                    parsed,
-                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                )
-            }
-        }
-        when (scope.lowercase()) {
-            "home" -> prefs.homeTreeUri = uri
-            "documents" -> prefs.documentsTreeUri = uri
-            "downloads" -> prefs.downloadsTreeUri = uri
-            else -> _error.value = "Unknown scope: $scope"
-        }
-    }
-
-    /** Current Patch Kernel URL/token from prefs. Empty url disables the kernel. */
-    fun patchKernelUrl(): String =
-        nz.kaimahi.bridge.storage.SecurePrefs(coreContext()).patchKernelUrl.orEmpty()
-    fun patchKernelToken(): String =
-        nz.kaimahi.bridge.storage.SecurePrefs(coreContext()).patchKernelAuthToken.orEmpty()
-
-    /**
-     * Persist the kernel URL/token and re-probe reachability. After this
-     * runs, the [nz.kaimahi.bridge.RestGeminiCore] tool registry reflects
-     * whether the kernel's tool family is exposed to the model.
-     */
-    fun setPatchKernel(url: String, token: String) {
-        val prefs = nz.kaimahi.bridge.storage.SecurePrefs(coreContext())
-        prefs.patchKernelUrl = url.trim().ifBlank { null }
-        prefs.patchKernelAuthToken = token.trim().ifBlank { null }
-        viewModelScope.launch { core.refreshPatchKernelTools() }
-    }
-
-    /** Returns the granted SAF URI for [scope], or null if not granted. */
-    fun grantedScope(scope: String): String? {
-        val prefs = nz.kaimahi.bridge.storage.SecurePrefs(coreContext())
-        return when (scope.lowercase()) {
-            "home" -> prefs.homeTreeUri
-            "documents" -> prefs.documentsTreeUri
-            "downloads" -> prefs.downloadsTreeUri
-            else -> null
-        }
-    }
-
-    private fun coreContext(): android.content.Context = core.appContext
-
     fun clearError() { _error.value = null }
 
     fun lastAssistantText(): String? =
@@ -497,13 +435,13 @@ class ChatViewModel(
                         }
                     }
                 }
-                messaging.resetSession()
+                core.resetSession()
                 _messages.clear()
                 // Inline call instead of sendMessage() to avoid re-entering
                 // auto-compress on the summary response.
                 _isLoading.value = true
                 try {
-                    when (val r = messaging.sendMessage(prompt)) {
+                    when (val r = core.sendMessage(prompt)) {
                         is GeminiResult.Success -> {}
                         is GeminiResult.Error -> _error.value = r.message
                     }
@@ -527,6 +465,49 @@ class ChatViewModel(
     fun setAutoCompressThreshold(fraction: Float) {
         core.setAutoCompressThreshold(fraction)
         _autoCompressThreshold.value = core.autoCompressThreshold()
+    }
+
+    fun refreshLocalModels() {
+        viewModelScope.launch { refreshLocalModelsNow() }
+    }
+
+    fun selectLocalModel(path: String?) {
+        val selected = path?.takeIf { it.isNotBlank() }
+        core.setSelectedLocalModelPath(selected)
+        _selectedLocalModelPath.value = core.selectedLocalModelPath()
+    }
+
+    fun importLocalModel(uri: Uri) {
+        viewModelScope.launch {
+            core.importLocalModel(uri)
+                .onSuccess {
+                    refreshLocalModelsNow()
+                }
+                .onFailure {
+                    _error.value = it.message ?: "Could not import model file"
+                }
+        }
+    }
+
+    fun deleteLocalModel(path: String) {
+        viewModelScope.launch {
+            val deleted = core.removeLocalModel(path)
+            if (!deleted) {
+                _error.value = "Could not delete model file"
+                return@launch
+            }
+            refreshLocalModelsNow()
+        }
+    }
+
+    private suspend fun refreshLocalModelsNow() {
+        _localModels.value = core.listLocalModels()
+        val selected = core.selectedLocalModelPath()
+        _selectedLocalModelPath.value = selected
+        if (!selected.isNullOrBlank() && _localModels.value.none { it.path == selected }) {
+            core.setSelectedLocalModelPath(null)
+            _selectedLocalModelPath.value = null
+        }
     }
 }
 

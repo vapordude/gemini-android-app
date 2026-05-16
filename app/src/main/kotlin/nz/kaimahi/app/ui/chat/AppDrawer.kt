@@ -1,6 +1,5 @@
 package nz.kaimahi.app.ui.chat
 
-import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -50,6 +49,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import nz.kaimahi.app.R
+import nz.kaimahi.app.ui.termux.openTermux
+import nz.kaimahi.app.ui.termux.startGeminiCliLoginInTermux
 
 @Composable
 fun AppDrawer(
@@ -118,6 +119,9 @@ fun AppDrawer(
         SectionLabel("Tools & shell")
         DrawerItem(Icons.Default.Terminal, "Open Termux") {
             onClose(); openTermux(context)
+        }
+        DrawerItem(Icons.Default.Terminal, "Gemini CLI login") {
+            onClose(); startGeminiCliLoginInTermux(context)
         }
         DrawerItem(Icons.Default.Code, "Source code") {
             onClose(); openUrl(context, "https://github.com/vapordude/gemini-android-app")
@@ -234,16 +238,4 @@ private fun shareMarkdown(context: Context, markdown: String) {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         )
     }
-}
-
-private fun openTermux(context: Context) {
-    val launch = context.packageManager.getLaunchIntentForPackage("com.termux")
-    if (launch != null) {
-        try {
-            context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            return
-        } catch (_: ActivityNotFoundException) {
-        }
-    }
-    openUrl(context, "https://f-droid.org/packages/com.termux/")
 }

@@ -1,6 +1,5 @@
 package nz.kaimahi.app.ui.settings
 
-import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -10,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.widget.Toast
+import java.util.Locale
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
@@ -77,6 +78,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import nz.kaimahi.app.ui.chat.ChatViewModel
+import nz.kaimahi.app.ui.termux.openTermux
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -98,6 +100,8 @@ fun SettingsSheet(
     val tokenUsage by viewModel.tokenUsage.collectAsState()
     val autoSave by viewModel.autoSaveEnabled.collectAsState()
     val imagenModel by viewModel.imagenModel.collectAsState()
+    val localModels by viewModel.localModels.collectAsState()
+    val selectedLocalModelPath by viewModel.selectedLocalModelPath.collectAsState()
 
     var customModel by remember { mutableStateOf("") }
     var customImagenModel by remember { mutableStateOf("") }
@@ -107,6 +111,11 @@ fun SettingsSheet(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
         if (uri != null) viewModel.setProjectFolder(uri.toString())
+    }
+    val modelFileLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) viewModel.importLocalModel(uri)
     }
 
     fun toggle(name: String) {
@@ -338,6 +347,77 @@ fun SettingsSheet(
             }
 
             SettingsAccordion(
+                title = "Local model (GGUF)",
+                icon = Icons.Default.Memory,
+                expanded = "Local model" in expanded,
+                onToggle = { toggle("Local model") }
+            ) {
+                Text(
+                    "Import a GGUF model file from Android storage for local offline use.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = {
+                        modelFileLauncher.launch(arrayOf("*/*"))
+                    }) {
+                        Icon(Icons.Default.Folder, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Import GGUF")
+                    }
+                    OutlinedButton(onClick = { viewModel.refreshLocalModels() }) {
+                        Text("Refresh")
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                if (localModels.isEmpty()) {
+                    Text(
+                        "No local model files imported yet.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    localModels.forEach { modelFile ->
+                        val selected = modelFile.path == selectedLocalModelPath
+                        Surface(
+                            color = if (selected) MaterialTheme.colorScheme.secondaryContainer
+                            else MaterialTheme.colorScheme.surfaceVariant,
+                            shape = MaterialTheme.shapes.small,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(
+                                    modelFile.name,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Text(
+                                    "${humanReadableBytes(modelFile.sizeBytes)} · ${modelFile.path}",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedButton(onClick = { viewModel.selectLocalModel(modelFile.path) }) {
+                                        Icon(Icons.Default.PlayArrow, contentDescription = null)
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(if (selected) "Selected" else "Use")
+                                    }
+                                    OutlinedButton(onClick = { viewModel.deleteLocalModel(modelFile.path) }) {
+                                        Icon(Icons.Default.Delete, contentDescription = null)
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Delete")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            SettingsAccordion(
                 title = "Workspace",
                 icon = Icons.Default.Folder,
                 expanded = "Workspace" in expanded,
@@ -396,34 +476,6 @@ fun SettingsSheet(
                     Spacer(Modifier.width(8.dp))
                     Text("Pick folder")
                 }
-            }
-
-            SettingsAccordion(
-                title = "Storage access",
-                icon = Icons.Default.Folder,
-                expanded = "Storage access" in expanded,
-                onToggle = { toggle("Storage access") }
-            ) {
-                Text(
-                    "Grant the model read-only access to your Home, Documents, and Downloads " +
-                        "folders via the Storage Access Framework. Sensitive prompts (per the " +
-                        "safety classifier) won't be sent to Gemini regardless of these grants.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(8.dp))
-                StorageScopeRow(viewModel, "home", "Home")
-                StorageScopeRow(viewModel, "documents", "Documents")
-                StorageScopeRow(viewModel, "downloads", "Downloads")
-            }
-
-            SettingsAccordion(
-                title = "Patch kernel",
-                icon = Icons.Default.Security,
-                expanded = "Patch kernel" in expanded,
-                onToggle = { toggle("Patch kernel") }
-            ) {
-                PatchKernelSection(viewModel)
             }
 
             SettingsAccordion(
@@ -1055,16 +1107,14 @@ private fun openUrl(context: Context, url: String) {
     }
 }
 
-private fun openTermux(context: Context) {
-    val launch = context.packageManager.getLaunchIntentForPackage("com.termux")
-    if (launch != null) {
-        try {
-            context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            return
-        } catch (_: ActivityNotFoundException) {
-        }
-    }
-    openUrl(context, "https://f-droid.org/packages/com.termux/")
+private fun humanReadableBytes(bytes: Long): String {
+    if (bytes < 1024) return "$bytes B"
+    val kb = bytes / 1024.0
+    if (kb < 1024) return String.format(Locale.US, "%.1f KiB", kb)
+    val mb = kb / 1024.0
+    if (mb < 1024) return String.format(Locale.US, "%.1f MiB", mb)
+    val gb = mb / 1024.0
+    return String.format(Locale.US, "%.1f GiB", gb)
 }
 
 // The chicken-and-egg of Termux bootstrap: we can't run commands via
@@ -1138,76 +1188,4 @@ fun TermuxSetupDialog(
             }
         }
     )
-}
-
-@Composable
-private fun StorageScopeRow(viewModel: ChatViewModel, scope: String, label: String) {
-    val granted = viewModel.grantedScope(scope)
-    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
-        if (uri != null) viewModel.grantUserScope(scope, uri.toString())
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.bodyMedium)
-            Text(
-                granted ?: "Not granted",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
-        }
-        if (granted == null) {
-            OutlinedButton(onClick = { launcher.launch(null) }) { Text("Grant") }
-        } else {
-            OutlinedButton(onClick = { viewModel.grantUserScope(scope, null) }) { Text("Revoke") }
-        }
-    }
-}
-
-@Composable
-private fun PatchKernelSection(viewModel: ChatViewModel) {
-    var url by remember { mutableStateOf(viewModel.patchKernelUrl()) }
-    var token by remember { mutableStateOf(viewModel.patchKernelToken()) }
-    Text(
-        "Optional sidecar that gives the agent surgical patching, multi-file " +
-            "atomic batches, symbol search, and chunked writes. Runs separately " +
-            "(typically in Termux on port 7979). Empty URL disables the kernel.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-    Spacer(Modifier.height(8.dp))
-    OutlinedTextField(
-        value = url,
-        onValueChange = { url = it },
-        label = { Text("Kernel URL") },
-        placeholder = { Text("http://127.0.0.1:7979") },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth(),
-    )
-    Spacer(Modifier.height(8.dp))
-    OutlinedTextField(
-        value = token,
-        onValueChange = { token = it },
-        label = { Text("Auth token (optional)") },
-        singleLine = true,
-        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-        modifier = Modifier.fillMaxWidth(),
-    )
-    Spacer(Modifier.height(8.dp))
-    Row {
-        Button(onClick = { viewModel.setPatchKernel(url, token) }) {
-            Text("Save & probe")
-        }
-        Spacer(Modifier.width(8.dp))
-        OutlinedButton(onClick = { viewModel.setPatchKernel("", "") }) {
-            Text("Disable")
-        }
-    }
 }
