@@ -36,7 +36,6 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Palette
@@ -168,23 +167,17 @@ fun SettingsSheet(
                 onToggle = { toggle("Account") }
             ) {
                 Text(
-                    "API key from Google AI Studio. Sign in with your Google " +
-                        "account there to create one, then paste it here.",
+                    "Cloud sign-in goes through Google Sign-In or gemini-cli " +
+                        "credentials loaded from Termux. Tokens are stored " +
+                        "encrypted on this device.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { openUrl(context, "https://aistudio.google.com/app/apikey") }) {
-                        Icon(Icons.Default.Key, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Get API key")
-                    }
-                    OutlinedButton(onClick = {
-                        viewModel.signOut()
-                        onDismiss()
-                    }) { Text("Sign out") }
-                }
+                OutlinedButton(onClick = {
+                    viewModel.signOut()
+                    onDismiss()
+                }) { Text("Sign out") }
             }
 
             SettingsAccordion(

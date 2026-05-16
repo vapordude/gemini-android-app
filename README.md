@@ -39,23 +39,36 @@ from-scratch Rust runtime — no third-party inference libraries.
   the model into your workspace directory: `python foo.py`, `npm test`,
   `cargo build`, `pip install …`, `curl`, `git status`. Backgrounded
   processes (servers, watchers) keep running when the model's turn ends.
-- **Sign in the way you prefer.** Use a Gemini API key or Google OAuth
-  (including a browser-first handoff, then continue in app).
-- **Kick off Gemini CLI auth quickly.** Start `gemini login` from the
-  Login screen, chat top bar, or app drawer; the command is copied for
-  easy paste in Termux.
+- **Sign in two ways, plus a no-auth escape hatch.**
+  - **Reuse `gemini-cli` credentials.** If you've already run
+    `gemini login` in Termux, tap "Load from Termux ~/.gemini" and the
+    OAuth tokens come straight out of `~/.gemini/oauth_creds.json`.
+    Requests route through the Code Assist API
+    (`cloudcode-pa.googleapis.com`), the same endpoint gemini-cli uses;
+    the free-tier 2.5 Pro quota on personal Google accounts comes with
+    it.
+  - **Continue with Google.** Play Services account picker, in-app OAuth.
+  - **Skip — local model only.** No Google account at all. Use an
+    imported GGUF file and stay offline.
+- **Run a local GGUF model on-device.** Import a Gemma 2/3 GGUF
+  (F16/F32/Q4_K/Q4_0/Q8_0/BF16 supported) under Settings → Local model;
+  the Rust runtime dequantizes the weights, runs a SwiGLU decoder pass,
+  samples tokens, and streams them into the chat. See "Known gaps"
+  below for what this does **not** yet do.
+- **Local-first cold start.** If a local model is already selected, the
+  app skips the login screen and comes up in local-agent mode.
 - **Generate images inline.** Both **Imagen** (dedicated picker in
   Settings → Model) and **Gemini 2.5 Flash Image** ("Nano Banana",
   auto-enabled when you pick it in the top-bar dropdown) save their
-  outputs to the chat bubble as thumbnails.
+  outputs to the chat bubble as thumbnails. Cloud-backed only.
 - **Send images for the model to analyse.** Tap the image icon, pick any
   photo from the gallery — it's sent as `inlineData` base64 in the next
-  turn. The model can OCR, describe, or reason about the image.
+  turn. Cloud-backed only.
 - **Survive long sessions.** The app reports live token usage and
   auto-compresses the conversation into a fresh summary once the context
-  window fills up, so you keep talking without 400 errors.
-- **Autosave every turn.** Close the app, come back three days later,
-  the conversation is exactly where you left it. Name and save snapshots
+  window fills up.
+- **Autosave every turn.** Close the app, come back later, the
+  conversation is exactly where you left it. Name and save snapshots
   from the drawer for archive.
 - **Export anywhere.** Drawer → Export as Markdown opens the Android
   share sheet — send the full conversation (text, code blocks, tables,
@@ -63,14 +76,25 @@ from-scratch Rust runtime — no third-party inference libraries.
 
 ## ✨ Feature breakdown
 
-- **Streaming chat** over `generativelanguage.googleapis.com`. API key
-  encrypted locally in `EncryptedSharedPreferences`. No server in the
-  middle.
+- **Two streaming transports for cloud chat:**
+  - **Public Gemini API** (`generativelanguage.googleapis.com`) when
+    signed in with Google Sign-In.
+  - **Code Assist API** (`cloudcode-pa.googleapis.com/v1internal`) when
+    using gemini-cli credentials. Access token + refresh token + Cloud
+    AI Companion project id are stored encrypted; the app refreshes on
+    expiry and re-onboards if `loadCodeAssist` reports the user
+    isn't onboarded yet.
+- **Local inference** through `libkaimahi_native.so` (built from
+  `native/`): GGUF parser, F32/F16/BF16/Q4_0/Q4_K/Q8_0 dequant, SwiGLU
+  decoder pass, RoPE + GQA SDPA, sampler (greedy / temperature + top-k).
+  Tokens stream over a JNI callback into the same chat bubble as the
+  cloud path.
 - **Function calling** with 9 built-in tools:
   `read_file`, `write_file`, `edit_file`, `delete_file`,
   `list_directory`, `glob_files`, `grep`, `run_shell_command`
   (foreground or background), `generate_image` (Imagen). The model
-  decides when to call them.
+  decides when to call them. **Cloud path only** — the local agent
+  doesn't drive tools yet.
 - **Safety on destructive tools**: every `write_file` / `edit_file` /
   `delete_file` / shell command shows an approval dialog with arguments
   and a diff (for edits) before it runs. One-tap "Auto-approve" toggle
@@ -84,7 +108,7 @@ from-scratch Rust runtime — no third-party inference libraries.
   (system Files app) or "Change folder" (SAF picker).
 - **Multimodal input**: attach one or more images per turn; thumbnails
   render in the user bubble and persist across reloads. 15 MB cap per
-  image.
+  image. Cloud path only.
 - **Dynamic model list**: fetched live from `/v1beta/models`, no
   hardcoded catalog. Custom model IDs accepted in Settings.
 - **Diff viewer** in the tool-result bubble for `edit_file`.
@@ -93,18 +117,25 @@ from-scratch Rust runtime — no third-party inference libraries.
 ## 🛠 Prerequisites
 
 - **Android 8.0+** (API 26+).
-- A **Gemini API key** (free tier works for chat; image generation
-  requires billing on the associated Google Cloud project):
-  <https://aistudio.google.com/app/apikey>.
-- **Optional** — [Termux](https://f-droid.org/packages/com.termux/)
+- For cloud chat — **one of**:
+  - A Google account you can sign into with Play Services.
+  - Or [`gemini-cli`](https://github.com/google-gemini/gemini-cli) installed
+    in Termux and `gemini login` run once, so
+    `~/.gemini/oauth_creds.json` exists.
+- **Recommended** — [Termux](https://f-droid.org/packages/com.termux/)
   from F-Droid or [the GitHub releases](https://github.com/termux/termux-app/releases)
-  (⚠️ **not** the Play Store version, abandoned since 2020) if you want
-  shell command execution.
-- **Optional (local/offline inference)** — one or more GGUF model files
-  you can import from Android storage in Settings.
+  (⚠️ **not** the Play Store version, abandoned since 2020). Required
+  for the gemini-cli login path; required for `run_shell_command`.
+- **Optional (offline inference)** — one or more GGUF model files you
+  can import from Android storage in Settings. See "Known gaps" below
+  for which sizes / quants actually fit on a phone today.
 
 To build from source:
 - **Android SDK** (API 34+), **JDK 17** on `JAVA_HOME`.
+- **Rust toolchain** with `aarch64-linux-android` + `x86_64-linux-android`
+  targets, plus `cargo-ndk` and the Android NDK r27c, for native binary
+  rebuilds. The CI workflow at `.github/workflows/native.yml` shows the
+  exact incantation.
 
 ## 🚀 Installation
 
@@ -125,20 +156,32 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 ## 💻 First-run setup
 
-1. **Login / Settings → Account**: authenticate with either a Gemini API
-   key or Google OAuth. Secrets are stored encrypted on device.
+1. **Login screen — pick a path**:
+   - *Load from Termux ~/.gemini* — recommended if you've already used
+     `gemini-cli`. Tap "Start gemini login in Termux" first if you
+     haven't.
+   - *Continue with Google* — Play Services account picker, then
+     in-app OAuth.
+   - *Use local-only mode* — skip auth entirely. You'll need to import
+     a GGUF before you can talk to anything.
+
+   Tokens (and the resolved Cloud AI Companion project id, if any) are
+   stored encrypted on device.
 2. **Top-bar folder name → Change folder**: pick a workspace under
    `/storage/emulated/0/` (avoid `/Android/data/…`, unreachable to
    Termux). The file tools operate relative to this folder.
-3. **Settings → Termux shell** (optional, one-time): follow the 3-step
-   guide to allow `run_shell_command`. You need Termux installed and
+3. **Settings → Termux shell** (one-time): follow the 3-step guide to
+   allow `run_shell_command`. You need Termux installed and
    `termux-setup-storage` run once.
-4. **Top-bar model name**: tap it to pick a model. Use
-   `gemini-2.5-flash` for everyday coding, `gemini-2.5-pro` for harder
-   reasoning, `gemini-2.5-flash-image-preview` if you want inline image
-   generation (requires billing).
-5. **Settings → Local model (GGUF)** (optional): import a local model,
-   select it for use, and remove stale model files as needed.
+4. **Top-bar model name**: tap to pick a model. Use `gemini-2.5-flash`
+   for everyday coding, `gemini-2.5-pro` for harder reasoning,
+   `gemini-2.5-flash-image-preview` for inline image generation
+   (requires billing on the API-key path; the Code Assist path inherits
+   gemini-cli's quota and may differ).
+5. **Settings → Local model (GGUF)** (optional): import a local model
+   file from any document provider, select it for use, and delete stale
+   files. Once selected, the next cold start skips the login screen and
+   comes up in local-agent mode.
 
 ## 🧱 Architecture
 
@@ -157,15 +200,64 @@ and a local OpenAPI server.
 | `:emdash-bridge` | Typed HTTP client + Compose screens for remote emdash-rs instances |
 | `native/` (Rust) | from-scratch tensor math, GGUF loader, agent loop, telemetry, hand-rolled HTTP/1.1 server. See `native/README.md`. |
 
-The cloud-Gemini path flows through `RestGeminiCore`. The on-device path
-goes through the `inference-bridge` and `agent-bridge` JNI surfaces,
-both implementing the contract in [`native/openapi.yaml`](native/openapi.yaml)
-([API surface guide](docs/API.md)). The same OpenAPI spec is served on
-127.0.0.1 so CLIs, editor plugins, and devops scripts can talk to the
-runtime as a drop-in OpenAI-compatible endpoint.
+**Cloud chat** flows through `RestGeminiCore`, which has two transports:
+
+- **Public Gemini API**, used when `RestGeminiCore.init()` receives an
+  `api_key` or a Play-Services OAuth access token.
+- **Code Assist API** via `CodeAssistSession` (in `core-bridge/codeassist`),
+  used when `init()` receives a `refresh_token` from the gemini-cli
+  `oauth_creds.json` parse, or when prefs report a previously-onboarded
+  Code Assist session. The session owns refresh + onboarding so the
+  REST layer just sees a working bearer token.
+
+**Local chat** goes through `inference-bridge::RustInferenceEngine`,
+which holds a JNI handle from `nativeOpenSession(path)`,
+`nativeGenerate(handle, prompt, callback, …)`, and friends. The native
+side dequantizes weights from GGUF and runs the Gemma forward pass.
 
 No DI framework, no Room. `SharedPreferences` + JSON files under
 `filesDir`.
+
+## ⚠️ Known gaps
+
+Honest about where the current build is wobbly:
+
+- **Gemma forward pass — math wiring is in, parity is not.** The
+  decoder shape is right (RMSNorm → Q/K/V → RoPE → GQA SDPA → O →
+  optional post-attn-norm → residual → SwiGLU FFN → optional
+  post-ffn-norm → residual → final norm → lm_head) and 37+ tensor
+  tests pass against synthetic fixtures, but no PyTorch parity harness
+  validates the output for a real Gemma checkpoint. Expect plausible
+  shape, not necessarily plausible content. Gemma 3's
+  alternating-window attention and per-layer RoPE base are currently
+  approximated by a single window + base applied uniformly.
+- **Memory footprint at load time.** Every weight tensor is dequantized
+  to F32 in RAM when the model loads. Gemma 270M fits (~1 GB). Gemma
+  2B does not (~8 GB). The follow-up is a quantized matvec kernel that
+  reads Q4_K / Q8_0 bytes directly. Until that lands, stick to small
+  GGUF files on-device.
+- **Local tool use.** The agent loop drives tools only when the model
+  is cloud-Gemini. The local Gemma path streams tokens but doesn't yet
+  invoke `read_file`, shell commands, etc.
+- **Local multimodal.** Vision encoder isn't wired on-device. Image
+  attachments only work on the cloud path.
+- **Code Assist response shape.** The Code Assist client matches the
+  payload shapes documented in the public `gemini-cli` source. If
+  Google changes them server-side, the chat throws "Code Assist HTTP
+  …" and the cure is a request-shape patch.
+- **Native HTTP server.** `native/local-server` and the `local API` /
+  `OPENAI_BASE_URL` story documented in `docs/API.md` are spec-level —
+  the JNI bridge for the Android side is not wired into the running
+  app yet, and the OpenAI-compat endpoints return their declared 501s
+  for diffusion / video.
+- **Unwired Compose surfaces.** A `RoomViewModel` exists for
+  multi-persona chat rooms but no screen renders it. The
+  `native-driver` module (separate `libgemma4.so` skeleton under
+  `rust/crates/gemma4-*`) is a parity-oracle workspace and isn't
+  included in `settings.gradle.kts`; it ships unused.
+
+If you want to help close any of these, the relevant entry points are
+called out in `docs/PORTING.md` and `docs/SCAFFOLDING.md`.
 
 ### On-device runtime principles
 

@@ -47,12 +47,14 @@ model — entirely on-device, owned by the operator.
 Kaimahi treats cloud and local engines as peers, not alternatives. The
 canonical setup:
 
-1. **Cloud Gemini** — API key set up via `Settings → Account`,
-   encrypted in `EncryptedSharedPreferences`. Always available unless
-   rate-limited or offline.
-2. **Local Gemma 4 (E2B or E4B)** — GGUF in `filesDir/models/`, loaded
-   into the Rust runtime on app start. Always available when the file
-   is present.
+1. **Cloud Gemini** — either Google Sign-In (public Gemini API) or
+   `gemini-cli` credentials loaded from Termux (Code Assist API).
+   Tokens are encrypted in `EncryptedSharedPreferences` and refreshed
+   automatically. Always available unless rate-limited or offline.
+2. **Local Gemma** — GGUF in `filesDir/models/`, loaded into the Rust
+   runtime on first use (`nativeOpenSession`). Always available when
+   the file is present and small enough to dequant into RAM. See the
+   "Known gaps" section in the top-level README for current limits.
 
 Both stay authenticated simultaneously. The agent picks per call via
 `MultiBackend(Policy::*)`:
