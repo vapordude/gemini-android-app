@@ -78,6 +78,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import nz.kaimahi.app.ui.chat.ChatViewModel
+import nz.kaimahi.app.ui.local.InferenceMode
+import nz.kaimahi.app.ui.local.InferenceModeToggle
 import nz.kaimahi.app.ui.termux.openTermux
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -102,6 +104,7 @@ fun SettingsSheet(
     val imagenModel by viewModel.imagenModel.collectAsState()
     val localModels by viewModel.localModels.collectAsState()
     val selectedLocalModelPath by viewModel.selectedLocalModelPath.collectAsState()
+    val inferenceMode by viewModel.inferenceMode.collectAsState()
 
     var customModel by remember { mutableStateOf("") }
     var customImagenModel by remember { mutableStateOf("") }
@@ -476,6 +479,29 @@ fun SettingsSheet(
                     Spacer(Modifier.width(8.dp))
                     Text("Pick folder")
                 }
+            }
+
+            SettingsAccordion(
+                title = "Inference mode",
+                icon = Icons.Default.Memory,
+                expanded = "Inference mode" in expanded,
+                onToggle = { toggle("Inference mode") }
+            ) {
+                InferenceModeToggle(
+                    selected = inferenceMode,
+                    onSelect = { viewModel.setInferenceMode(it) }
+                )
+                val label = when (inferenceMode) {
+                    InferenceMode.CLOUD_GEMINI ->
+                        "Cloud Gemini uses function-calling tools and full app features."
+                    InferenceMode.LOCAL_AGENT ->
+                        "Local agent uses your selected GGUF model for offline responses."
+                }
+                Text(
+                    label,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             SettingsAccordion(
@@ -971,6 +997,8 @@ private fun TermuxBody(viewModel: ChatViewModel) {
     var testing by remember { mutableStateOf(false) }
     var testOutput by remember { mutableStateOf<String?>(null) }
     var testOk by remember { mutableStateOf<Boolean?>(null) }
+    var checkingAuth by remember { mutableStateOf(false) }
+    var authOutput by remember { mutableStateOf<String?>(null) }
     Button(
         enabled = !testing && permissionGranted && declaresPermission,
         onClick = {
@@ -989,6 +1017,23 @@ private fun TermuxBody(viewModel: ChatViewModel) {
         Spacer(Modifier.width(6.dp))
         Text(if (testing) "Testing…" else "Test shell now")
     }
+    Spacer(Modifier.height(8.dp))
+    OutlinedButton(
+        enabled = !checkingAuth && permissionGranted && declaresPermission,
+        onClick = {
+            checkingAuth = true
+            authOutput = null
+            scope.launch {
+                authOutput = runCatching { viewModel.checkGeminiCliAuthInTermux() }
+                    .getOrElse { it.message ?: "unknown error" }
+                checkingAuth = false
+            }
+        }
+    ) {
+        Icon(Icons.Default.AccountCircle, contentDescription = null)
+        Spacer(Modifier.width(6.dp))
+        Text(if (checkingAuth) "Checking…" else "Check Gemini CLI auth (~/.gemini)")
+    }
     testOutput?.let { out ->
         Spacer(Modifier.height(8.dp))
         Surface(
@@ -1002,6 +1047,27 @@ private fun TermuxBody(viewModel: ChatViewModel) {
                     style = MaterialTheme.typography.labelMedium,
                     color = if (testOk == true) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.error
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    out,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
+                )
+            }
+        }
+    }
+    authOutput?.let { out ->
+        Spacer(Modifier.height(8.dp))
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shape = MaterialTheme.shapes.small,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(10.dp)) {
+                Text(
+                    "Gemini CLI auth check",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(

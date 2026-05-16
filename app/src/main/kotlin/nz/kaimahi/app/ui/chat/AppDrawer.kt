@@ -58,7 +58,9 @@ fun AppDrawer(
     onClose: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenChats: () -> Unit,
-    onOpenAbout: () -> Unit
+    onOpenAbout: () -> Unit,
+    onOpenLocalTraces: () -> Unit,
+    onOpenDeploymentConfigs: () -> Unit
 ) {
     val context = LocalContext.current
     val workspaceLabel by viewModel.workspaceLabel.collectAsState()
@@ -122,6 +124,12 @@ fun AppDrawer(
         }
         DrawerItem(Icons.Default.Terminal, "Gemini CLI login") {
             onClose(); startGeminiCliLoginInTermux(context)
+        }
+        DrawerItem(Icons.Default.BugReport, "Local traces") {
+            onClose(); onOpenLocalTraces()
+        }
+        DrawerItem(Icons.Default.Build, "Deployment configs") {
+            onClose(); onOpenDeploymentConfigs()
         }
         DrawerItem(Icons.Default.Code, "Source code") {
             onClose(); openUrl(context, "https://github.com/vapordude/gemini-android-app")

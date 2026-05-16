@@ -5,16 +5,19 @@ import android.net.Uri
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import nz.kaimahi.app.ui.local.InferenceMode
 import nz.kaimahi.bridge.LocalModelFile
 import nz.kaimahi.bridge.RestGeminiCore
 import nz.kaimahi.domain.Attachment
 import nz.kaimahi.domain.GeminiEvent
 import nz.kaimahi.domain.GeminiMessage
 import nz.kaimahi.domain.GeminiResult
+import nz.kaimahi.domain.GenerateRequest
 import nz.kaimahi.domain.MessageRole
 import nz.kaimahi.domain.ToolCall
 import nz.kaimahi.domain.ToolDecision
 import nz.kaimahi.domain.ToolSpec
+import nz.kaimahi.inference.RustInferenceEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellationException
@@ -24,7 +27,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
+class ChatViewModel(
+    private val core: RestGeminiCore,
+    private val appContext: Context,
+) : ViewModel() {
 
     private val _messages = mutableStateListOf<GeminiMessage>()
     val messages: List<GeminiMessage> = _messages
@@ -71,6 +77,9 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
     private val _selectedLocalModelPath = MutableStateFlow(core.selectedLocalModelPath())
     val selectedLocalModelPath: StateFlow<String?> = _selectedLocalModelPath.asStateFlow()
 
+    private val _inferenceMode = MutableStateFlow(InferenceMode.CLOUD_GEMINI)
+    val inferenceMode: StateFlow<InferenceMode> = _inferenceMode.asStateFlow()
+
     private val _thinking = MutableStateFlow<String?>(null)
     val thinking: StateFlow<String?> = _thinking.asStateFlow()
 
@@ -96,6 +105,8 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
 
     private var sendJob: Job? = null
     private var lastUserPrompt: String? = null
+    private val localInference by lazy { RustInferenceEngine(appContext) }
+    private var localLoadedModelPath: String? = null
 
     val availableTools: List<ToolSpec> get() = core.availableTools()
     val termuxInstalled: Boolean get() = core.termux.isInstalled()
@@ -105,6 +116,23 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
 
     suspend fun testTermuxShell(): String {
         val r = core.termux.run("echo hello from termux && uname -a")
+        return if (r.ok) r.stdout.ifBlank { "ok" }
+        else buildString {
+            append("exit=").append(r.exitCode)
+            if (r.stderr.isNotBlank()) append('\n').append(r.stderr)
+        }
+    }
+
+    suspend fun checkGeminiCliAuthInTermux(): String {
+        val command = """
+            if [ -d "$HOME/.gemini" ]; then
+              echo "FOUND:$HOME/.gemini"
+              ls -la "$HOME/.gemini"
+            else
+              echo "MISSING:$HOME/.gemini"
+            fi
+        """.trimIndent()
+        val r = core.termux.run(command)
         return if (r.ok) r.stdout.ifBlank { "ok" }
         else buildString {
             append("exit=").append(r.exitCode)
@@ -220,6 +248,10 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
         val attachments = _pendingAttachments.value
         if (text.isBlank() && attachments.isEmpty()) return
         if (sendJob?.isActive == true) return
+        if (_inferenceMode.value == InferenceMode.LOCAL_AGENT) {
+            sendLocalMessage(text, attachments)
+            return
+        }
         lastUserPrompt = text
         val payload = attachments.map { Attachment(it.bytes, it.mimeType, it.localPath) }
         _pendingAttachments.value = emptyList()
@@ -239,6 +271,71 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
                 _thinking.value = null
                 sendJob = null
                 maybeAutoCompress()
+            }
+        }
+    }
+
+    private fun sendLocalMessage(text: String, attachments: List<PendingAttachment>) {
+        if (attachments.isNotEmpty()) {
+            _error.value = "Local mode does not support attachments yet"
+            return
+        }
+        val modelPath = _selectedLocalModelPath.value
+        if (modelPath.isNullOrBlank()) {
+            _error.value = "Select a local GGUF model first in Settings → Local model (GGUF)."
+            return
+        }
+        lastUserPrompt = text
+        _pendingAttachments.value = emptyList()
+        sendJob = viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                _messages.add(
+                    GeminiMessage(
+                        id = "local-user-${System.nanoTime()}",
+                        text = text,
+                        isUser = true,
+                        timestamp = System.currentTimeMillis(),
+                        role = MessageRole.USER
+                    )
+                )
+                if (localLoadedModelPath != modelPath) {
+                    val loaded = localInference.loadModel(modelPath).getOrElse {
+                        _error.value = "Could not load local model: ${it.message ?: "unknown error"}"
+                        return@launch
+                    }
+                    localLoadedModelPath = loaded.path
+                }
+                val modelMessageId = "local-model-${System.nanoTime()}"
+                _messages.add(
+                    GeminiMessage(
+                        id = modelMessageId,
+                        text = "",
+                        isUser = false,
+                        timestamp = System.currentTimeMillis(),
+                        role = MessageRole.MODEL
+                    )
+                )
+                var output = ""
+                localInference.generate(GenerateRequest(prompt = text)).collect { token ->
+                    if (token.text.isEmpty()) return@collect
+                    output += token.text
+                    val idx = _messages.indexOfLast { it.id == modelMessageId }
+                    if (idx >= 0) _messages[idx] = _messages[idx].copy(text = output)
+                }
+                if (output.isBlank()) {
+                    val idx = _messages.indexOfLast { it.id == modelMessageId }
+                    if (idx >= 0) _messages.removeAt(idx)
+                    _error.value = "Local runtime returned no tokens. Build native runtime or choose another model."
+                }
+            } catch (_: CancellationException) {
+                // Cancelled by user — silent.
+            } catch (t: Throwable) {
+                _error.value = t.message ?: "Local inference failed"
+            } finally {
+                _isLoading.value = false
+                _thinking.value = null
+                sendJob = null
             }
         }
     }
@@ -380,6 +477,10 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
         _model.value = core.currentModel()
     }
 
+    fun setInferenceMode(mode: InferenceMode) {
+        _inferenceMode.value = mode
+    }
+
     fun setImagenModel(name: String) {
         core.setImagenModel(name)
         _imagenModel.value = core.imagenModel()
@@ -475,6 +576,9 @@ class ChatViewModel(private val core: RestGeminiCore) : ViewModel() {
         val selected = path?.takeIf { it.isNotBlank() }
         core.setSelectedLocalModelPath(selected)
         _selectedLocalModelPath.value = core.selectedLocalModelPath()
+        if (selected == null || selected != localLoadedModelPath) {
+            localLoadedModelPath = null
+        }
     }
 
     fun importLocalModel(uri: Uri) {
