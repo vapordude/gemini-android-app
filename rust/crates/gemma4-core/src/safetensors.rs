@@ -89,6 +89,77 @@ impl<'a> SafeTensors<'a> {
         }
         Some(out)
     }
+
+    /// Number of scalar elements in `name`. Computed from the declared
+    /// shape, not from the on-disk byte length — the loader uses this to
+    /// pre-size buffers before the (potentially streaming) dequant.
+    pub fn numel(&self, name: &str) -> Option<usize> {
+        let e = self.get(name)?;
+        Some(e.shape.iter().product())
+    }
+
+    /// Read any supported dtype and return an owned `Vec<f32>`. This is
+    /// the load-time path used by [`crate::SafeTensors`] consumers that
+    /// want a single F32 representation regardless of the on-disk
+    /// encoding. Returns `None` when the tensor is missing or the dtype
+    /// isn't yet supported (only Q4_K_M from gemma4-quant — that path
+    /// goes through [`as_q4km_bytes`] instead, since it stays packed).
+    pub fn as_f32(&self, name: &str) -> Option<Vec<f32>> {
+        let e = self.get(name)?;
+        let raw = &self.bytes[e.start..e.end];
+        let n: usize = e.shape.iter().product();
+        match e.dtype {
+            Dtype::F32 => {
+                if raw.len() < n * 4 {
+                    return None;
+                }
+                let mut out = Vec::with_capacity(n);
+                for chunk in raw.chunks_exact(4).take(n) {
+                    out.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+                }
+                Some(out)
+            }
+            Dtype::BF16 => {
+                if raw.len() < n * 2 {
+                    return None;
+                }
+                let mut out = Vec::with_capacity(n);
+                for chunk in raw.chunks_exact(2).take(n) {
+                    let bits = u16::from_le_bytes([chunk[0], chunk[1]]);
+                    out.push(crate::dtype::bf16_to_f32(bits));
+                }
+                Some(out)
+            }
+            Dtype::F16 => {
+                if raw.len() < n * 2 {
+                    return None;
+                }
+                let mut out = Vec::with_capacity(n);
+                for chunk in raw.chunks_exact(2).take(n) {
+                    let bits = u16::from_le_bytes([chunk[0], chunk[1]]);
+                    out.push(crate::dtype::f16_to_f32(bits));
+                }
+                Some(out)
+            }
+            // Int8 carries its own scale stored as a sibling tensor or
+            // in a `scale_inv` entry; without that companion, we can't
+            // turn it into F32. The loader handles INT8 weights through
+            // gemma4-quant directly.
+            Dtype::Int8 => None,
+            Dtype::Q4KM => None,
+        }
+    }
+
+    /// Raw bytes for the Q4_K_M payload of `name`, if it's stored as a
+    /// raw blob (custom packing — see gemma4-quant). Used by the
+    /// quantized-matmul path that operates on the packed form directly.
+    pub fn as_q4km_bytes(&self, name: &str) -> Option<&[u8]> {
+        let e = self.get(name)?;
+        if e.dtype != Dtype::Q4KM {
+            return None;
+        }
+        Some(&self.bytes[e.start..e.end])
+    }
 }
 
 /// Tiny header parser. The JSON we expect is a flat object whose values are
