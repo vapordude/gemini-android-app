@@ -108,7 +108,10 @@ Pour compiler depuis les sources :
 
 Télécharger la dernière APK depuis la
 [page Releases](https://github.com/aciderix/gemini-android-app/releases).
-APKs debug-signé et release-signé publiés à chaque tag.
+Chaque tag publie `gemini-android-app-<tag>-debug.apk` et
+`gemini-android-app-<tag>-release.apk`. La variante release utilise le
+keystore de release configuré quand les secrets CI sont présents ; sinon
+elle retombe sur une signature debug pour rester installable.
 
 ### Option 2 : compiler depuis les sources
 
@@ -221,6 +224,9 @@ Commandes utiles :
 ./gradlew :app:lint                 # Android lint
 ./gradlew :core-bridge:test         # tests unitaires
 ```
+
+Les releases manuelles doivent passer par le workflow GitHub Actions
+**Release** avec un tag valide comme `v1.0.0`.
 
 ## 📄 Licence
 

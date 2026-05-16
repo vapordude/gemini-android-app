@@ -7,6 +7,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -54,6 +57,20 @@ jobs:
           path: |
             core-bridge/build/reports/tests/
             core-bridge/build/test-results/
+          if-no-files-found: ignore
+
+      - name: Android lint
+        run: ./gradlew :app:lint --stacktrace --info
+
+      - name: Upload lint reports (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-lint-reports
+          path: |
+            app/build/reports/lint-results-*.html
+            app/build/reports/lint-results-*.xml
+            app/build/intermediates/lint_intermediate_text_report/
           if-no-files-found: ignore
 
       - name: Assemble debug APK

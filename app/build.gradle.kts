@@ -3,6 +3,22 @@ plugins {
     alias(libs.plugins.kotlin.android)
 }
 
+fun propertyOrEnv(name: String): String? = providers.gradleProperty(name)
+    .orElse(providers.environmentVariable(name))
+    .orNull
+    ?.takeIf { it.isNotBlank() }
+
+val releaseStoreFilePath = propertyOrEnv("ANDROID_RELEASE_STORE_FILE")
+val releaseStorePassword = propertyOrEnv("ANDROID_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = propertyOrEnv("ANDROID_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = propertyOrEnv("ANDROID_RELEASE_KEY_PASSWORD")
+val hasReleaseSigning = listOf(
+    releaseStoreFilePath,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { !it.isNullOrBlank() } && file(releaseStoreFilePath!!).exists()
+
 android {
     namespace = "com.gemini.app"
     compileSdk = 34
@@ -24,6 +40,17 @@ android {
         manifestPlaceholders += mapOf("appAuthRedirectScheme" to "com.google.gemini.android")
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseStoreFilePath!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
@@ -31,9 +58,7 @@ android {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Debug-sign release until a proper keystore/CI secret is wired up,
-            // so the APK uploaded by the workflow can actually be installed.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {

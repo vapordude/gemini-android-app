@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to release (e.g. v1.0.0)'
+        description: 'Release tag (e.g. v1.0.0)'
         required: true
 
 permissions:
@@ -38,26 +38,81 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      - name: Resolve release tag
+        id: release_tag
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag="${{ github.event.inputs.tag }}"
+          fi
+          if [[ -z "${tag}" ]]; then
+            echo "Release tag is required." >&2
+            exit 1
+          fi
+          if [[ ! "${tag}" =~ ^v[0-9]+(\.[0-9]+){2}([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must look like v1.2.3 or v1.2.3-rc.1." >&2
+            exit 1
+          fi
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Prepare release signing
+        shell: bash
+        env:
+          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          ANDROID_RELEASE_STORE_PASSWORD_SECRET: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS_SECRET: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD_SECRET: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: |
+          if [[ -n "${ANDROID_RELEASE_KEYSTORE_BASE64}" && -n "${ANDROID_RELEASE_STORE_PASSWORD_SECRET}" && -n "${ANDROID_RELEASE_KEY_ALIAS_SECRET}" && -n "${ANDROID_RELEASE_KEY_PASSWORD_SECRET}" ]]; then
+            keystore_path="${RUNNER_TEMP}/android-release.keystore"
+            printf '%s' "${ANDROID_RELEASE_KEYSTORE_BASE64}" | base64 --decode > "${keystore_path}"
+            {
+              echo "ANDROID_RELEASE_STORE_FILE=${keystore_path}"
+              echo "ANDROID_RELEASE_STORE_PASSWORD=${ANDROID_RELEASE_STORE_PASSWORD_SECRET}"
+              echo "ANDROID_RELEASE_KEY_ALIAS=${ANDROID_RELEASE_KEY_ALIAS_SECRET}"
+              echo "ANDROID_RELEASE_KEY_PASSWORD=${ANDROID_RELEASE_KEY_PASSWORD_SECRET}"
+            } >> "${GITHUB_ENV}"
+            echo "Using configured release-signing credentials."
+          else
+            echo "Release-signing secrets are not fully configured; falling back to debug signing."
+          fi
+
+      - name: Android lint
+        run: ./gradlew :app:lint --stacktrace --info
+
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
 
-      - name: Build release APK (debug-signed)
+      - name: Build release APK
         run: ./gradlew :app:assembleRelease --stacktrace
+
+      - name: Upload app reports (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-build-reports
+          path: |
+            app/build/reports/
+            app/build/outputs/logs/
+          if-no-files-found: ignore
 
       - name: Rename APKs with tag
         run: |
-          TAG="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk "dist/gemini-android-${TAG}-debug.apk"
-          cp app/build/outputs/apk/release/app-release.apk "dist/gemini-android-${TAG}-release.apk"
+          TAG="${{ steps.release_tag.outputs.tag }}"
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/gemini-android-app-${TAG}-debug.apk"
+          cp app/build/outputs/apk/release/app-release.apk "dist/gemini-android-app-${TAG}-release.apk"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          name: ${{ github.event.inputs.tag || github.ref_name }}
+          tag_name: ${{ steps.release_tag.outputs.tag }}
+          name: ${{ steps.release_tag.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
           draft: false
           prerelease: false
           files: |
-            dist/gemini-android-*.apk
+            dist/gemini-android-app-*.apk
