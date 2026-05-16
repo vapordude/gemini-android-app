@@ -406,6 +406,48 @@ class ChatViewModel(
         }
     }
 
+    /**
+     * Record a SAF tree URI for one of the standard user scopes
+     * (`"home"` / `"documents"` / `"downloads"`). Takes persistable read
+     * permission so subsequent app launches can read the granted tree
+     * without re-prompting. Pass `null` [uri] to revoke.
+     *
+     * Wired to the [com.gemini.bridge.tools.ListUserFilesTool] via
+     * [com.gemini.bridge.storage.SecurePrefs].
+     */
+    fun grantUserScope(scope: String, uri: String?) {
+        val prefs = com.gemini.bridge.storage.SecurePrefs(coreContext())
+        val resolver = coreContext().contentResolver
+        val parsed = uri?.let { android.net.Uri.parse(it) }
+        if (parsed != null) {
+            runCatching {
+                resolver.takePersistableUriPermission(
+                    parsed,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+        }
+        when (scope.lowercase()) {
+            "home" -> prefs.homeTreeUri = uri
+            "documents" -> prefs.documentsTreeUri = uri
+            "downloads" -> prefs.downloadsTreeUri = uri
+            else -> _error.value = "Unknown scope: $scope"
+        }
+    }
+
+    /** Returns the granted SAF URI for [scope], or null if not granted. */
+    fun grantedScope(scope: String): String? {
+        val prefs = com.gemini.bridge.storage.SecurePrefs(coreContext())
+        return when (scope.lowercase()) {
+            "home" -> prefs.homeTreeUri
+            "documents" -> prefs.documentsTreeUri
+            "downloads" -> prefs.downloadsTreeUri
+            else -> null
+        }
+    }
+
+    private fun coreContext(): android.content.Context = core.appContext
+
     fun clearError() { _error.value = null }
 
     fun lastAssistantText(): String? =

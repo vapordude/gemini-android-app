@@ -96,6 +96,32 @@ class SecurePrefs(context: Context) {
             if (value.isNullOrBlank()) remove(KEY_WORKSPACE) else putString(KEY_WORKSPACE, value)
         }.apply()
 
+    /**
+     * SAF tree URIs the user has granted for the standard Home / Documents /
+     * Downloads scopes. Each is set via the per-scope picker in Settings; the
+     * URI carries persistable read permission (taken via
+     * `ContentResolver.takePersistableUriPermission` at the call site).
+     * Empty/null means "not granted" — [com.gemini.bridge.tools.ListUserFilesTool]
+     * surfaces a clear error in that case rather than silently failing.
+     */
+    var homeTreeUri: String?
+        get() = plain.getString(KEY_HOME_URI, null)
+        set(value) = plain.edit().apply {
+            if (value.isNullOrBlank()) remove(KEY_HOME_URI) else putString(KEY_HOME_URI, value)
+        }.apply()
+
+    var documentsTreeUri: String?
+        get() = plain.getString(KEY_DOCS_URI, null)
+        set(value) = plain.edit().apply {
+            if (value.isNullOrBlank()) remove(KEY_DOCS_URI) else putString(KEY_DOCS_URI, value)
+        }.apply()
+
+    var downloadsTreeUri: String?
+        get() = plain.getString(KEY_DOWN_URI, null)
+        set(value) = plain.edit().apply {
+            if (value.isNullOrBlank()) remove(KEY_DOWN_URI) else putString(KEY_DOWN_URI, value)
+        }.apply()
+
     var autoApprove: Boolean
         get() = plain.getBoolean(KEY_AUTO_APPROVE, false)
         set(value) = plain.edit().putBoolean(KEY_AUTO_APPROVE, value).apply()
@@ -137,6 +163,9 @@ class SecurePrefs(context: Context) {
         const val KEY_AUTO_COMPRESS_THRESHOLD = "auto_compress_threshold"
         const val KEY_AUTO_SAVE = "auto_save_enabled"
         const val KEY_DRIVER_MODE = "driver_mode"
+        const val KEY_HOME_URI = "home_tree_uri"
+        const val KEY_DOCS_URI = "documents_tree_uri"
+        const val KEY_DOWN_URI = "downloads_tree_uri"
     }
 }
 

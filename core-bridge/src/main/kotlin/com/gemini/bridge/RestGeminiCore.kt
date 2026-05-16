@@ -65,7 +65,10 @@ class RestGeminiCore(
     private val defaultModel: String = DEFAULT_MODEL
 ) : GeminiCore {
 
-    private val appContext: Context = appContext.applicationContext
+    /** Read-only access to the host application Context for callers wiring
+     * Android APIs (SAF, ContentResolver, etc.) that don't belong on the
+     * driver itself. */
+    val appContext: Context = appContext.applicationContext
 
     private val registry = ToolRegistry().apply {
         register(ReadFileTool(workspace))
@@ -89,7 +92,7 @@ class RestGeminiCore(
         register(com.gemini.bridge.tools.ForgetFactTool(memory))
         register(com.gemini.bridge.tools.RecallMemoryTool(memory))
         register(com.gemini.bridge.tools.NoteWriteTool(memory))
-        register(com.gemini.bridge.tools.ListUserFilesTool(this@RestGeminiCore.appContext))
+        register(com.gemini.bridge.tools.ListUserFilesTool(this@RestGeminiCore.appContext, prefs))
     }
 
     private var apiKey: String = ""

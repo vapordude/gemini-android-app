@@ -399,6 +399,25 @@ fun SettingsSheet(
             }
 
             SettingsAccordion(
+                title = "Storage access",
+                icon = Icons.Default.Folder,
+                expanded = "Storage access" in expanded,
+                onToggle = { toggle("Storage access") }
+            ) {
+                Text(
+                    "Grant the model read-only access to your Home, Documents, and Downloads " +
+                        "folders via the Storage Access Framework. Sensitive prompts (per the " +
+                        "safety classifier) won't be sent to Gemini regardless of these grants.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                StorageScopeRow(viewModel, "home", "Home")
+                StorageScopeRow(viewModel, "documents", "Documents")
+                StorageScopeRow(viewModel, "downloads", "Downloads")
+            }
+
+            SettingsAccordion(
                 title = "Tool approvals",
                 icon = Icons.Default.Security,
                 expanded = "Tool approvals" in expanded,
@@ -1110,4 +1129,35 @@ fun TermuxSetupDialog(
             }
         }
     )
+}
+
+@Composable
+private fun StorageScopeRow(viewModel: ChatViewModel, scope: String, label: String) {
+    val granted = viewModel.grantedScope(scope)
+    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) viewModel.grantUserScope(scope, uri.toString())
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                granted ?: "Not granted",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
+        if (granted == null) {
+            OutlinedButton(onClick = { launcher.launch(null) }) { Text("Grant") }
+        } else {
+            OutlinedButton(onClick = { viewModel.grantUserScope(scope, null) }) { Text("Revoke") }
+        }
+    }
 }
