@@ -44,6 +44,7 @@ import nz.kaimahi.app.ui.login.LoginScreen
 import nz.kaimahi.app.ui.memory.MemoryBrowserHost
 import nz.kaimahi.app.ui.research.DailyFrontPageScreen
 import nz.kaimahi.app.ui.settings.ThemeMode
+import nz.kaimahi.app.ui.splash.KaimahiSplash
 import nz.kaimahi.bridge.research.FeedTopic
 import nz.kaimahi.bridge.RestGeminiCore
 import nz.kaimahi.bridge.storage.ChatStore
@@ -93,7 +94,10 @@ private fun KaimahiApp(
     val localTraces by vm.localTraceEvents.collectAsState()
     val context = LocalContext.current
 
-    // Local-first bring-up.
+    // Splash gate — shown once per process. The math-spiral rotates at
+    // 60s/turn so 1.5s of dwell reads as "loading", not "loading
+    // forever". Auto-login happens behind it.
+    var splashFinished by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         if (!isReady) {
             val localPath = vm.preselectedLocalModelPath()
@@ -103,6 +107,13 @@ private fun KaimahiApp(
                 vm.tryAutoLogin(context)
             }
         }
+        kotlinx.coroutines.delay(1500L)
+        splashFinished = true
+    }
+
+    if (!splashFinished) {
+        KaimahiSplash()
+        return
     }
 
     if (!isReady) {

@@ -98,9 +98,18 @@ it iterate on its own.
 - **Survive long sessions.** The app reports live token usage and
   auto-compresses the conversation into a fresh summary once the context
   window fills up.
-- **Autosave every turn.** Close the app, come back later, the
-  conversation is exactly where you left it. Name and save snapshots
-  from the drawer for archive.
+- **Persistent projects in the left drawer.** Conversations live as
+  named projects — active and archived in two sections. Tap a project
+  to resume, ellipsis → rename / archive / delete. The chat you're
+  in autosaves every turn, so coming back is always exactly where
+  you left it.
+- **Daily todo + daily front page + memory browser**, all reachable
+  from the left drawer alongside Trace viewer, Deployments, Model
+  picker, Settings and About. The daily-todo screen persists under
+  `filesDir/screens/daily-todo/`; the daily-front-page surface scaffolds
+  a research feed (arXiv + lab blogs + synthesis venues, full source
+  list in `docs/research/daily-front-page.md`); the memory browser
+  shows project recency until the Rust memory-store JNI bridge lands.
 - **Export anywhere.** Drawer → Export as Markdown opens the Android
   share sheet — send the full conversation (text, code blocks, tables,
   image references) to any app.
