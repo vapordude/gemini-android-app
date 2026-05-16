@@ -195,11 +195,13 @@ fun AboutDialog(viewModel: ChatViewModel, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-        title = { Text("Gemini for Android") },
+        title = { Text("Kaimahi") },
         text = {
             Column {
                 Text(
-                    "Native Android client for the Gemini function-calling API.",
+                    "Native Android client. Runs Gemma 4 on-device through the " +
+                        "Kaimahi runtime, with the Gemini function-calling API " +
+                        "available as a cloud fallback.",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(Modifier.height(8.dp))
@@ -236,7 +238,7 @@ private fun shareMarkdown(context: Context, markdown: String) {
     val intent = Intent(Intent.ACTION_SEND)
         .setType("text/markdown")
         .putExtra(Intent.EXTRA_TEXT, markdown)
-        .putExtra(Intent.EXTRA_SUBJECT, "Gemini conversation")
+        .putExtra(Intent.EXTRA_SUBJECT, "Kaimahi conversation")
     runCatching {
         context.startActivity(
             Intent.createChooser(intent, "Export conversation")

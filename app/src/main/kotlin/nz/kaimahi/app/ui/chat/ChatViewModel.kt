@@ -760,7 +760,7 @@ fun ChatViewModel.exportAsMarkdown(): String {
     val ts = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US)
         .format(java.util.Date())
     val sb = StringBuilder()
-    sb.append("# Gemini conversation\n\n")
+    sb.append("# Kaimahi conversation\n\n")
     sb.append("_Model: ").append(model.value).append("_  \n")
     sb.append("_Exported: ").append(ts).append("_\n\n")
     messages.forEach { msg ->
@@ -769,7 +769,7 @@ fun ChatViewModel.exportAsMarkdown(): String {
                 sb.append("## User\n\n").append(msg.text.trim()).append("\n\n")
             }
             MessageRole.MODEL -> {
-                sb.append("## Gemini\n\n").append(msg.text.trim()).append("\n\n")
+                sb.append("## Kaimahi\n\n").append(msg.text.trim()).append("\n\n")
             }
             MessageRole.TOOL -> {
                 msg.toolCall?.let { call ->

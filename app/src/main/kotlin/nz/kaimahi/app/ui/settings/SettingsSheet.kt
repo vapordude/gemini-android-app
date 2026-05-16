@@ -1239,7 +1239,7 @@ fun TermuxSetupDialog(
                     .fillMaxWidth()
             ) {
                 Text(
-                    "Gemini can run real shell commands (git, gradle, curl…) " +
+                    "Kaimahi can run real shell commands (git, gradle, curl…) " +
                         "through Termux. This is optional — skip if you only need " +
                         "chat and in-app file tools.",
                     style = MaterialTheme.typography.bodySmall,
