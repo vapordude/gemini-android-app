@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Build
@@ -104,6 +105,9 @@ fun AppDrawer(
 
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         SectionLabel("Conversation")
+        DrawerItem(Icons.Default.Add, "New chat") {
+            onClose(); viewModel.startNewChat()
+        }
         DrawerItem(Icons.Default.ChatBubble, "Saved chats") {
             onClose(); onOpenChats()
         }
