@@ -2,7 +2,7 @@ name: Native (Rust)
 
 on:
   push:
-    branches: [main, "claude/**"]
+    branches: [main, "claude/**", "copilot/**"]
     paths:
       - "native/**"
       - ".github/workflows/native.yml"
