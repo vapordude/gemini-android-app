@@ -86,6 +86,91 @@ pub fn dequantize(src: &[u8], dst: &mut [f32]) {
     }
 }
 
+/// Compute `y = x · Wᵀ` where `W` is a `[n, k]` Q4_K_M-packed matrix
+/// laid out row-by-row (the GGUF Linear-weight convention) and `x` is
+/// a `[k]` f32 activation vector. Output `y` has length `n`.
+///
+/// The kernel walks each output row's super-blocks against the
+/// activation in place — no intermediate dequant to f32. For a 256
+/// element sub-block we do
+///
+/// ```text
+///   acc += (d * scale_s) * Σ(q_i · x_i)  -  (dmin * min_s) · Σ x_i
+/// ```
+///
+/// so the inner loop is one mul-add per nibble. Activation reads are
+/// shared across all output rows for a given column range, which is
+/// what makes this much faster than a dequant+matmul split.
+///
+/// `k` must be a multiple of 256 (the super-block size).
+pub fn matvec_q4_k_row_major(w: &[u8], n: usize, k: usize, x: &[f32], y: &mut [f32]) {
+    assert_eq!(x.len(), k, "activation length mismatch");
+    assert_eq!(y.len(), n, "output length mismatch");
+    assert_eq!(k % SUPER_BLOCK, 0, "k must be a multiple of {SUPER_BLOCK}");
+    let supers_per_row = k / SUPER_BLOCK;
+    let row_bytes = supers_per_row * BYTES_PER_SUPER_BLOCK;
+    assert_eq!(w.len(), n * row_bytes, "weight buffer size mismatch");
+
+    // Precompute per-sub-block sums of x. The sub-block boundary in
+    // x doesn't move per output row, so we pay this once.
+    //
+    // Layout: `x_sub_sums[block_idx * SUB_BLOCKS + sub_idx]` is the
+    // sum of x over its 32 elements.
+    let n_sub_blocks = supers_per_row * SUB_BLOCKS;
+    let mut x_sub_sums = vec![0.0f32; n_sub_blocks];
+    for block in 0..supers_per_row {
+        for sub in 0..SUB_BLOCKS {
+            let base = block * SUPER_BLOCK + sub * SUB_SIZE;
+            let mut s = 0.0f32;
+            for i in 0..SUB_SIZE {
+                s += x[base + i];
+            }
+            x_sub_sums[block * SUB_BLOCKS + sub] = s;
+        }
+    }
+
+    for (row, y_slot) in y.iter_mut().enumerate().take(n) {
+        let row_start = row * row_bytes;
+        let row_w = &w[row_start..row_start + row_bytes];
+        let mut acc = 0.0f32;
+        for block in 0..supers_per_row {
+            let src = &row_w[block * BYTES_PER_SUPER_BLOCK..(block + 1) * BYTES_PER_SUPER_BLOCK];
+            let d = f16_to_f32(u16::from_le_bytes([src[0], src[1]]));
+            let dmin = f16_to_f32(u16::from_le_bytes([src[2], src[3]]));
+            let scales = &src[4..16];
+            let qs = &src[16..16 + 128];
+            let x_block_base = block * SUPER_BLOCK;
+            for pair in 0..4 {
+                let lo_sub = pair;
+                let hi_sub = pair + 4;
+                let (lo_scale, lo_min) = scale_min(lo_sub, scales);
+                let (hi_scale, hi_min) = scale_min(hi_sub, scales);
+                let scale_lo = d * lo_scale as f32;
+                let scale_hi = d * hi_scale as f32;
+                let bias_lo = dmin * lo_min as f32;
+                let bias_hi = dmin * hi_min as f32;
+                let lo_x_base = x_block_base + lo_sub * SUB_SIZE;
+                let hi_x_base = x_block_base + hi_sub * SUB_SIZE;
+                let qs_off = pair * SUB_SIZE;
+                let mut sum_qx_lo = 0.0f32;
+                let mut sum_qx_hi = 0.0f32;
+                for i in 0..SUB_SIZE {
+                    let b = qs[qs_off + i];
+                    let q_lo = (b & 0x0F) as f32;
+                    let q_hi = (b >> 4) as f32;
+                    sum_qx_lo += q_lo * x[lo_x_base + i];
+                    sum_qx_hi += q_hi * x[hi_x_base + i];
+                }
+                let sum_x_lo = x_sub_sums[block * SUB_BLOCKS + lo_sub];
+                let sum_x_hi = x_sub_sums[block * SUB_BLOCKS + hi_sub];
+                acc += scale_lo * sum_qx_lo - bias_lo * sum_x_lo;
+                acc += scale_hi * sum_qx_hi - bias_hi * sum_x_hi;
+            }
+        }
+        *y_slot = acc;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,6 +256,75 @@ mod tests {
         // value = 0.5 * 1 * 3 - 0 * 0 = 1.5
         for v in &dst {
             assert!((v - 1.5).abs() < 1e-5);
+        }
+    }
+
+    /// matvec_q4_k_row_major must match the result of dequantizing every
+    /// row to F32 and running a plain matmul. The activation here is a
+    /// pseudo-random pattern so cancellation errors would show.
+    #[test]
+    #[allow(clippy::needless_range_loop)] // explicit index arithmetic is clearer for the fixture
+    fn matvec_matches_dequant_then_matmul() {
+        // Build a 3-row × (2 super-block = 512) matrix with varied scales.
+        let n = 3;
+        let supers_per_row = 2;
+        let k = supers_per_row * SUPER_BLOCK;
+        let mut weight_bytes = Vec::with_capacity(n * supers_per_row * BYTES_PER_SUPER_BLOCK);
+        for row in 0..n {
+            for b in 0..supers_per_row {
+                let mut sm = [(0u8, 0u8); 8];
+                for j in 0..8 {
+                    sm[j] = (
+                        ((row * 7 + b * 3 + j) as u8) % 8 + 1,
+                        ((j * 5 + b) as u8) % 4,
+                    );
+                }
+                let mut nibbles = [0u8; SUPER_BLOCK];
+                for i in 0..SUPER_BLOCK {
+                    nibbles[i] = ((row * 31 + b * 17 + i * 3) as u8) & 0x0F;
+                }
+                let d = 0.25 + (b as f32) * 0.1;
+                let dmin = 0.05 + (row as f32) * 0.02;
+                weight_bytes.extend(make_super(d, dmin, sm, nibbles));
+            }
+        }
+        // Dequantize the whole matrix for comparison.
+        let mut weight_f32 = vec![0.0f32; n * k];
+        for row in 0..n {
+            let row_bytes_start = row * supers_per_row * BYTES_PER_SUPER_BLOCK;
+            let row_bytes_end = (row + 1) * supers_per_row * BYTES_PER_SUPER_BLOCK;
+            let row_dst_start = row * k;
+            let row_dst_end = (row + 1) * k;
+            dequantize(
+                &weight_bytes[row_bytes_start..row_bytes_end],
+                &mut weight_f32[row_dst_start..row_dst_end],
+            );
+        }
+        // Activation: deterministic pseudo-random sequence.
+        let x: Vec<f32> = (0..k).map(|i| ((i as f32) * 0.0137).sin()).collect();
+        // Reference: y_ref[row] = sum_k weight_f32[row, k] * x[k].
+        let mut y_ref = vec![0.0f32; n];
+        for row in 0..n {
+            let mut acc = 0.0f32;
+            for col in 0..k {
+                acc += weight_f32[row * k + col] * x[col];
+            }
+            y_ref[row] = acc;
+        }
+        // Kernel under test.
+        let mut y = vec![0.0f32; n];
+        matvec_q4_k_row_major(&weight_bytes, n, k, &x, &mut y);
+        for row in 0..n {
+            let err = (y[row] - y_ref[row]).abs();
+            // Q4_K_M error bound: scale * 8 + dmin, scaled by sum |x| ≈ 0.6 here.
+            // The kernel itself does the same arithmetic in a different order;
+            // the tolerance is for f32 accumulation, not for quant error.
+            assert!(
+                err < 1e-3,
+                "row {row}: matvec {} vs ref {} (delta {err})",
+                y[row],
+                y_ref[row],
+            );
         }
     }
 }

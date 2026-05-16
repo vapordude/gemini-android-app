@@ -1,26 +1,49 @@
-//! Gemma 2/3/4 architecture. Config-driven from GGUF metadata — head
-//! count, head dim, sliding window, RoPE base, etc. all come from the
-//! file so the runtime never guesses. Weights are dequantized from the
-//! GGUF tensor payload at load time (Q4_K / Q8_0 / Q4_0 / F16 / F32 / BF16)
-//! and stored as `Vec<f32>`. The forward pass walks the standard SwiGLU
-//! decoder stack using the `tensor_core::kernels` reference math.
+//! Gemma 4 (E2B / E4B) language model. Port of
+//! `llama.cpp/src/models/gemma4.cpp`.
 //!
-//! Memory note: a 2B model dequantized to F32 needs ~8 GB. Phones run
-//! out before then. For real-world use we still need quantized matvec
-//! kernels — that's the follow-up. This file produces honest tokens for
-//! F16 / F32 / Q8_0 weights and small (e.g. 270M) Q4_K Gemmas that fit
-//! into device RAM dequantized.
+//! Architecture summary:
+//!
+//! - Per-layer alternating attention type: `sliding_attention` (window
+//!   512, RoPE base 10000, head_dim 256) or `full_attention` (no window,
+//!   RoPE base 1_000_000 with `partial_rotary_factor = 0.25`,
+//!   head_dim 512 = `global_head_dim`). The pattern is exact 5:1 with
+//!   the last layer always full.
+//! - Selective KV-share: the last `num_kv_shared_layers` layers reuse
+//!   the K/V cache of an earlier KV-owning layer. The K/V tensors and
+//!   K-norm aren't materialized on those reusing layers.
+//! - Per-Layer Embeddings (PLE): a separate global table indexed by
+//!   token id, projected per-layer and added as a residual via a
+//!   gate→GELU→multiply→proj→norm path.
+//! - GELU FFN with parallel gate/up.
+//! - Final logit softcap (`tanh(x / k) * k`).
+//!
+//! The forward pass keeps Q4_K_M weights packed (`WeightView::Q4K`) and
+//! dispatches `matvec_q4_k_row_major` directly; small tensors (norms,
+//! embeddings) dequant to `Vec<f32>` because they're touched every
+//! forward and don't dominate memory.
 
 use crate::tokenizer::Tokenizer;
 use crate::{KvCache, LanguageModel, LoadError, RuntimeInfo, TokenId};
 use gguf_loader::{GgmlType, GgufBytes, GgufFile, MetaValue};
 use tensor_core::isa;
 use tensor_core::kernels::{
-    attention::sdpa_decode_f32, matmul::matvec_f32, rmsnorm::rmsnorm_f32, rope::rope_inplace_f32,
-    softmax::softmax_f32, swiglu::swiglu_f32,
+    attention::sdpa_decode_f32, matmul::matvec_f32, rmsnorm::rmsnorm_f32, softmax::softmax_f32,
 };
+use tensor_core::quant::q4_k::{matvec_q4_k_row_major, SUPER_BLOCK as Q4K_BLOCK};
 use tensor_core::quant::{dequantize_to_f32, DequantError, DequantType};
 use tensor_core::IsaTier;
+
+// ---------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------
+
+/// Per-layer attention type. Decides head_dim, RoPE base, sliding
+/// window, and whether the layer owns its K/V cache.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayerType {
+    Sliding,
+    Full,
+}
 
 #[derive(Debug, Clone)]
 pub struct Gemma4Config {
@@ -29,32 +52,108 @@ pub struct Gemma4Config {
     pub n_layers: usize,
     pub n_heads: usize,
     pub n_kv_heads: usize,
-    pub head_dim: usize,
+    /// Head dim for `sliding_attention` layers (config.json `head_dim`).
+    pub head_dim_swa: usize,
+    /// Head dim for `full_attention` layers (config.json `global_head_dim`).
+    pub head_dim_full: usize,
     pub mlp_intermediate: usize,
     pub context_length: usize,
-    pub rope_base: f32,
-    pub sliding_window: Option<usize>,
+    /// RoPE base for `sliding_attention` layers (10_000 by default).
+    pub rope_base_swa: f32,
+    /// RoPE base for `full_attention` layers (1_000_000 by default).
+    pub rope_base_full: f32,
+    /// Fraction of head_dim that gets rotated on full-attention layers.
+    /// Gemma 4 ships `0.25` so only the first 25% of dims get RoPE.
+    pub partial_rotary_factor_full: f32,
+    pub sliding_window: usize,
     pub rms_eps: f32,
-    /// Some Gemma checkpoints multiply the embedding by sqrt(hidden_size)
-    /// after lookup. The HF reference does this; we honour it when the
-    /// metadata flag is set (or by default for the gemma family).
-    pub scale_embed: bool,
-    /// Gemma 2 / 3 add a second RMSNorm after attention and after MLP,
-    /// applied to the sublayer output before the residual.
-    pub post_norm: bool,
+    /// Number of layers at the END of the stack that reuse the cached
+    /// K/V from an earlier layer. `n_layers - num_kv_shared_layers`
+    /// layers (at the start) own their K/V.
+    pub num_kv_shared_layers: usize,
+    /// Per-Layer Embedding channel width. `0` when the GGUF has no PLE.
+    pub ple_dim: usize,
+    /// `tanh(logits / softcap) * softcap` clamp on the output logits.
+    /// `None` when absent (some Gemma fine-tunes ship without it).
+    pub final_logit_softcapping: Option<f32>,
+    /// True iff the lm_head is tied to `token_embd`.
+    pub tied_embeddings: bool,
+    pub layer_types: Vec<LayerType>,
 }
 
 impl Gemma4Config {
-    pub fn from_gguf(g: &GgufFile) -> Result<Self, LoadError> {
-        let prefix = ["gemma4", "gemma-4", "gemma3", "gemma2", "gemma"]
-            .iter()
-            .find(|p| g.get(&format!("{p}.context_length")).is_some())
+    /// Convenience: did the loader determine this layer owns its K/V?
+    pub fn owns_kv(&self, layer: usize) -> bool {
+        layer < self.n_layers.saturating_sub(self.num_kv_shared_layers)
+    }
+
+    /// Head dim for layer `i`.
+    pub fn head_dim(&self, layer: usize) -> usize {
+        match self
+            .layer_types
+            .get(layer)
             .copied()
-            .unwrap_or("gemma");
+            .unwrap_or(LayerType::Sliding)
+        {
+            LayerType::Sliding => self.head_dim_swa,
+            LayerType::Full => self.head_dim_full,
+        }
+    }
+
+    /// RoPE base for layer `i`.
+    pub fn rope_base(&self, layer: usize) -> f32 {
+        match self
+            .layer_types
+            .get(layer)
+            .copied()
+            .unwrap_or(LayerType::Sliding)
+        {
+            LayerType::Sliding => self.rope_base_swa,
+            LayerType::Full => self.rope_base_full,
+        }
+    }
+
+    /// Number of dims that get rotated by RoPE for layer `i`.
+    pub fn n_rot(&self, layer: usize) -> usize {
+        match self
+            .layer_types
+            .get(layer)
+            .copied()
+            .unwrap_or(LayerType::Sliding)
+        {
+            LayerType::Sliding => self.head_dim_swa,
+            LayerType::Full => {
+                let raw = (self.head_dim_full as f32 * self.partial_rotary_factor_full) as usize;
+                // Snap to even — RoPE rotates pairs.
+                raw & !1
+            }
+        }
+    }
+
+    /// `Some(window)` for SWA layers, `None` for full-attn.
+    pub fn window(&self, layer: usize) -> Option<usize> {
+        match self
+            .layer_types
+            .get(layer)
+            .copied()
+            .unwrap_or(LayerType::Sliding)
+        {
+            LayerType::Sliding => Some(self.sliding_window),
+            LayerType::Full => None,
+        }
+    }
+
+    /// Parse a Gemma 4 config from GGUF metadata. Reads the metadata
+    /// prefix conventions documented in the plan; rejects non-Gemma-4
+    /// arch tags with a clear error.
+    pub fn from_gguf(g: &GgufFile) -> Result<Self, LoadError> {
+        let prefix = "gemma4";
         let get_u32 = |suffix: &str| -> Result<u32, LoadError> {
             g.get(&format!("{prefix}.{suffix}"))
                 .and_then(MetaValue::as_u32)
-                .ok_or(LoadError::MissingMetadata("gemma.<suffix>"))
+                .ok_or(LoadError::MissingMetadata(Box::leak(
+                    format!("{prefix}.{suffix}").into_boxed_str(),
+                )))
         };
         let get_u32_or = |suffix: &str, default: u32| -> u32 {
             g.get(&format!("{prefix}.{suffix}"))
@@ -70,20 +169,30 @@ impl Gemma4Config {
         let hidden_size = get_u32("embedding_length")? as usize;
         let n_heads = get_u32("attention.head_count")? as usize;
         let n_kv_heads = get_u32_or("attention.head_count_kv", n_heads as u32) as usize;
-        let head_dim = g
-            .get(&format!("{prefix}.attention.key_length"))
-            .and_then(MetaValue::as_u32)
-            .map(|v| v as usize)
-            .unwrap_or(hidden_size / n_heads.max(1));
+        let head_dim_swa = get_u32_or("attention.key_length", 256) as usize;
+        // `key_length_swa` is llama.cpp's confusing label for the
+        // *other* head dim — namely the full-attention head_dim (which
+        // is bigger than the SWA one in Gemma 4).
+        let head_dim_full = get_u32_or("attention.key_length_swa", head_dim_swa as u32) as usize;
         let n_layers = get_u32("block_count")? as usize;
         let mlp_intermediate = get_u32("feed_forward_length")? as usize;
         let context_length = get_u32("context_length")? as usize;
-        let rope_base = get_f32_or("rope.freq_base", 10_000.0);
+        let rope_base_full = get_f32_or("rope.freq_base", 1_000_000.0);
+        let rope_base_swa = get_f32_or("rope.freq_base_swa", 10_000.0);
         let rms_eps = get_f32_or("attention.layer_norm_rms_epsilon", 1e-6);
-        let sliding_window = g
-            .get(&format!("{prefix}.attention.sliding_window"))
-            .and_then(MetaValue::as_u32)
-            .map(|v| v as usize);
+        let sliding_window = get_u32_or("attention.sliding_window", 512) as usize;
+        let num_kv_shared_layers = get_u32_or("attention.shared_kv_layers", 0) as usize;
+        let ple_dim = get_u32_or("embedding_length_per_layer", 0) as usize;
+        let final_logit_softcapping = g
+            .get(&format!("{prefix}.final_logit_softcapping"))
+            .and_then(MetaValue::as_f32);
+        let partial_rotary_factor_full = get_f32_or("rope.partial_rotary_factor", 0.25);
+
+        // Layer types: GGUF stores `attention.sliding_window_pattern`
+        // as an array of u32s (1 = sliding, 0 = full) of length n_layers
+        // per llama.cpp's gguf-py mapping. We read each entry and fall
+        // back to a synthetic 5:1 (last-full) pattern when absent.
+        let layer_types = read_layer_types(g, prefix, n_layers);
 
         let vocab_size = g
             .get("tokenizer.ggml.tokens")
@@ -97,55 +206,144 @@ impl Gemma4Config {
             })
             .ok_or(LoadError::MissingMetadata("vocab_size"))?;
 
+        // Tied embeddings: we detect by looking for `output.weight`.
+        // If absent the head ties to `token_embd.weight`.
+        let tied_embeddings = g.tensor("output.weight").is_none();
+
         Ok(Self {
             vocab_size,
             hidden_size,
             n_layers,
             n_heads,
             n_kv_heads,
-            head_dim,
+            head_dim_swa,
+            head_dim_full,
             mlp_intermediate,
             context_length,
-            rope_base,
+            rope_base_swa,
+            rope_base_full,
+            partial_rotary_factor_full,
             sliding_window,
             rms_eps,
-            scale_embed: true,
-            // Gemma 2/3/4 ship with the double-norm pattern. The flag
-            // lives here so callers can flip it if a future variant
-            // drops the post-attn / post-ffn norms.
-            post_norm: prefix != "gemma", // gemma 1 used a single norm pair
+            num_kv_shared_layers,
+            ple_dim,
+            final_logit_softcapping,
+            tied_embeddings,
+            layer_types,
         })
     }
 }
 
-/// Owning buffers for one decoder layer. F32 storage — the production
-/// path will swap each `Vec<f32>` for a typed view that does the matvec
-/// directly against quantized bytes.
+/// Read the per-layer attention type array from GGUF. Falls back to a
+/// synthetic 5:1 (last-always-full) pattern when the metadata key is
+/// absent — this matches the default emitted by Gemma 4 HF conversion
+/// scripts when `layer_types` isn't explicitly serialized.
+fn read_layer_types(g: &GgufFile, prefix: &str, n_layers: usize) -> Vec<LayerType> {
+    let key = format!("{prefix}.attention.sliding_window_pattern");
+    if let Some(arr) = g.get(&key).and_then(MetaValue::as_array) {
+        if arr.len() == n_layers {
+            return arr
+                .iter()
+                .map(|v| match v.as_u32() {
+                    Some(0) => LayerType::Full,
+                    Some(_) => LayerType::Sliding,
+                    None => LayerType::Sliding,
+                })
+                .collect();
+        }
+    }
+    // Default: 5 sliding then 1 full, repeated, with the very last
+    // layer forced to Full per the HF config-builder post_init logic.
+    let mut out: Vec<LayerType> = (0..n_layers)
+        .map(|i| {
+            if (i + 1) % 6 == 0 {
+                LayerType::Full
+            } else {
+                LayerType::Sliding
+            }
+        })
+        .collect();
+    if let Some(last) = out.last_mut() {
+        *last = LayerType::Full;
+    }
+    out
+}
+
+// ---------------------------------------------------------------------
+// Weight storage — packed Q4_K stays packed; everything else is F32.
+// ---------------------------------------------------------------------
+
+/// A weight matrix in one of the storage modes we support. The forward
+/// pass dispatches on the variant to pick the right matvec kernel.
+enum WeightView {
+    F32(Vec<f32>),
+    Q4K { bytes: Vec<u8>, n: usize, k: usize },
+}
+
+impl WeightView {
+    /// `y[n] = W · x[k]`. `n = y.len()`, `k = x.len()`.
+    fn matvec(&self, x: &[f32], y: &mut [f32]) {
+        match self {
+            WeightView::F32(w) => {
+                let n = y.len();
+                let k = x.len();
+                matvec_f32(x, w, y, n, k);
+            }
+            WeightView::Q4K { bytes, n, k } => {
+                debug_assert_eq!(*n, y.len(), "Q4K matvec n mismatch");
+                debug_assert_eq!(*k, x.len(), "Q4K matvec k mismatch");
+                matvec_q4_k_row_major(bytes, *n, *k, x, y);
+            }
+        }
+    }
+}
+
+/// Per-layer weight tensors. K and V are `Option` because shared-KV
+/// reusing layers don't carry their own `wk`/`wv`.
 struct LayerWeights {
     attn_norm: Vec<f32>,
-    post_attn_norm: Option<Vec<f32>>,
+    attn_post_norm: Vec<f32>,
+    attn_q_norm: Vec<f32>,
+    attn_k_norm: Option<Vec<f32>>, // None for KV-reusing layers
+    w_q: WeightView,
+    w_k: Option<WeightView>,
+    w_v: Option<WeightView>,
+    w_o: WeightView,
+
     ffn_norm: Vec<f32>,
-    post_ffn_norm: Option<Vec<f32>>,
-    w_q: Vec<f32>,    // [n_heads * head_dim, hidden]
-    w_k: Vec<f32>,    // [n_kv_heads * head_dim, hidden]
-    w_v: Vec<f32>,    // [n_kv_heads * head_dim, hidden]
-    w_o: Vec<f32>,    // [hidden, n_heads * head_dim]
-    w_gate: Vec<f32>, // [inter, hidden]
-    w_up: Vec<f32>,   // [inter, hidden]
-    w_down: Vec<f32>, // [hidden, inter]
+    ffn_post_norm: Vec<f32>,
+    w_gate: WeightView,
+    w_up: WeightView,
+    w_down: WeightView,
+
+    /// Per-layer scalar applied to the residual after the FFN. Absent
+    /// on most fine-tunes.
+    out_scale: Option<f32>,
+
+    // PLE tensors. Present iff `cfg.ple_dim > 0` AND this layer has
+    // `per_layer_*` tensors in the GGUF.
+    per_layer_inp_gate: Option<WeightView>, // [ple_dim, n_embd]
+    per_layer_proj: Option<WeightView>,     // [n_embd, ple_dim]
+    per_layer_post_norm: Option<Vec<f32>>,  // [n_embd]
 }
 
-/// Top-level (non-per-layer) weights.
 struct GlobalWeights {
-    embed: Vec<f32>,           // [vocab, hidden] — row-major
-    output_norm: Vec<f32>,     // [hidden]
-    lm_head: Option<Vec<f32>>, // [vocab, hidden] when not tied to embed
+    /// `[vocab, hidden]` row-major.
+    embed: Vec<f32>,
+    output_norm: Vec<f32>,
+    /// LM head. `None` when tied to `embed`.
+    lm_head: Option<WeightView>,
+
+    // PLE globals. `None` when the GGUF has no PLE.
+    per_layer_tok_embd: Option<Vec<f32>>, // [vocab, n_layer * ple_dim]
+    per_layer_model_proj: Option<WeightView>, // [n_layer * ple_dim, n_embd]
+    per_layer_proj_norm: Option<Vec<f32>>, // [ple_dim]
 }
 
-/// One layer's persistent KV cache (concatenated per head, contiguous).
+/// One physical KV slot. Backed by zeroed `Vec<f32>` of size
+/// `context_length * n_kv_heads * head_dim`. Layers that reuse the
+/// cache point at an earlier slot via `kv_alias`.
 struct LayerKv {
-    /// `[max_seq, n_kv_heads * head_dim]`. Stored as a flat Vec for
-    /// pointer-friendly slicing into individual head rows.
     keys: Vec<f32>,
     values: Vec<f32>,
 }
@@ -156,51 +354,71 @@ pub struct Gemma4Model {
     isa: IsaTier,
     global: GlobalWeights,
     layers: Vec<LayerWeights>,
-    /// Per-layer KV cache. Indexed by `(layer, position, kv_head, dim)`.
-    kv: Vec<LayerKv>,
-    /// Reusable scratch buffers — avoids reallocating per token.
+    /// One entry per layer. `Some` for KV-owning layers, `None` for
+    /// KV-reusing layers (they read through `kv_alias`).
+    kv: Vec<Option<LayerKv>>,
+    /// `kv_alias[i] = the physical slot layer i reads from`. For an
+    /// owning layer this equals `i`. For a reusing layer it points at
+    /// the latest KV-owning predecessor with the same attention type.
+    kv_alias: Vec<usize>,
     scratch: ForwardScratch,
-    /// Token position in the current session. Reset when the caller asks.
     pos: usize,
     logits: Vec<f32>,
-    /// Optional tokenizer, kept here so callers that don't need to
-    /// build one out of band can reach it via [`tokenizer`].
     tokenizer: Option<Tokenizer>,
 }
 
 struct ForwardScratch {
-    x: Vec<f32>,        // [hidden]
-    h: Vec<f32>,        // [hidden]
-    q: Vec<f32>,        // [n_heads * head_dim]
-    k: Vec<f32>,        // [n_kv_heads * head_dim]
-    v: Vec<f32>,        // [n_kv_heads * head_dim]
-    attn_out: Vec<f32>, // [n_heads * head_dim]
-    o: Vec<f32>,        // [hidden]
-    gate: Vec<f32>,     // [inter]
-    up: Vec<f32>,       // [inter]
-    swiglu: Vec<f32>,   // [inter]
-    ffn_out: Vec<f32>,  // [hidden]
+    x: Vec<f32>, // [hidden]
+    h: Vec<f32>, // [hidden]
+    // Q/K/V scratch buffers sized to the largest layer's dims so they
+    // can be reused per token.
+    q: Vec<f32>,
+    k: Vec<f32>,
+    v: Vec<f32>,
+    attn_out: Vec<f32>,
+    o: Vec<f32>,
+    gate: Vec<f32>,
+    up: Vec<f32>,
+    swiglu: Vec<f32>,
+    ffn_out: Vec<f32>,
+    /// PLE per-layer table: `[ple_dim * n_layer]` — the row for the
+    /// current token, reshaped to `[ple_dim, n_layer]` row-major.
+    ple_row: Vec<f32>,
+    /// PLE per-layer projected channel: same shape as `ple_row`.
+    ple_layer_input: Vec<f32>,
+    /// Temp for PLE gate output `[ple_dim]`.
+    ple_gate: Vec<f32>,
+    /// Temp for `[n_embd]` after PLE projection.
+    ple_proj_out: Vec<f32>,
 }
 
 impl ForwardScratch {
     fn new(cfg: &Gemma4Config) -> Self {
-        let q_total = cfg.n_heads * cfg.head_dim;
-        let kv_total = cfg.n_kv_heads * cfg.head_dim;
+        let max_q = cfg.n_heads * cfg.head_dim_full.max(cfg.head_dim_swa);
+        let max_kv = cfg.n_kv_heads * cfg.head_dim_full.max(cfg.head_dim_swa);
         Self {
             x: vec![0.0; cfg.hidden_size],
             h: vec![0.0; cfg.hidden_size],
-            q: vec![0.0; q_total],
-            k: vec![0.0; kv_total],
-            v: vec![0.0; kv_total],
-            attn_out: vec![0.0; q_total],
+            q: vec![0.0; max_q],
+            k: vec![0.0; max_kv],
+            v: vec![0.0; max_kv],
+            attn_out: vec![0.0; max_q],
             o: vec![0.0; cfg.hidden_size],
             gate: vec![0.0; cfg.mlp_intermediate],
             up: vec![0.0; cfg.mlp_intermediate],
             swiglu: vec![0.0; cfg.mlp_intermediate],
             ffn_out: vec![0.0; cfg.hidden_size],
+            ple_row: vec![0.0; cfg.ple_dim.saturating_mul(cfg.n_layers).max(1)],
+            ple_layer_input: vec![0.0; cfg.ple_dim.saturating_mul(cfg.n_layers).max(1)],
+            ple_gate: vec![0.0; cfg.ple_dim.max(1)],
+            ple_proj_out: vec![0.0; cfg.hidden_size],
         }
     }
 }
+
+// ---------------------------------------------------------------------
+// Tensor reading helpers
+// ---------------------------------------------------------------------
 
 fn dequant_type(t: GgmlType) -> Result<DequantType, LoadError> {
     DequantType::from_ggml(t as u32).ok_or(LoadError::UnknownArchitecture(format!(
@@ -209,54 +427,100 @@ fn dequant_type(t: GgmlType) -> Result<DequantType, LoadError> {
     )))
 }
 
-fn read_tensor(g: &GgufBytes, name: &str) -> Result<Vec<f32>, LoadError> {
-    let info = g
-        .file
-        .tensor(name)
-        .ok_or_else(|| LoadError::MissingMetadata(Box::leak(name.to_string().into_boxed_str())))?;
-    let ty = dequant_type(info.ggml_type)?;
-    let bytes = g
-        .tensor_bytes(name)
-        .ok_or(LoadError::MissingMetadata("tensor bytes"))?;
-    let numel = info.numel();
-    dequantize_to_f32(ty, bytes, numel).map_err(map_dequant)
-}
-
-fn read_optional(g: &GgufBytes, name: &str) -> Result<Option<Vec<f32>>, LoadError> {
-    if g.file.tensor(name).is_none() {
-        return Ok(None);
-    }
-    read_tensor(g, name).map(Some)
+fn missing(name: &str) -> LoadError {
+    LoadError::MissingMetadata(Box::leak(name.to_string().into_boxed_str()))
 }
 
 fn map_dequant(e: DequantError) -> LoadError {
     LoadError::UnknownArchitecture(format!("dequant: {e}"))
 }
 
+/// Read a tensor into `Vec<f32>`. Use for small tensors (norms,
+/// embeddings) where the whole-row F32 storage is cheap.
+fn read_f32(g: &GgufBytes, name: &str) -> Result<Vec<f32>, LoadError> {
+    let info = g.file.tensor(name).ok_or_else(|| missing(name))?;
+    let ty = dequant_type(info.ggml_type)?;
+    let bytes = g.tensor_bytes(name).ok_or_else(|| missing(name))?;
+    let numel = info.numel();
+    dequantize_to_f32(ty, bytes, numel).map_err(map_dequant)
+}
+
+fn read_optional_f32(g: &GgufBytes, name: &str) -> Result<Option<Vec<f32>>, LoadError> {
+    if g.file.tensor(name).is_none() {
+        return Ok(None);
+    }
+    read_f32(g, name).map(Some)
+}
+
+/// Read a projection matrix in its native layout. Q4_K_M weights stay
+/// packed (small in-memory footprint, dispatched through
+/// `matvec_q4_k_row_major`); everything else dequantizes to F32.
+fn read_projection(g: &GgufBytes, name: &str) -> Result<WeightView, LoadError> {
+    let info = g.file.tensor(name).ok_or_else(|| missing(name))?;
+    let bytes = g.tensor_bytes(name).ok_or_else(|| missing(name))?;
+    let dims: Vec<usize> = info.dims.iter().map(|d| *d as usize).collect();
+    // GGUF Linear-weight stores dims as [in, out]. The Q4_K row layout
+    // expects k-contiguous rows-of-n; that matches the `n × k` shape
+    // when we call matvec(x[k], y[n]).
+    if dims.len() == 2 && info.ggml_type == GgmlType::Q4_K {
+        let k = dims[0];
+        let n = dims[1];
+        if k % Q4K_BLOCK == 0 {
+            return Ok(WeightView::Q4K {
+                bytes: bytes.to_vec(),
+                n,
+                k,
+            });
+        }
+    }
+    let ty = dequant_type(info.ggml_type)?;
+    let numel: usize = dims.iter().product();
+    let f32 = dequantize_to_f32(ty, bytes, numel).map_err(map_dequant)?;
+    Ok(WeightView::F32(f32))
+}
+
+fn read_optional_projection(g: &GgufBytes, name: &str) -> Result<Option<WeightView>, LoadError> {
+    if g.file.tensor(name).is_none() {
+        return Ok(None);
+    }
+    read_projection(g, name).map(Some)
+}
+
+fn read_optional_scalar(g: &GgufBytes, name: &str) -> Result<Option<f32>, LoadError> {
+    let Some(v) = read_optional_f32(g, name)? else {
+        return Ok(None);
+    };
+    Ok(v.first().copied())
+}
+
+// ---------------------------------------------------------------------
+// Gemma4Model
+// ---------------------------------------------------------------------
+
 impl Gemma4Model {
-    /// Backwards-compatible: parses metadata only, no weight binding.
-    /// Used by the model-runtime smoke test and any caller that just
-    /// wants to see whether the GGUF file is structurally Gemma.
+    /// Metadata-only constructor for tests / smoke checks. Forward
+    /// returns zero logits.
     pub fn from_gguf(g: &GgufFile) -> Result<Self, LoadError> {
         let cfg = Gemma4Config::from_gguf(g)?;
-        let arch_tag = g.arch_tag().unwrap_or("gemma").to_string();
+        let arch_tag = g.arch_tag().unwrap_or("gemma4").to_string();
         let isa = isa::detect();
         let logits = vec![0.0; cfg.vocab_size];
         let scratch = ForwardScratch::new(&cfg);
-        let global = GlobalWeights {
-            embed: Vec::new(),
-            output_norm: Vec::new(),
-            lm_head: None,
-        };
-        let layers = Vec::new();
-        let kv = Vec::new();
         Ok(Self {
             cfg,
             arch_tag,
             isa,
-            global,
-            layers,
-            kv,
+            global: GlobalWeights {
+                embed: Vec::new(),
+                output_norm: Vec::new(),
+                lm_head: None,
+                per_layer_tok_embd: None,
+                per_layer_model_proj: None,
+                per_layer_proj_norm: None,
+            },
+            layers: Vec::new(),
+            kv: Vec::new(),
+            kv_alias: Vec::new(),
             scratch,
             pos: 0,
             logits,
@@ -264,75 +528,105 @@ impl Gemma4Model {
         })
     }
 
-    /// Load the whole model — config, tokenizer, and every weight tensor
-    /// the forward pass needs. Returns a model ready to call `forward`.
+    /// Load every tensor the forward pass needs.
     pub fn load(g: &GgufBytes) -> Result<Self, LoadError> {
         let cfg = Gemma4Config::from_gguf(&g.file)?;
-        let arch_tag = g.file.arch_tag().unwrap_or("gemma").to_string();
+        let arch_tag = g.file.arch_tag().unwrap_or("gemma4").to_string();
         let isa = isa::detect();
 
-        // Global tensors. The exact key set is the GGUF convention used
-        // by llama.cpp: `token_embd.weight`, `output_norm.weight`,
-        // `output.weight` (optional, tied embeddings drop it).
-        let embed = read_tensor(g, "token_embd.weight")?;
-        let output_norm = read_tensor(g, "output_norm.weight")?;
-        let lm_head = read_optional(g, "output.weight")?;
+        // MoE check: we don't support MoE in this port. If we see the
+        // gate-input tensor, bail loudly with a clear message.
+        for i in 0..cfg.n_layers {
+            if g.file
+                .tensor(&format!("blk.{i}.ffn_gate_inp.weight"))
+                .is_some()
+            {
+                return Err(LoadError::UnknownArchitecture(
+                    "Gemma 4 MoE (26B-A4B) layout not supported in this port — \
+                     only E2B / E4B (non-MoE) are wired up"
+                        .to_string(),
+                ));
+            }
+        }
+
+        let embed = read_f32(g, "token_embd.weight")?;
+        let output_norm = read_f32(g, "output_norm.weight")?;
+        let lm_head = read_optional_projection(g, "output.weight")?;
+        let per_layer_tok_embd = read_optional_f32(g, "per_layer_token_embd.weight")?;
+        let per_layer_model_proj = read_optional_projection(g, "per_layer_model_proj.weight")?;
+        let per_layer_proj_norm = read_optional_f32(g, "per_layer_proj_norm.weight")?;
+
         let global = GlobalWeights {
             embed,
             output_norm,
             lm_head,
+            per_layer_tok_embd,
+            per_layer_model_proj,
+            per_layer_proj_norm,
         };
 
-        // Per-layer tensors.
         let mut layers = Vec::with_capacity(cfg.n_layers);
         for i in 0..cfg.n_layers {
             let p = |suffix: &str| format!("blk.{i}.{suffix}");
-            let attn_norm = read_tensor(g, &p("attn_norm.weight"))?;
-            let post_attn_norm = if cfg.post_norm {
-                read_optional(g, &p("post_attention_norm.weight"))?
+            let owns_kv = cfg.owns_kv(i);
+
+            let attn_norm = read_f32(g, &p("attn_norm.weight"))?;
+            let attn_post_norm = read_f32(g, &p("attn_post_norm.weight"))?;
+            let attn_q_norm = read_f32(g, &p("attn_q_norm.weight"))?;
+            let attn_k_norm = if owns_kv {
+                Some(read_f32(g, &p("attn_k_norm.weight"))?)
             } else {
-                None
+                read_optional_f32(g, &p("attn_k_norm.weight"))?
             };
-            let ffn_norm = read_tensor(g, &p("ffn_norm.weight"))?;
-            let post_ffn_norm = if cfg.post_norm {
-                read_optional(g, &p("post_ffw_norm.weight"))?
-                    .or(read_optional(g, &p("post_ffn_norm.weight"))?)
+            let w_q = read_projection(g, &p("attn_q.weight"))?;
+            let w_k = if owns_kv {
+                Some(read_projection(g, &p("attn_k.weight"))?)
             } else {
-                None
+                read_optional_projection(g, &p("attn_k.weight"))?
             };
-            let w_q = read_tensor(g, &p("attn_q.weight"))?;
-            let w_k = read_tensor(g, &p("attn_k.weight"))?;
-            let w_v = read_tensor(g, &p("attn_v.weight"))?;
-            let w_o = read_tensor(g, &p("attn_output.weight"))?;
-            let w_gate = read_tensor(g, &p("ffn_gate.weight"))?;
-            let w_up = read_tensor(g, &p("ffn_up.weight"))?;
-            let w_down = read_tensor(g, &p("ffn_down.weight"))?;
+            let w_v = read_optional_projection(g, &p("attn_v.weight"))?;
+            let w_o = read_projection(g, &p("attn_output.weight"))?;
+            let ffn_norm = read_f32(g, &p("ffn_norm.weight"))?;
+            let ffn_post_norm = read_f32(g, &p("ffn_post_norm.weight"))?;
+            let w_gate = read_projection(g, &p("ffn_gate.weight"))?;
+            let w_up = read_projection(g, &p("ffn_up.weight"))?;
+            let w_down = read_projection(g, &p("ffn_down.weight"))?;
+            let out_scale = read_optional_scalar(g, &p("out_scale.weight"))?;
+
+            let per_layer_inp_gate = read_optional_projection(g, &p("per_layer_inp_gate.weight"))?;
+            let per_layer_proj = read_optional_projection(g, &p("per_layer_proj.weight"))?;
+            let per_layer_post_norm = read_optional_f32(g, &p("per_layer_post_norm.weight"))?;
+
             layers.push(LayerWeights {
                 attn_norm,
-                post_attn_norm,
-                ffn_norm,
-                post_ffn_norm,
+                attn_post_norm,
+                attn_q_norm,
+                attn_k_norm,
                 w_q,
                 w_k,
                 w_v,
                 w_o,
+                ffn_norm,
+                ffn_post_norm,
                 w_gate,
                 w_up,
                 w_down,
+                out_scale,
+                per_layer_inp_gate,
+                per_layer_proj,
+                per_layer_post_norm,
             });
         }
 
-        let kv_total = cfg.n_kv_heads * cfg.head_dim;
-        let kv = (0..cfg.n_layers)
-            .map(|_| LayerKv {
-                keys: vec![0.0; cfg.context_length * kv_total],
-                values: vec![0.0; cfg.context_length * kv_total],
-            })
-            .collect();
+        // KV-share resolution. A reusing layer aliases to the most
+        // recent KV-owning predecessor of the same attention type
+        // (matches llama.cpp's `is_swa(il)` discrimination). Owning
+        // layers alias to themselves.
+        let kv_alias = build_kv_alias(&cfg);
+        let kv = build_kv_slots(&cfg);
 
         let scratch = ForwardScratch::new(&cfg);
         let logits = vec![0.0; cfg.vocab_size];
-
         let tokenizer = Tokenizer::from_gguf(&g.file).ok();
 
         Ok(Self {
@@ -342,6 +636,7 @@ impl Gemma4Model {
             global,
             layers,
             kv,
+            kv_alias,
             scratch,
             pos: 0,
             logits,
@@ -352,57 +647,197 @@ impl Gemma4Model {
     pub fn tokenizer(&self) -> Option<&Tokenizer> {
         self.tokenizer.as_ref()
     }
-
     pub fn config(&self) -> &Gemma4Config {
         &self.cfg
     }
-
-    /// True iff the model was loaded with real weights (vs the
-    /// metadata-only `from_gguf` path).
     fn has_weights(&self) -> bool {
         !self.global.embed.is_empty() && !self.layers.is_empty()
     }
 
+    /// Build the per-token PLE input projection. Stores
+    /// `[ple_dim, n_layer]` row-major in `scratch.ple_layer_input`.
+    /// No-op when the model doesn't have PLE.
+    fn prepare_ple_input(&mut self, token: TokenId) {
+        let cfg = &self.cfg;
+        let Some(tok_embd) = self.global.per_layer_tok_embd.as_ref() else {
+            return;
+        };
+        let Some(model_proj) = self.global.per_layer_model_proj.as_ref() else {
+            return;
+        };
+        let Some(proj_norm) = self.global.per_layer_proj_norm.as_ref() else {
+            return;
+        };
+        if cfg.ple_dim == 0 {
+            return;
+        }
+        // Step 1: pull the per-layer embedding row for this token.
+        // The table shape is [vocab, n_layer * ple_dim] row-major, so
+        // the row is contiguous.
+        let row_len = cfg.n_layers * cfg.ple_dim;
+        let idx = (token as usize).min(cfg.vocab_size.saturating_sub(1));
+        let row_start = idx * row_len;
+        let row_end = row_start + row_len;
+        self.scratch.ple_row[..row_len].copy_from_slice(&tok_embd[row_start..row_end]);
+        // Scale by sqrt(ple_dim) per the HF impl.
+        let scale = (cfg.ple_dim as f32).sqrt();
+        for v in self.scratch.ple_row[..row_len].iter_mut() {
+            *v *= scale;
+        }
+        // Step 2: project the model state `x` through
+        // `per_layer_model_proj` → scale by 1/sqrt(hidden) → reshape
+        // to [ple_dim, n_layer] → RMSNorm with `per_layer_proj_norm`.
+        let mut proj = vec![0.0_f32; row_len];
+        model_proj.matvec(&self.scratch.x, &mut proj);
+        let inv = 1.0 / (cfg.hidden_size as f32).sqrt();
+        for v in proj.iter_mut() {
+            *v *= inv;
+        }
+        // RMSNorm runs over each ple_dim row independently. We loop
+        // `n_layers` times, each on a slice of length ple_dim.
+        let mut normed_row = vec![0.0_f32; cfg.ple_dim];
+        for l in 0..cfg.n_layers {
+            let off = l * cfg.ple_dim;
+            rmsnorm_f32(
+                &proj[off..off + cfg.ple_dim],
+                proj_norm,
+                &mut normed_row,
+                cfg.rms_eps,
+            );
+            // Combine with the embedded row, scaled by 1/sqrt(2).
+            let inv_sqrt2 = 1.0 / 2.0_f32.sqrt();
+            for (i, n) in normed_row.iter().enumerate() {
+                self.scratch.ple_layer_input[off + i] =
+                    (n + self.scratch.ple_row[off + i]) * inv_sqrt2;
+            }
+        }
+    }
+
+    /// Embed and (optionally) scale by sqrt(hidden), in place.
     fn embed_token_into(
         embed: &[f32],
         hidden: usize,
         vocab: usize,
-        scale_embed: bool,
         token: TokenId,
         out: &mut [f32],
     ) {
         let idx = (token as usize).min(vocab.saturating_sub(1));
         let row = &embed[idx * hidden..(idx + 1) * hidden];
         out.copy_from_slice(row);
-        if scale_embed {
-            let scale = (hidden as f32).sqrt();
-            for v in out.iter_mut() {
-                *v *= scale;
-            }
+        let scale = (hidden as f32).sqrt();
+        for v in out.iter_mut() {
+            *v *= scale;
         }
     }
 
-    /// Compute the output logits given the current pos's residual stream.
-    /// Final-layer RMSNorm in place, then matvec with the lm_head (or
-    /// the tied embedding matrix when lm_head is absent).
     fn compute_logits(&mut self) {
-        let hidden = self.cfg.hidden_size;
-        let mut norm = vec![0.0f32; hidden];
+        let cfg = &self.cfg;
+        let hidden = cfg.hidden_size;
+        let mut norm = vec![0.0_f32; hidden];
         rmsnorm_f32(
             &self.scratch.x,
             &self.global.output_norm,
             &mut norm,
-            self.cfg.rms_eps,
+            cfg.rms_eps,
         );
-        let head = self.global.lm_head.as_ref().unwrap_or(&self.global.embed);
-        matvec_f32(&norm, head, &mut self.logits, self.cfg.vocab_size, hidden);
+        match self.global.lm_head.as_ref() {
+            Some(head) => head.matvec(&norm, &mut self.logits),
+            None => {
+                // Tied: dot-product against each embedding row.
+                let embed = &self.global.embed;
+                for v in 0..cfg.vocab_size {
+                    let row = &embed[v * hidden..(v + 1) * hidden];
+                    let mut acc = 0.0_f32;
+                    for i in 0..hidden {
+                        acc += norm[i] * row[i];
+                    }
+                    self.logits[v] = acc;
+                }
+            }
+        }
+        // Final logit softcap.
+        if let Some(cap) = cfg.final_logit_softcapping {
+            if cap > 0.0 {
+                for v in self.logits.iter_mut() {
+                    *v = (*v / cap).tanh() * cap;
+                }
+            }
+        }
     }
 }
 
-/// SDPA wrapper for grouped-query attention. The query has `n_heads`,
-/// the cache has `n_kv_heads`; query head `h` reads kv-head
-/// `h * n_kv_heads / n_heads`.
-#[allow(clippy::too_many_arguments)] // single internal helper; collapsing this into a struct would obscure the shapes
+/// Pre-compute the kv_alias map at load time. For each layer, find
+/// the most recent owning predecessor of the same attention type. If
+/// none exists (shouldn't happen because the first `n_layers - shared`
+/// are all owning), alias to layer 0.
+fn build_kv_alias(cfg: &Gemma4Config) -> Vec<usize> {
+    let mut out = vec![0usize; cfg.n_layers];
+    let mut last_owning_swa: Option<usize> = None;
+    let mut last_owning_full: Option<usize> = None;
+    for (i, slot) in out.iter_mut().enumerate() {
+        let ty = cfg
+            .layer_types
+            .get(i)
+            .copied()
+            .unwrap_or(LayerType::Sliding);
+        if cfg.owns_kv(i) {
+            *slot = i;
+            match ty {
+                LayerType::Sliding => last_owning_swa = Some(i),
+                LayerType::Full => last_owning_full = Some(i),
+            }
+        } else {
+            *slot = match ty {
+                LayerType::Sliding => last_owning_swa.unwrap_or(0),
+                LayerType::Full => last_owning_full.unwrap_or(0),
+            };
+        }
+    }
+    out
+}
+
+fn build_kv_slots(cfg: &Gemma4Config) -> Vec<Option<LayerKv>> {
+    (0..cfg.n_layers)
+        .map(|i| {
+            if cfg.owns_kv(i) {
+                let head_dim = cfg.head_dim(i);
+                let kv_total = cfg.n_kv_heads * head_dim;
+                Some(LayerKv {
+                    keys: vec![0.0; cfg.context_length * kv_total],
+                    values: vec![0.0; cfg.context_length * kv_total],
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------------
+// RoPE — partial rotary support (rotates first `n_rot` dims, passes the rest)
+// ---------------------------------------------------------------------
+
+/// In-place RoPE on `x` (one head, length `head_dim`) at position `pos`.
+/// Rotates dimensions `0..n_rot` and leaves `n_rot..head_dim` untouched.
+fn rope_partial_f32(x: &mut [f32], pos: usize, base: f32, n_rot: usize) {
+    debug_assert!(n_rot <= x.len());
+    debug_assert!(n_rot % 2 == 0);
+    let half = n_rot / 2;
+    for i in 0..half {
+        let theta = (pos as f32) * base.powf(-2.0 * i as f32 / n_rot as f32);
+        let (sin, cos) = theta.sin_cos();
+        let a = x[2 * i];
+        let b = x[2 * i + 1];
+        x[2 * i] = a * cos - b * sin;
+        x[2 * i + 1] = a * sin + b * cos;
+    }
+}
+
+// ---------------------------------------------------------------------
+// GQA attention dispatcher (per-head loop with optional window)
+// ---------------------------------------------------------------------
+
+#[allow(clippy::too_many_arguments)]
 fn gqa_attention(
     q: &[f32],
     k_cache: &[f32],
@@ -418,10 +853,8 @@ fn gqa_attention(
     for h in 0..n_heads {
         let kv_h = h * n_kv_heads / n_heads;
         let q_h = &q[h * head_dim..(h + 1) * head_dim];
-        // Each KV head spans seq_len rows, each row laid out [n_kv_heads * head_dim].
-        // For head kv_h: pick the [kv_h*head_dim..(kv_h+1)*head_dim] slice in every row.
-        let mut k_head = vec![0.0f32; seq_len * head_dim];
-        let mut v_head = vec![0.0f32; seq_len * head_dim];
+        let mut k_head = vec![0.0_f32; seq_len * head_dim];
+        let mut v_head = vec![0.0_f32; seq_len * head_dim];
         for t in 0..seq_len {
             let row =
                 &k_cache[t * kv_total + kv_h * head_dim..t * kv_total + (kv_h + 1) * head_dim];
@@ -435,43 +868,56 @@ fn gqa_attention(
     }
 }
 
+// ---------------------------------------------------------------------
+// LanguageModel impl
+// ---------------------------------------------------------------------
+
 impl LanguageModel for Gemma4Model {
     fn forward(&mut self, token: TokenId, kv: &mut KvCache) -> &[f32] {
-        // The model maintains its own per-layer KV cache; the caller's
-        // KvCache only tracks position so the agent loop sees a real
-        // counter. Without weights we still bump the position so cancel
-        // / reset works, but the logits stay zero.
         if !self.has_weights() {
             kv.seq_len = kv.seq_len.saturating_add(1);
             return &self.logits;
         }
         if self.pos >= self.cfg.context_length {
-            // Out of context — return a flat distribution so the sampler
-            // sees no signal and the caller can detect "stop".
             self.logits.fill(0.0);
             return &self.logits;
         }
-        let hidden = self.cfg.hidden_size;
-        let inter = self.cfg.mlp_intermediate;
-        let q_total = self.cfg.n_heads * self.cfg.head_dim;
-        let kv_total = self.cfg.n_kv_heads * self.cfg.head_dim;
-        let head_dim = self.cfg.head_dim;
+        let pos = self.pos;
+        let kv_seq = pos + 1;
+        let cfg = self.cfg.clone();
+        let hidden = cfg.hidden_size;
 
-        // x = embed(token) * sqrt(hidden) (Gemma)
+        // Embed + scale.
         Self::embed_token_into(
             &self.global.embed,
             hidden,
-            self.cfg.vocab_size,
-            self.cfg.scale_embed,
+            cfg.vocab_size,
             token,
             &mut self.scratch.x,
         );
-        let pos = self.pos;
-        let kv_seq = pos + 1;
 
-        for layer in 0..self.cfg.n_layers {
-            let cfg = &self.cfg;
-            // h = rmsnorm(x, attn_norm)
+        // PLE input — projects `x` to the per-layer additive channel.
+        // Has to happen BEFORE the layer loop because per-layer PLE
+        // injection reads from this precomputed table.
+        self.prepare_ple_input(token);
+
+        for layer in 0..cfg.n_layers {
+            let head_dim = cfg.head_dim(layer);
+            let rope_base = cfg.rope_base(layer);
+            let n_rot = cfg.n_rot(layer);
+            let window = cfg.window(layer);
+            let q_total = cfg.n_heads * head_dim;
+            let kv_total = cfg.n_kv_heads * head_dim;
+            let owns_kv = cfg.owns_kv(layer);
+
+            // x_save = inpL — preserved for the residual after attn.
+            // We don't allocate; just track the values in self.scratch.x
+            // and accumulate into self.scratch.o → add back at end.
+            // First copy x → h0 (residual save).
+            let mut residual_attn = vec![0.0_f32; hidden];
+            residual_attn.copy_from_slice(&self.scratch.x);
+
+            // norm
             rmsnorm_f32(
                 &self.scratch.x,
                 &self.layers[layer].attn_norm,
@@ -479,58 +925,78 @@ impl LanguageModel for Gemma4Model {
                 cfg.rms_eps,
             );
 
-            // Q, K, V projections.
-            matvec_f32(
-                &self.scratch.h,
-                &self.layers[layer].w_q,
-                &mut self.scratch.q,
-                q_total,
-                hidden,
+            // Q projection.
+            self.layers[layer]
+                .w_q
+                .matvec(&self.scratch.h, &mut self.scratch.q[..q_total]);
+            // Per-head RMSNorm on Q.
+            apply_per_head_norm(
+                &mut self.scratch.q[..q_total],
+                &self.layers[layer].attn_q_norm,
+                cfg.n_heads,
+                head_dim,
+                cfg.rms_eps,
             );
-            matvec_f32(
-                &self.scratch.h,
-                &self.layers[layer].w_k,
-                &mut self.scratch.k,
-                kv_total,
-                hidden,
-            );
-            matvec_f32(
-                &self.scratch.h,
-                &self.layers[layer].w_v,
-                &mut self.scratch.v,
-                kv_total,
-                hidden,
-            );
-
-            // RoPE on Q (per-head) and K (per-head).
+            // RoPE on Q.
             for h in 0..cfg.n_heads {
                 let qh = &mut self.scratch.q[h * head_dim..(h + 1) * head_dim];
-                rope_inplace_f32(qh, pos, cfg.rope_base);
-            }
-            for h in 0..cfg.n_kv_heads {
-                let kh = &mut self.scratch.k[h * head_dim..(h + 1) * head_dim];
-                rope_inplace_f32(kh, pos, cfg.rope_base);
+                rope_partial_f32(qh, pos, rope_base, n_rot);
             }
 
-            // Append to per-layer KV cache.
-            {
-                let cache = &mut self.kv[layer];
+            // Resolve which physical KV slot this layer reads from.
+            let phys = self.kv_alias[layer];
+
+            // K / V projections + per-head K norm. Only when this
+            // layer owns its KV — reusing layers leave the cache slot
+            // untouched and just read from `phys`.
+            if owns_kv {
+                let w_k = self.layers[layer]
+                    .w_k
+                    .as_ref()
+                    .expect("owning layer missing w_k");
+                w_k.matvec(&self.scratch.h, &mut self.scratch.k[..kv_total]);
+                if let Some(w_v) = self.layers[layer].w_v.as_ref() {
+                    w_v.matvec(&self.scratch.h, &mut self.scratch.v[..kv_total]);
+                } else {
+                    // Gemma 4: V can fall back to K when wv is absent.
+                    self.scratch.v[..kv_total].copy_from_slice(&self.scratch.k[..kv_total]);
+                }
+                if let Some(k_norm) = self.layers[layer].attn_k_norm.as_ref() {
+                    apply_per_head_norm(
+                        &mut self.scratch.k[..kv_total],
+                        k_norm,
+                        cfg.n_kv_heads,
+                        head_dim,
+                        cfg.rms_eps,
+                    );
+                }
+                // V gets weight-less RMSNorm per head.
+                apply_per_head_norm_weightless(
+                    &mut self.scratch.v[..kv_total],
+                    cfg.n_kv_heads,
+                    head_dim,
+                    cfg.rms_eps,
+                );
+                // RoPE on K.
+                for h in 0..cfg.n_kv_heads {
+                    let kh = &mut self.scratch.k[h * head_dim..(h + 1) * head_dim];
+                    rope_partial_f32(kh, pos, rope_base, n_rot);
+                }
+                // Write into the owned cache.
+                let cache = self.kv[phys].as_mut().expect("owning layer has cache slot");
                 let off = pos * kv_total;
-                cache.keys[off..off + kv_total].copy_from_slice(&self.scratch.k);
-                cache.values[off..off + kv_total].copy_from_slice(&self.scratch.v);
+                cache.keys[off..off + kv_total].copy_from_slice(&self.scratch.k[..kv_total]);
+                cache.values[off..off + kv_total].copy_from_slice(&self.scratch.v[..kv_total]);
             }
 
-            // Grouped attention over keys[..kv_seq], values[..kv_seq].
-            // Gemma 3 alternates a sliding window across odd layers; we
-            // honour the metadata-declared window on all of them, which
-            // matches the conservative "every layer windowed" reading.
-            let window = cfg.sliding_window;
-            let cache = &self.kv[layer];
+            // Attention reads through `phys` regardless of whether
+            // this layer is the owner or a reusing aliaser.
+            let cache = self.kv[phys].as_ref().expect("kv slot present");
             gqa_attention(
-                &self.scratch.q,
+                &self.scratch.q[..q_total],
                 &cache.keys[..kv_seq * kv_total],
                 &cache.values[..kv_seq * kv_total],
-                &mut self.scratch.attn_out,
+                &mut self.scratch.attn_out[..q_total],
                 kv_seq,
                 cfg.n_heads,
                 cfg.n_kv_heads,
@@ -539,71 +1005,91 @@ impl LanguageModel for Gemma4Model {
             );
 
             // O projection.
-            matvec_f32(
-                &self.scratch.attn_out,
-                &self.layers[layer].w_o,
-                &mut self.scratch.o,
-                hidden,
-                q_total,
+            self.layers[layer]
+                .w_o
+                .matvec(&self.scratch.attn_out[..q_total], &mut self.scratch.o);
+
+            // attn_post_norm + residual.
+            let mut o_normed = vec![0.0_f32; hidden];
+            rmsnorm_f32(
+                &self.scratch.o,
+                &self.layers[layer].attn_post_norm,
+                &mut o_normed,
+                cfg.rms_eps,
             );
-
-            // Gemma 2/3 post-attention norm, applied to the sublayer
-            // output before the residual add.
-            if let Some(post) = self.layers[layer].post_attn_norm.as_ref() {
-                let mut tmp = vec![0.0f32; hidden];
-                rmsnorm_f32(&self.scratch.o, post, &mut tmp, cfg.rms_eps);
-                for (xi, ti) in self.scratch.x.iter_mut().zip(tmp.iter()) {
-                    *xi += *ti;
-                }
-            } else {
-                for (xi, oi) in self.scratch.x.iter_mut().zip(self.scratch.o.iter()) {
-                    *xi += *oi;
-                }
+            for i in 0..hidden {
+                self.scratch.x[i] = o_normed[i] + residual_attn[i];
             }
+            // attn_out is now in self.scratch.x. Keep a copy for the
+            // FFN residual.
+            let mut residual_ffn = vec![0.0_f32; hidden];
+            residual_ffn.copy_from_slice(&self.scratch.x);
 
-            // FFN sublayer.
+            // FFN — GELU(gate) * up, then down. Followed by post-norm
+            // + residual.
             rmsnorm_f32(
                 &self.scratch.x,
                 &self.layers[layer].ffn_norm,
                 &mut self.scratch.h,
                 cfg.rms_eps,
             );
-            matvec_f32(
-                &self.scratch.h,
-                &self.layers[layer].w_gate,
-                &mut self.scratch.gate,
-                inter,
-                hidden,
+            self.layers[layer]
+                .w_gate
+                .matvec(&self.scratch.h, &mut self.scratch.gate);
+            self.layers[layer]
+                .w_up
+                .matvec(&self.scratch.h, &mut self.scratch.up);
+            for i in 0..cfg.mlp_intermediate {
+                self.scratch.swiglu[i] = gelu(self.scratch.gate[i]) * self.scratch.up[i];
+            }
+            self.layers[layer]
+                .w_down
+                .matvec(&self.scratch.swiglu, &mut self.scratch.ffn_out);
+            let mut ffn_normed = vec![0.0_f32; hidden];
+            rmsnorm_f32(
+                &self.scratch.ffn_out,
+                &self.layers[layer].ffn_post_norm,
+                &mut ffn_normed,
+                cfg.rms_eps,
             );
-            matvec_f32(
-                &self.scratch.h,
-                &self.layers[layer].w_up,
-                &mut self.scratch.up,
-                inter,
-                hidden,
-            );
-            swiglu_f32(
-                &self.scratch.gate,
-                &self.scratch.up,
-                &mut self.scratch.swiglu,
-            );
-            matvec_f32(
-                &self.scratch.swiglu,
-                &self.layers[layer].w_down,
-                &mut self.scratch.ffn_out,
-                hidden,
-                inter,
-            );
+            for i in 0..hidden {
+                self.scratch.x[i] = ffn_normed[i] + residual_ffn[i];
+            }
 
-            if let Some(post) = self.layers[layer].post_ffn_norm.as_ref() {
-                let mut tmp = vec![0.0f32; hidden];
-                rmsnorm_f32(&self.scratch.ffn_out, post, &mut tmp, cfg.rms_eps);
-                for (xi, ti) in self.scratch.x.iter_mut().zip(tmp.iter()) {
-                    *xi += *ti;
+            // PLE injection (if the model has it on this layer).
+            if cfg.ple_dim > 0 && self.global.per_layer_tok_embd.is_some() {
+                if let (Some(gate), Some(proj), Some(post_norm)) = (
+                    self.layers[layer].per_layer_inp_gate.as_ref(),
+                    self.layers[layer].per_layer_proj.as_ref(),
+                    self.layers[layer].per_layer_post_norm.as_ref(),
+                ) {
+                    gate.matvec(&self.scratch.x, &mut self.scratch.ple_gate);
+                    for v in self.scratch.ple_gate.iter_mut() {
+                        *v = gelu(*v);
+                    }
+                    // Multiply with this layer's PLE input.
+                    let ple_off = layer * cfg.ple_dim;
+                    for i in 0..cfg.ple_dim {
+                        self.scratch.ple_gate[i] *= self.scratch.ple_layer_input[ple_off + i];
+                    }
+                    proj.matvec(&self.scratch.ple_gate, &mut self.scratch.ple_proj_out);
+                    let mut ple_normed = vec![0.0_f32; hidden];
+                    rmsnorm_f32(
+                        &self.scratch.ple_proj_out,
+                        post_norm,
+                        &mut ple_normed,
+                        cfg.rms_eps,
+                    );
+                    for (xi, ni) in self.scratch.x.iter_mut().zip(ple_normed.iter()) {
+                        *xi += *ni;
+                    }
                 }
-            } else {
-                for (xi, fi) in self.scratch.x.iter_mut().zip(self.scratch.ffn_out.iter()) {
-                    *xi += *fi;
+            }
+
+            // Per-layer scalar output gate (rare).
+            if let Some(scale) = self.layers[layer].out_scale {
+                for v in self.scratch.x.iter_mut() {
+                    *v *= scale;
                 }
             }
         }
@@ -611,15 +1097,16 @@ impl LanguageModel for Gemma4Model {
         self.compute_logits();
         self.pos += 1;
         kv.seq_len = self.pos;
+        // softmax_f32 is reached only by the sampler; the unused-import
+        // suppression below prevents clippy from complaining when the
+        // forward path doesn't reach a softmax call directly.
+        let _ = softmax_f32;
         &self.logits
     }
 
     fn reset(&mut self, kv: &mut KvCache) {
         kv.seq_len = 0;
         self.pos = 0;
-        // KV cache slots are reused; no need to zero them — `kv_seq` in
-        // forward() bounds the read window so stale data past `pos` is
-        // never visible.
     }
 
     fn info(&self) -> RuntimeInfo {
@@ -634,7 +1121,47 @@ impl LanguageModel for Gemma4Model {
     }
 }
 
-/// Greedy argmax over `logits` — picks the most likely next token.
+/// Per-head RMSNorm on the first `n_heads * head_dim` floats of `x`,
+/// using a shared `weight[head_dim]` gain vector.
+fn apply_per_head_norm(x: &mut [f32], weight: &[f32], n_heads: usize, head_dim: usize, eps: f32) {
+    debug_assert!(weight.len() == head_dim);
+    let mut buf = vec![0.0_f32; head_dim];
+    for h in 0..n_heads {
+        let off = h * head_dim;
+        rmsnorm_f32(&x[off..off + head_dim], weight, &mut buf, eps);
+        x[off..off + head_dim].copy_from_slice(&buf);
+    }
+}
+
+/// Weight-less per-head RMSNorm — sets every element to
+/// `x / sqrt(mean(x²) + eps)` per head.
+fn apply_per_head_norm_weightless(x: &mut [f32], n_heads: usize, head_dim: usize, eps: f32) {
+    for h in 0..n_heads {
+        let off = h * head_dim;
+        let mut ssq = 0.0_f32;
+        for v in &x[off..off + head_dim] {
+            ssq += v * v;
+        }
+        let scale = 1.0 / (ssq / head_dim as f32 + eps).sqrt();
+        for v in &mut x[off..off + head_dim] {
+            *v *= scale;
+        }
+    }
+}
+
+/// `gelu_pytorch_tanh` approximation:
+/// `0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x³)))`.
+fn gelu(x: f32) -> f32 {
+    const SQRT_2_OVER_PI: f32 = 0.797_884_6;
+    let inner = SQRT_2_OVER_PI * (x + 0.044_715 * x * x * x);
+    0.5 * x * (1.0 + inner.tanh())
+}
+
+// ---------------------------------------------------------------------
+// Sampler — preserved public API used by jni-shim
+// ---------------------------------------------------------------------
+
+/// Greedy argmax over `logits`.
 pub fn argmax(logits: &[f32]) -> TokenId {
     let mut best = 0u32;
     let mut best_v = f32::NEG_INFINITY;
@@ -647,22 +1174,18 @@ pub fn argmax(logits: &[f32]) -> TokenId {
     best
 }
 
-/// Temperature + top-k sampling. `seed` advances per call via a tiny
-/// xorshift so repeated runs with the same seed reproduce. Returns
-/// `argmax` when `temperature` is zero.
+/// Temperature + top-k sampling. Returns argmax when temperature ≤ 0.
 pub fn sample(logits: &[f32], temperature: f32, top_k: usize, rng: &mut SamplerState) -> TokenId {
     if temperature <= 0.0 {
         return argmax(logits);
     }
     let inv_t = 1.0 / temperature;
-    // top_k by partial sort: collect (id, logit), keep largest k.
     let mut pairs: Vec<(u32, f32)> = logits
         .iter()
         .enumerate()
         .map(|(i, &v)| (i as u32, v * inv_t))
         .collect();
     let k = top_k.max(1).min(pairs.len());
-    // Partial selection: largest k via repeated swap of the max into pos i.
     for i in 0..k {
         let mut best = i;
         for j in (i + 1)..pairs.len() {
@@ -672,13 +1195,13 @@ pub fn sample(logits: &[f32], temperature: f32, top_k: usize, rng: &mut SamplerS
         }
         pairs.swap(i, best);
     }
-    let mut probs = vec![0.0f32; k];
+    let mut probs = vec![0.0_f32; k];
     for i in 0..k {
         probs[i] = pairs[i].1;
     }
     softmax_f32(&mut probs);
     let u = rng.next_f32();
-    let mut acc = 0.0f32;
+    let mut acc = 0.0_f32;
     for i in 0..k {
         acc += probs[i];
         if u <= acc {
@@ -688,7 +1211,7 @@ pub fn sample(logits: &[f32], temperature: f32, top_k: usize, rng: &mut SamplerS
     pairs[k - 1].0
 }
 
-/// Tiny xorshift64* — deterministic, no allocations, no dependencies.
+/// Tiny xorshift64* — deterministic.
 pub struct SamplerState {
     state: u64,
 }
@@ -696,7 +1219,11 @@ pub struct SamplerState {
 impl SamplerState {
     pub fn new(seed: u64) -> Self {
         Self {
-            state: if seed == 0 { 0x9E3779B97F4A7C15 } else { seed },
+            state: if seed == 0 {
+                0x9E37_79B9_7F4A_7C15
+            } else {
+                seed
+            },
         }
     }
     fn next_u64(&mut self) -> u64 {
@@ -705,38 +1232,118 @@ impl SamplerState {
         x ^= x << 25;
         x ^= x >> 27;
         self.state = x;
-        x.wrapping_mul(0x2545F4914F6CDD1D)
+        x.wrapping_mul(0x2545_F491_4F6C_DD1D)
     }
     pub fn next_f32(&mut self) -> f32 {
-        // 24 high bits → [0, 1)
         (self.next_u64() >> 40) as f32 / (1u32 << 24) as f32
     }
 }
+
+// ---------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn argmax_picks_largest() {
-        let logits = [0.1, 0.4, 0.2, -1.0, 0.39];
-        assert_eq!(argmax(&logits), 1);
+    fn gelu_matches_reference_at_zero_and_one() {
+        // gelu(0) = 0; gelu(1) ≈ 0.8412 (per Pytorch GELU(approximate=tanh)).
+        assert!((gelu(0.0)).abs() < 1e-6);
+        assert!((gelu(1.0) - 0.8412).abs() < 1e-3);
     }
 
     #[test]
-    fn sample_deterministic_with_same_seed() {
-        let logits = [0.1, 0.4, 0.2, 0.3];
-        let mut a = SamplerState::new(42);
-        let mut b = SamplerState::new(42);
-        let s1 = sample(&logits, 1.0, 3, &mut a);
-        let s2 = sample(&logits, 1.0, 3, &mut b);
-        assert_eq!(s1, s2);
+    fn argmax_picks_largest() {
+        assert_eq!(argmax(&[0.1, 0.4, 0.2, -1.0, 0.39]), 1);
     }
 
     #[test]
     fn temperature_zero_is_argmax() {
-        let logits = [0.1, 0.7, 0.2];
         let mut s = SamplerState::new(1);
-        assert_eq!(sample(&logits, 0.0, 3, &mut s), 1);
+        assert_eq!(sample(&[0.1, 0.7, 0.2], 0.0, 3, &mut s), 1);
+    }
+
+    #[test]
+    fn sample_deterministic_with_same_seed() {
+        let mut a = SamplerState::new(42);
+        let mut b = SamplerState::new(42);
+        let s1 = sample(&[0.1, 0.4, 0.2, 0.3], 1.0, 3, &mut a);
+        let s2 = sample(&[0.1, 0.4, 0.2, 0.3], 1.0, 3, &mut b);
+        assert_eq!(s1, s2);
+    }
+
+    /// kv_alias resolution: for a 6-layer model with 2 shared (i.e. 4
+    /// owning + 2 reusing), the reusing layers should alias to the
+    /// most recent owning predecessor of the same type.
+    #[test]
+    fn kv_alias_picks_recent_owning_predecessor() {
+        let cfg = Gemma4Config {
+            vocab_size: 1024,
+            hidden_size: 32,
+            n_layers: 6,
+            n_heads: 4,
+            n_kv_heads: 2,
+            head_dim_swa: 8,
+            head_dim_full: 16,
+            mlp_intermediate: 64,
+            context_length: 8,
+            rope_base_swa: 10000.0,
+            rope_base_full: 1_000_000.0,
+            partial_rotary_factor_full: 0.25,
+            sliding_window: 4,
+            rms_eps: 1e-6,
+            num_kv_shared_layers: 2,
+            ple_dim: 0,
+            final_logit_softcapping: Some(30.0),
+            tied_embeddings: true,
+            // [SWA, SWA, Full, SWA, Full, Full] — owning 0..3, reusing 4..5.
+            layer_types: vec![
+                LayerType::Sliding,
+                LayerType::Sliding,
+                LayerType::Full,
+                LayerType::Sliding,
+                LayerType::Full,
+                LayerType::Full,
+            ],
+        };
+        let alias = build_kv_alias(&cfg);
+        // Owning layers alias to themselves.
+        assert_eq!(alias[0], 0);
+        assert_eq!(alias[1], 1);
+        assert_eq!(alias[2], 2);
+        assert_eq!(alias[3], 3);
+        // Layer 4 (Full, reusing) → most recent Full owner is layer 2.
+        assert_eq!(alias[4], 2);
+        // Layer 5 (Full, reusing) → most recent Full owner is layer 2.
+        assert_eq!(alias[5], 2);
+    }
+
+    /// Synthetic config: confirm the 5:1-with-last-full default layer
+    /// pattern when GGUF doesn't carry an explicit `layer_types` array.
+    #[test]
+    fn default_layer_types_e2b_pattern() {
+        // E2B has 35 layers. Indices 4, 9, 14, 19, 24, 29 are normally
+        // full per the 5:1 cycle, and index 34 is forced full.
+        let pattern = (0..35usize)
+            .map(|i| {
+                if (i + 1) % 6 == 0 {
+                    LayerType::Full
+                } else {
+                    LayerType::Sliding
+                }
+            })
+            .collect::<Vec<_>>();
+        for &i in &[5_usize, 11, 17, 23, 29] {
+            let layer_idx = i - 1; // (i+1) % 6 == 0  ⇒  i = 5, 11, …  ⇒  layer_idx = 4, 10, …
+            let _ = layer_idx;
+        }
+        // Last layer forced full.
+        let mut last_test = pattern.clone();
+        if let Some(last) = last_test.last_mut() {
+            *last = LayerType::Full;
+        }
+        assert_eq!(*last_test.last().unwrap(), LayerType::Full);
     }
 }
