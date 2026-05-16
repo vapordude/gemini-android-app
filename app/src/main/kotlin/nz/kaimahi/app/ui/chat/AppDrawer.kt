@@ -5,7 +5,6 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,7 +12,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -46,12 +44,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import nz.kaimahi.app.R
 import nz.kaimahi.app.ui.termux.openTermux
 import nz.kaimahi.app.ui.termux.startGeminiCliLoginInTermux
+import nz.kaimahi.ui.KaimahiBrand
+import nz.kaimahi.ui.KaimahiLogo
+import nz.kaimahi.ui.KaimahiLogoStyle
 
 @Composable
 fun AppDrawer(
@@ -81,16 +80,13 @@ fun AppDrawer(
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Image(
-                    painter = painterResource(id = R.mipmap.ic_launcher_foreground),
-                    contentDescription = null,
-                    modifier = Modifier.size(40.dp)
-                )
+                KaimahiLogo(size = 40.dp, style = KaimahiLogoStyle.Brand)
                 Spacer(Modifier.width(12.dp))
-                Image(
-                    painter = painterResource(id = R.drawable.logo_gemini),
-                    contentDescription = "Gemini",
-                    modifier = Modifier.height(24.dp)
+                Text(
+                    KaimahiBrand.NAME,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontFamily = FontFamily.Serif
                 )
             }
             Spacer(Modifier.height(12.dp))

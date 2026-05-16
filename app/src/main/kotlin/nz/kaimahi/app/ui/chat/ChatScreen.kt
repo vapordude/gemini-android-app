@@ -96,12 +96,16 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import nz.kaimahi.app.R
+import nz.kaimahi.app.ui.local.InferenceMode
 import nz.kaimahi.app.ui.settings.SettingsSheet
 import nz.kaimahi.app.ui.settings.TermuxSetupDialog
 import nz.kaimahi.app.ui.settings.ThemeMode
 import nz.kaimahi.app.ui.termux.startGeminiCliLoginInTermux
 import nz.kaimahi.domain.GeminiMessage
 import nz.kaimahi.domain.MessageRole
+import nz.kaimahi.ui.KaimahiBrand
+import nz.kaimahi.ui.KaimahiLogo
+import nz.kaimahi.ui.KaimahiLogoStyle
 import nz.kaimahi.ui.LocalKaimahiColors
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -141,6 +145,9 @@ fun ChatScreen(
     val pendingCall by viewModel.pendingCall.collectAsState()
     val model by viewModel.model.collectAsState()
     val availableModels by viewModel.availableModels.collectAsState()
+    val localModels by viewModel.localModels.collectAsState()
+    val selectedLocalModelPath by viewModel.selectedLocalModelPath.collectAsState()
+    val inferenceMode by viewModel.inferenceMode.collectAsState()
     val workspaceLabel by viewModel.workspaceLabel.collectAsState()
     val workspaceUri by viewModel.workspaceUri.collectAsState()
     val thinking by viewModel.thinking.collectAsState()
@@ -161,6 +168,7 @@ fun ChatScreen(
 
     var modelMenuOpen by remember { mutableStateOf(false) }
     var folderMenuOpen by remember { mutableStateOf(false) }
+    var settingsInitialAccordion by remember { mutableStateOf<String?>(null) }
 
     val listState = rememberLazyListState()
     val isNearBottom by remember(listState) {
@@ -204,16 +212,20 @@ fun ChatScreen(
                 CenterAlignedTopAppBar(
                     title = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Image(
-                                painter = painterResource(id = R.drawable.logo_gemini),
-                                contentDescription = "Gemini",
-                                modifier = Modifier.height(28.dp)
-                            )
+                            KaimahiLogo(size = 28.dp, style = KaimahiLogoStyle.Solid)
                             Spacer(Modifier.width(8.dp))
                             Column {
                                 Box {
+                                    val displayedModel = when (inferenceMode) {
+                                        InferenceMode.LOCAL_AGENT ->
+                                            selectedLocalModelPath
+                                                ?.substringAfterLast('/')
+                                                ?.takeIf { it.isNotBlank() }
+                                                ?: KaimahiBrand.ON_DEVICE_MODELS.first()
+                                        InferenceMode.CLOUD_GEMINI -> model
+                                    }
                                     Text(
-                                        model,
+                                        displayedModel,
                                         style = MaterialTheme.typography.labelMedium,
                                         modifier = Modifier
                                             .clickable { modelMenuOpen = true }
@@ -223,12 +235,79 @@ fun ChatScreen(
                                         expanded = modelMenuOpen,
                                         onDismissRequest = { modelMenuOpen = false }
                                     ) {
+                                        ModelMenuCaption("On device")
+                                        // Canonical on-device runtime models — always
+                                        // shown so users know what the Rust runtime
+                                        // can load even before they import a GGUF.
+                                        val matchedPaths = mutableSetOf<String>()
+                                        KaimahiBrand.ON_DEVICE_MODELS.forEach { canonical ->
+                                            val match = matchCanonicalLocalModel(canonical, localModels)
+                                            if (match != null) matchedPaths += match.path
+                                            val isCurrent = inferenceMode == InferenceMode.LOCAL_AGENT &&
+                                                match != null && match.path == selectedLocalModelPath
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Column {
+                                                        Text(
+                                                            canonical,
+                                                            style = if (isCurrent)
+                                                                MaterialTheme.typography.bodyMedium.copy(
+                                                                    color = MaterialTheme.colorScheme.primary
+                                                                )
+                                                            else MaterialTheme.typography.bodyMedium
+                                                        )
+                                                        Text(
+                                                            if (match != null) "imported" else "needs import",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                },
+                                                onClick = {
+                                                    modelMenuOpen = false
+                                                    if (match != null) {
+                                                        viewModel.selectLocalModel(match.path)
+                                                        viewModel.setInferenceMode(InferenceMode.LOCAL_AGENT)
+                                                    } else {
+                                                        settingsInitialAccordion = "Local model"
+                                                        showSettings = true
+                                                    }
+                                                }
+                                            )
+                                        }
+                                        // Extra imported GGUFs that didn't match a canonical name.
+                                        val extras = localModels.filter { it.path !in matchedPaths }
+                                        extras.forEach { file ->
+                                            val isCurrent = inferenceMode == InferenceMode.LOCAL_AGENT &&
+                                                file.path == selectedLocalModelPath
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        file.name,
+                                                        style = if (isCurrent)
+                                                            MaterialTheme.typography.bodyMedium.copy(
+                                                                color = MaterialTheme.colorScheme.primary
+                                                            )
+                                                        else MaterialTheme.typography.bodyMedium
+                                                    )
+                                                },
+                                                onClick = {
+                                                    viewModel.selectLocalModel(file.path)
+                                                    viewModel.setInferenceMode(InferenceMode.LOCAL_AGENT)
+                                                    modelMenuOpen = false
+                                                }
+                                            )
+                                        }
+                                        androidx.compose.material3.HorizontalDivider()
+                                        ModelMenuCaption("Cloud")
                                         availableModels.forEach { name ->
+                                            val isCurrent = inferenceMode == InferenceMode.CLOUD_GEMINI &&
+                                                name == model
                                             DropdownMenuItem(
                                                 text = {
                                                     Text(
                                                         name,
-                                                        style = if (name == model)
+                                                        style = if (isCurrent)
                                                             MaterialTheme.typography.bodyMedium.copy(
                                                                 color = MaterialTheme.colorScheme.primary
                                                             )
@@ -237,13 +316,12 @@ fun ChatScreen(
                                                 },
                                                 onClick = {
                                                     viewModel.setModel(name)
+                                                    viewModel.setInferenceMode(InferenceMode.CLOUD_GEMINI)
                                                     modelMenuOpen = false
                                                 }
                                             )
                                         }
-                                        if (availableModels.isNotEmpty()) {
-                                            androidx.compose.material3.HorizontalDivider()
-                                        }
+                                        androidx.compose.material3.HorizontalDivider()
                                         DropdownMenuItem(
                                             text = { Text("More models…") },
                                             onClick = {
@@ -407,9 +485,13 @@ fun ChatScreen(
                 if (showSettings) {
                     SettingsSheet(
                         viewModel = viewModel,
-                        onDismiss = { showSettings = false },
+                        onDismiss = {
+                            showSettings = false
+                            settingsInitialAccordion = null
+                        },
                         themeMode = themeMode,
-                        onThemeChange = onThemeChange
+                        onThemeChange = onThemeChange,
+                        initialAccordion = settingsInitialAccordion
                     )
                 }
 
@@ -514,7 +596,7 @@ private fun EmptyState(onSuggestion: (String) -> Unit) {
             )
             Spacer(Modifier.size(8.dp))
             Text(
-                "Gemini can read, write, search or run shell commands. " +
+                "Kaimahi can read, write, search or run shell commands. " +
                     "Pick a starter or type your own message.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -954,7 +1036,7 @@ private fun ToolApprovalCard(
             )
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    "Gemini wants to run: $name",
+                    "Kaimahi wants to run: $name",
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -1062,7 +1144,7 @@ fun BottomChatBar(
                             enabled = enabled,
                             placeholder = {
                                 Text(
-                                    "Message Gemini…",
+                                    "Message Kaimahi…",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             },
@@ -1236,6 +1318,46 @@ private fun openWorkspaceFolder(context: Context, workspaceUri: String?) {
                 Toast.LENGTH_SHORT
             ).show()
         }
+    }
+}
+
+/**
+ * Section caption row inside the chat top-bar model dropdown. Non-clickable,
+ * styled as a small uppercase label so the menu reads as two clearly-labelled
+ * groups (`On device` / `Cloud`) instead of one undifferentiated list.
+ */
+@Composable
+private fun ModelMenuCaption(text: String) {
+    Text(
+        text.uppercase(),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+    )
+}
+
+/**
+ * Map a canonical on-device model name (e.g. "Gemma 4 E2B") to an imported
+ * GGUF in [pool]. Requires the filename to look like a Gemma 4 file (the
+ * runtime only loads Gemma 4 — Gemma 2/3 GGUFs are rejected) and to carry
+ * the variant tag. So `gemma-4-e2b-it-Q4_K_M.gguf` matches "Gemma 4 E2B",
+ * while `gemma-2-2b.gguf` does not — that one falls through to the
+ * generic "extras" list. Returns `null` when nothing in the pool matches.
+ */
+private fun matchCanonicalLocalModel(
+    canonical: String,
+    pool: List<nz.kaimahi.bridge.LocalModelFile>
+): nz.kaimahi.bridge.LocalModelFile? {
+    val lower = canonical.lowercase()
+    val variant = when {
+        "e2b" in lower -> "e2b"
+        "e4b" in lower -> "e4b"
+        else -> return null
+    }
+    return pool.firstOrNull { file ->
+        val n = file.name.lowercase()
+        val looksLikeGemma4 = "gemma-4" in n || "gemma4" in n || "gemma_4" in n
+        looksLikeGemma4 && variant in n
     }
 }
 

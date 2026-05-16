@@ -7,6 +7,50 @@ ratchets independently and is currently `0.2.0`.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-05-16
+
+The on-device Kaimahi cut. The libkaimahi_native.so that the runtime,
+agent, and emdash facades all load is finally produced by CI and shipped
+in the APK — previous tags packaged the Kotlin facades only and silently
+fell back to stubs at runtime. Adds the Gemma 4 (E2B / E4B) forward pass,
+the NEON Q4_K matvec kernel, MCP client, dynamic agent-authored screens,
+and finishes the Cathedral rebrand across login / drawer / chat top app
+bar / composer. The chat model picker is now local-first: Gemma 4 E2B and
+E4B render at the top of the menu (tagged `imported` / `needs import`),
+followed by any extra GGUFs the user has imported, then the cloud
+gemini-2.5-\* list below a divider.
+
+### Added — Build + release pipeline
+
+- **Android workflow now cross-compiles `libkaimahi_native.so`** before
+  assembling the APK. Installs the Rust toolchain, `aarch64-linux-android`
+  + `x86_64-linux-android` targets, `cargo-ndk`, and NDK r27c, then runs
+  `./gradlew :inference-bridge:buildNative` so the resulting `.so` lands
+  in `inference-bridge/src/main/jniLibs/<abi>/` and gets merged into the
+  app APK. Mirrored into `release.yml` so tagged releases ship the lib
+  too.
+- **`KaimahiBrand.ON_DEVICE_MODELS`** — single source of truth for the
+  canonical on-device runtime models (`Gemma 4 E2B`, `Gemma 4 E4B`).
+  Picker, future onboarding, and About all reference this list so they
+  stay in lock-step with what the Rust `model-runtime` actually loads.
+
+### Changed — Cathedral rebrand polish
+
+- Chat top app bar, drawer header, and login hero now render the
+  `KaimahiLogo` koru instead of `R.drawable.logo_gemini`.
+- Composer placeholder: `"Message Gemini…"` → `"Message Kaimahi…"`.
+- Tool-approval card: `"Gemini wants to run: …"` → `"Kaimahi wants to
+  run: …"`.
+- Empty-state copy: `"Gemini can read, write, search…"` → `"Kaimahi can
+  read, write, search…"`.
+- Orphaned `res/drawable-*/logo_gemini.png` assets (5 densities)
+  removed.
+- Top-bar dropdown rebuilt with two captioned sections (`On device` /
+  `Cloud`), local first. Tapping a canonical Gemma 4 row whose GGUF
+  isn't imported yet opens Settings pre-expanded at the `Local model
+  (GGUF)` accordion (new `initialAccordion` parameter on
+  `SettingsSheet`).
+
 ### Added — Gemma 4 (E2B / E4B) on-device
 
 - **Real Gemma 4 forward pass** ported line-by-line from
@@ -74,8 +118,6 @@ ratchets independently and is currently `0.2.0`.
   E2B/E4B.
 - **SIMD intrinsics not wired** — scalar matvec only. Cortex-A76
   estimate: 0.05–0.3 tok/s for E2B Q4_K_M.
-
-## [0.2.0] — 2026-05-16
 
 ## [0.2.0] — 2026-05-16
 
@@ -318,5 +360,6 @@ type system and a full visual identity.
 Before this release, Kaimahi was an in-flight fork. See
 [`MIHI.md`](MIHI.md) for full attribution.
 
-[Unreleased]: https://github.com/vapordude/gemini-android-app/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/vapordude/gemini-android-app/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/vapordude/gemini-android-app/releases/tag/v0.3.0
 [0.1.0]: https://github.com/vapordude/gemini-android-app/releases/tag/v0.1.0

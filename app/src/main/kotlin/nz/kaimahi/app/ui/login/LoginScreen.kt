@@ -2,7 +2,6 @@ package nz.kaimahi.app.ui.login
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -13,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -38,12 +36,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import nz.kaimahi.app.R
 import nz.kaimahi.app.ui.termux.startGeminiCliLoginInTermux
 import nz.kaimahi.bridge.termux.TermuxBridge
+import nz.kaimahi.ui.KaimahiLogo
+import nz.kaimahi.ui.KaimahiLogoStyle
 import nz.kaimahi.ui.LocalKaimahiColors
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -113,17 +111,7 @@ fun LoginScreen(
             verticalArrangement = Arrangement.Top
         ) {
             Spacer(Modifier.height(28.dp))
-            Image(
-                painter = painterResource(id = R.mipmap.ic_launcher_foreground),
-                contentDescription = null,
-                modifier = Modifier.size(96.dp)
-            )
-            Spacer(Modifier.height(8.dp))
-            Image(
-                painter = painterResource(id = R.drawable.logo_gemini),
-                contentDescription = "Gemini",
-                modifier = Modifier.height(48.dp)
-            )
+            KaimahiLogo(size = 96.dp, style = KaimahiLogoStyle.Brand)
             Spacer(Modifier.height(8.dp))
             Text(
                 "Sign in with Google or reuse credentials from gemini-cli. No API key needed.",
