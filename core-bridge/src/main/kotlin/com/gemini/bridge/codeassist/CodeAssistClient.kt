@@ -173,7 +173,7 @@ class CodeAssistClient(
         }
     }
 
-    private suspend fun execWithRetry(call: (access: String) -> HttpResult): String {
+    private suspend fun execWithRetry(call: suspend (access: String) -> HttpResult): String {
         var t = tokens()
         var r = call(t.accessToken)
         if (r.code == 401) {

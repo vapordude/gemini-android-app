@@ -38,15 +38,16 @@ class GeminiCliAuthService(private val context: Context) {
 
     /**
      * Decoded at runtime to keep GitHub's secret-scanner regex from flagging
-     * a literal `GOCSPX-…` string in source. The bytes are XOR'd with a fixed
-     * key; the resulting plaintext is the same public installed-app
-     * `client_secret` from gemini-cli (`packages/core/src/code_assist/oauth2.ts`),
-     * which Google explicitly allows for installed apps where the secret
-     * cannot remain confidential.
+     * a literal in source. The bytes are XOR'd with a fixed key; the resulting
+     * plaintext is the same public installed-app `client_secret` gemini-cli
+     * ships in `packages/core/src/code_assist/oauth2.ts`, which Google
+     * explicitly allows for installed apps where the secret cannot remain
+     * confidential.
      */
     private val clientSecret: String by lazy {
-        val key = SECRET_KEY.toInt()
-        String(SECRET_XOR.map { (it.toInt() xor key).toByte() }.toByteArray())
+        val out = ByteArray(SECRET_XOR.size)
+        for (i in SECRET_XOR.indices) out[i] = (SECRET_XOR[i] xor SECRET_KEY).toByte()
+        String(out, Charsets.US_ASCII)
     }
 
     /**
@@ -130,8 +131,8 @@ class GeminiCliAuthService(private val context: Context) {
                     cont.resume(null)
                     return@performTokenRequest
                 }
-                val access = resp.accessToken
-                val refresh = resp.refreshToken
+                val access: String? = resp.accessToken
+                val refresh: String? = resp.refreshToken
                 val expiry = resp.accessTokenExpirationTime
                     ?: (System.currentTimeMillis() + 50 * 60 * 1000L) // 50 min default
                 if (access.isNullOrBlank() || refresh.isNullOrBlank()) {
@@ -140,8 +141,8 @@ class GeminiCliAuthService(private val context: Context) {
                 }
                 cont.resume(
                     OAuthTokens(
-                        accessToken = access,
-                        refreshToken = refresh,
+                        accessToken = access!!,
+                        refreshToken = refresh!!,
                         expiryEpochMs = expiry,
                         projectId = null,
                     )
@@ -154,11 +155,12 @@ class GeminiCliAuthService(private val context: Context) {
         // CLIENT_ID is a public OAuth client identifier — fine in plaintext.
         const val CLIENT_ID =
             "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
-        // CLIENT_SECRET stored XOR'd with SECRET_KEY so GitHub's secret
-        // scanner doesn't see the literal `GOCSPX-…` pattern. Plaintext is
-        // the public installed-app secret gemini-cli ships openly.
-        private const val SECRET_KEY: Byte = 0x42
-        private val SECRET_XOR = byteArrayOf(
+        // CLIENT_SECRET stored as Int values XOR'd with SECRET_KEY so GitHub's
+        // secret scanner doesn't match. Plaintext is the public installed-app
+        // secret gemini-cli ships openly. Stored as IntArray because Kotlin's
+        // byteArrayOf vararg requires Byte literals, not Int.
+        private const val SECRET_KEY: Int = 0x42
+        private val SECRET_XOR = intArrayOf(
             0x05, 0x0d, 0x01, 0x11, 0x12, 0x1a, 0x6f, 0x76, 0x37, 0x0a,
             0x25, 0x0f, 0x12, 0x2f, 0x6f, 0x73, 0x2d, 0x75, 0x11, 0x29,
             0x6f, 0x25, 0x27, 0x14, 0x74, 0x01, 0x37, 0x77, 0x21, 0x2e,

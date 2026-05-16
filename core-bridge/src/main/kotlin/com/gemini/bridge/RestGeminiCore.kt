@@ -81,6 +81,7 @@ class RestGeminiCore(
     val termux: TermuxBridge = TermuxBridge(appContext),
     private val prefs: SecurePrefs = SecurePrefs(appContext),
     private val chatStore: ChatStore = ChatStore(appContext),
+    val memory: com.gemini.bridge.memory.MemoryStore = com.gemini.bridge.memory.MemoryStore(appContext),
     private val defaultModel: String = DEFAULT_MODEL
 ) : GeminiCore {
 
@@ -104,6 +105,10 @@ class RestGeminiCore(
                 }
             )
         )
+        register(com.gemini.bridge.tools.RememberFactTool(memory))
+        register(com.gemini.bridge.tools.ForgetFactTool(memory))
+        register(com.gemini.bridge.tools.RecallMemoryTool(memory))
+        register(com.gemini.bridge.tools.NoteWriteTool(memory))
     }
 
     private var apiKey: String = ""
@@ -808,6 +813,10 @@ class RestGeminiCore(
                     "run_shell_command) prompt the user in the UI; that's enough.\n\n"
             )
             append(termuxLine)
+            val facts = memory.factsForSystemPrompt()
+            if (facts.isNotBlank()) {
+                append("\n\n").append(facts)
+            }
         }
         return JSONObject().put(
             "parts",
