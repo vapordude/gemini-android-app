@@ -1,6 +1,5 @@
 package nz.kaimahi.app.ui.settings
 
-import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -78,6 +77,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import nz.kaimahi.app.ui.chat.ChatViewModel
+import nz.kaimahi.app.ui.termux.openTermux
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1115,18 +1115,6 @@ private fun humanReadableBytes(bytes: Long): String {
     if (mb < 1024) return String.format(Locale.US, "%.1f MiB", mb)
     val gb = mb / 1024.0
     return String.format(Locale.US, "%.1f GiB", gb)
-}
-
-private fun openTermux(context: Context) {
-    val launch = context.packageManager.getLaunchIntentForPackage("com.termux")
-    if (launch != null) {
-        try {
-            context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            return
-        } catch (_: ActivityNotFoundException) {
-        }
-    }
-    openUrl(context, "https://f-droid.org/packages/com.termux/")
 }
 
 // The chicken-and-egg of Termux bootstrap: we can't run commands via
