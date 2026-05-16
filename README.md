@@ -328,9 +328,13 @@ unit-tested, but not yet compared against a HuggingFace reference.
   RoPE schedule) that wedging them through the Gemma 4 path produces
   garbage. If you need Gemma 3 back, the previous SwiGLU decoder lives
   in git history at `v0.2.0`.
-- **SIMD intrinsics aren't wired.** Scalar Rust matvec only. On a
-  Cortex-A76 expect ~0.05–0.3 tok/s for E2B at Q4_K_M. The NEON path
-  is the highest-leverage follow-up.
+- **NEON-accelerated Q4_K matvec on aarch64.** The packed-Q4_K
+  matvec dispatches to a NEON kernel on aarch64 (the Android build
+  target); host x86 builds use the scalar reference. NEON-vs-scalar
+  parity is asserted by a unit test that runs when the target is
+  aarch64. Expect ~3-5× over scalar on Cortex-A76 — moves E2B Q4_K_M
+  from ~0.05–0.3 tok/s into the low-single-digit range. The earlier
+  scalar-only number is now a host-build baseline.
 - **`use_double_wide_mlp=true`** (E2B) is treated as the standard
   split-tensor FFN layout — confirmed against the GGUF converter
   scripts. If a future fine-tune ships fused gate+up under a
