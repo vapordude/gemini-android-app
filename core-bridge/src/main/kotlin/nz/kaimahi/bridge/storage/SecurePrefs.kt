@@ -56,6 +56,12 @@ class SecurePrefs(context: Context) {
             if (value.isNullOrBlank()) remove(KEY_WORKSPACE) else putString(KEY_WORKSPACE, value)
         }.apply()
 
+    var localModelPath: String?
+        get() = plain.getString(KEY_LOCAL_MODEL_PATH, null)
+        set(value) = plain.edit().apply {
+            if (value.isNullOrBlank()) remove(KEY_LOCAL_MODEL_PATH) else putString(KEY_LOCAL_MODEL_PATH, value)
+        }.apply()
+
     var autoApprove: Boolean
         get() = plain.getBoolean(KEY_AUTO_APPROVE, false)
         set(value) = plain.edit().putBoolean(KEY_AUTO_APPROVE, value).apply()
@@ -88,6 +94,7 @@ class SecurePrefs(context: Context) {
         const val KEY_MODEL = "model"
         const val KEY_IMAGEN_MODEL = "imagen_model"
         const val KEY_WORKSPACE = "workspace_uri"
+        const val KEY_LOCAL_MODEL_PATH = "local_model_path"
         const val KEY_AUTO_APPROVE = "auto_approve"
         const val KEY_TERMUX_GUIDE_SHOWN = "termux_guide_shown"
         const val KEY_AUTO_COMPRESS = "auto_compress_enabled"

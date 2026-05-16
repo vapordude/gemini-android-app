@@ -54,6 +54,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
@@ -98,6 +99,7 @@ import nz.kaimahi.app.R
 import nz.kaimahi.app.ui.settings.SettingsSheet
 import nz.kaimahi.app.ui.settings.TermuxSetupDialog
 import nz.kaimahi.app.ui.settings.ThemeMode
+import nz.kaimahi.app.ui.termux.startGeminiCliLoginInTermux
 import nz.kaimahi.domain.GeminiMessage
 import nz.kaimahi.domain.MessageRole
 import nz.kaimahi.ui.LocalKaimahiColors
@@ -299,6 +301,11 @@ fun ChatScreen(
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
                             Icon(Icons.Default.Menu, contentDescription = "Menu")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { startGeminiCliLoginInTermux(context) }) {
+                            Icon(Icons.Default.Terminal, contentDescription = "Terminal login")
                         }
                     },
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(

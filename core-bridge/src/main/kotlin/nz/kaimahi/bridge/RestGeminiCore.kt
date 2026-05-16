@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.util.Base64
 import android.util.Log
+import androidx.documentfile.provider.DocumentFile
 import nz.kaimahi.bridge.termux.TermuxBridge
 import nz.kaimahi.bridge.tools.DeleteFileTool
 import nz.kaimahi.bridge.tools.EditFileTool
@@ -41,6 +42,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
@@ -68,6 +70,13 @@ data class Attachment(
         return h
     }
 }
+
+data class LocalModelFile(
+    val name: String,
+    val path: String,
+    val sizeBytes: Long,
+    val modifiedAtMs: Long
+)
 
 /**
  * Gemini client with native function calling. The model declares what it
@@ -120,6 +129,9 @@ class RestGeminiCore(
     @Volatile private var discoveredModels: List<String> = AVAILABLE_MODELS
     private val tokenLimits = ConcurrentHashMap<String, Int>()
     @Volatile private var lastTokenUsage: Int = 0
+    private val localModelsDir: File by lazy {
+        File(appContext.filesDir, "models").apply { mkdirs() }
+    }
 
     init {
         // Restore non-sensitive prefs eagerly; the API key is injected via init().
@@ -178,6 +190,61 @@ class RestGeminiCore(
         prefs.autoApprove = enabled
     }
     fun isAutoApprove(): Boolean = autoApproveDestructive
+
+    fun selectedLocalModelPath(): String? = prefs.localModelPath
+    fun setSelectedLocalModelPath(path: String?) {
+        prefs.localModelPath = path
+    }
+    suspend fun listLocalModels(): List<LocalModelFile> = withContext(Dispatchers.IO) {
+        if (!localModelsDir.exists()) return@withContext emptyList()
+        localModelsDir.listFiles()?.toList().orEmpty()
+            .filter { it.isFile }
+            .sortedByDescending { it.lastModified() }
+            .map {
+                LocalModelFile(
+                    name = it.name,
+                    path = it.absolutePath,
+                    sizeBytes = it.length(),
+                    modifiedAtMs = it.lastModified()
+                )
+            }
+    }
+
+    suspend fun importLocalModel(uri: Uri): Result<LocalModelFile> = withContext(Dispatchers.IO) {
+        runCatching {
+            localModelsDir.mkdirs()
+            val resolver = appContext.contentResolver
+            val displayName = runCatching { DocumentFile.fromSingleUri(appContext, uri)?.name }.getOrNull()
+            val baseName = (displayName ?: "model-${System.currentTimeMillis()}.gguf")
+                .substringAfterLast('/')
+                .replace(Regex("[^A-Za-z0-9._-]"), "_")
+                .ifBlank { "model-${System.currentTimeMillis()}.gguf" }
+            val target = uniqueModelFile(baseName)
+            resolver.openInputStream(uri)?.use { src ->
+                target.outputStream().use { dst -> src.copyTo(dst) }
+            } ?: error("Could not read selected file")
+            prefs.localModelPath = target.absolutePath
+            LocalModelFile(
+                name = target.name,
+                path = target.absolutePath,
+                sizeBytes = target.length(),
+                modifiedAtMs = target.lastModified()
+            )
+        }
+    }
+
+    suspend fun removeLocalModel(path: String): Boolean = withContext(Dispatchers.IO) {
+        val file = File(path)
+        if (!file.exists()) return@withContext false
+        val canonicalRoot = runCatching { localModelsDir.canonicalFile }.getOrNull() ?: return@withContext false
+        val canonicalFile = runCatching { file.canonicalFile }.getOrNull() ?: return@withContext false
+        if (!canonicalFile.toPath().startsWith(canonicalRoot.toPath())) return@withContext false
+        val deleted = canonicalFile.delete()
+        if (deleted && prefs.localModelPath == canonicalFile.absolutePath) {
+            prefs.localModelPath = null
+        }
+        deleted
+    }
 
     fun isTermuxGuideShown(): Boolean = prefs.termuxGuideShown
     fun markTermuxGuideShown() { prefs.termuxGuideShown = true }
@@ -312,6 +379,19 @@ class RestGeminiCore(
                 else -> 0
             }
         }.thenBy { it })
+    }
+
+    private fun uniqueModelFile(name: String): File {
+        val dot = name.lastIndexOf('.')
+        val stem = if (dot > 0) name.substring(0, dot) else name
+        val ext = if (dot > 0) name.substring(dot) else ""
+        var i = 0
+        while (true) {
+            val candidate = if (i == 0) name else "$stem-$i$ext"
+            val f = File(localModelsDir, candidate)
+            if (!f.exists()) return f
+            i++
+        }
     }
 
     override suspend fun setProjectFolder(uri: String): GeminiResult = runCatching {

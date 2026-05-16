@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.foundation.border
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -51,11 +52,14 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import nz.kaimahi.app.R
+import nz.kaimahi.app.ui.termux.startGeminiCliLoginInTermux
 import nz.kaimahi.ui.LocalKaimahiColors
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 
 private const val AISTUDIO_KEY_URL = "https://aistudio.google.com/app/apikey"
+private const val GOOGLE_OAUTH_BROWSER_ENTRY_URL =
+    "https://accounts.google.com/signin/v2/identifier?continue=https%3A%2F%2Faistudio.google.com%2F"
 
 @Composable
 fun LoginScreen(
@@ -125,7 +129,7 @@ fun LoginScreen(
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "Native Android client for the Gemini API",
+                "Native Android client for the Gemini API - cloud OAuth & local model files",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
@@ -261,11 +265,30 @@ fun LoginScreen(
                         Text("Sign in with Google", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "Use your Google Account to authenticate directly. This requires access to your cloud platform and generative language API scopes.",
+                            "OAuth can start in your browser first, then continue in-app. " +
+                                "The app requests cloud-platform + generative-language scopes.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(Modifier.height(16.dp))
+                        OutlinedButton(
+                            onClick = { openUrl(context, GOOGLE_OAUTH_BROWSER_ENTRY_URL) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Open Google OAuth in browser")
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = { startGeminiCliLoginInTermux(context) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Terminal, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Terminal: start `gemini login`")
+                        }
+                        Spacer(Modifier.height(8.dp))
 
                         if (isLoading || isGoogleLoading) {
                             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -282,7 +305,7 @@ fun LoginScreen(
                             ) {
                                 Icon(Icons.Default.AccountCircle, contentDescription = null)
                                 Spacer(Modifier.width(8.dp))
-                                Text(stringResource(R.string.login_sign_in_google))
+                                Text("Continue OAuth in app")
                             }
                         }
                     }
