@@ -36,6 +36,7 @@ class ChatViewModel(
     private companion object {
         private const val TAG = "ChatViewModel"
         private const val MILLIS_PER_SECOND = 1000.0
+        private const val MIN_DURATION_MS = 1L
     }
 
     private val _messages = mutableStateListOf<GeminiMessage>()
@@ -356,12 +357,12 @@ class ChatViewModel(
                     if (idx >= 0) _messages.removeAt(idx)
                     _error.value = "No response generated. Verify the model is compatible or select a different GGUF model."
                 } else {
-                    val durationMs = (System.currentTimeMillis() - startedAt).coerceAtLeast(1L)
+                    val durationMs = (System.currentTimeMillis() - startedAt).coerceAtLeast(MIN_DURATION_MS)
                     _localTraceEvents.value = _localTraceEvents.value + TraceEvent.GenerateFinished(
                         timestampMs = System.currentTimeMillis(),
                         tokens = tokenCount,
                         durationMs = durationMs,
-                        tokensPerSec = tokenCount * MILLIS_PER_SECOND / durationMs
+                        tokensPerSec = (tokenCount.toDouble() / durationMs) * MILLIS_PER_SECOND
                     )
                 }
             } catch (_: CancellationException) {
