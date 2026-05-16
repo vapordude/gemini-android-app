@@ -283,14 +283,25 @@ class ChatViewModel(
 
     // --- chat persistence ---
     fun listSavedChats(): List<nz.kaimahi.bridge.storage.ChatStore.Entry> = core.listChats()
+    fun listActiveChats(): List<nz.kaimahi.bridge.storage.ChatStore.Entry> = core.listActiveChats()
+    fun listArchivedChats(): List<nz.kaimahi.bridge.storage.ChatStore.Entry> = core.listArchivedChats()
     fun saveChat(name: String) { core.saveChat(name) }
     fun deleteChat(name: String) { core.deleteChat(name) }
+    fun archiveChat(name: String): Boolean = core.archiveChat(name)
+    fun unarchiveChat(name: String): Boolean = core.unarchiveChat(name)
+    fun renameChat(oldName: String, newName: String): Boolean =
+        core.renameChat(oldName, newName)
     fun resumeChat(name: String) {
         viewModelScope.launch {
             _messages.clear()
             val ok = core.resumeChat(name)
             if (!ok) _error.value = "Could not resume \"$name\""
         }
+    }
+    /** Clear the UI message list. Underlying core state is reset on next send. */
+    fun startNewChat() {
+        _messages.clear()
+        _error.value = null
     }
 
     fun sendMessage(text: String) {

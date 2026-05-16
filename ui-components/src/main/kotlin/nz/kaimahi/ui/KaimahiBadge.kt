@@ -24,10 +24,10 @@ import androidx.compose.ui.unit.dp
  *
  * | Kind | Visual | Meaning |
  * | --- | --- | --- |
- * | Cloud  | pounamu fill | cloud Gemini in use this turn |
- * | Local  | kauri fill   | on-device LM in use this turn |
+ * | Cloud  | whero fill   | cloud Gemini in use this turn |
+ * | Local  | ember fill   | on-device LM in use this turn |
  * | Dual   | gradient     | both authenticated; policy decides per call |
- * | Memory | kowhai dot   | persistent-memory recall folded into this turn |
+ * | Memory | kōura dot    | persistent-memory recall folded into this turn |
  * | Delegate | brand outline | vendor delegate (NPU/GPU) engaged |
  *
  * Designed to disappear into the chat top bar — small, low-luminance,

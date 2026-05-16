@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kaimahi · Android frames</title>
+<link rel="stylesheet" href="kaimahi.css">
+<style>
+  html, body { margin: 0; padding: 0; background: #07070a; color: #c8c1b6; }
+  body { font-family: 'Inter', system-ui, sans-serif; min-height: 100vh; }
+
+  @keyframes kSpin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+  @keyframes kPulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.6); opacity: 0.4; } }
+
+  /* Canvas chrome */
+  .stage-intro {
+    padding: 56px 56px 24px;
+    max-width: 980px;
+  }
+  .stage-intro__eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: #7a7770;
+  }
+  .stage-intro h1 {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 56px;
+    font-weight: 500;
+    color: #F4ECE4;
+    margin: 14px 0 12px;
+    line-height: 1;
+    letter-spacing: 0.005em;
+  }
+  .stage-intro h1 em {
+    color: #D8A857;
+    font-style: italic;
+    font-weight: 400;
+  }
+  .stage-intro p {
+    font-size: 15px;
+    line-height: 1.6;
+    color: #B0ADA6;
+    max-width: 720px;
+  }
+  .stage-intro .meta-row {
+    display: flex; gap: 28px; margin-top: 22px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: #7a7770;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .stage-intro .meta-row b { color: #D8A857; font-weight: 500; }
+
+  /* Frame + annotation row */
+  .frame-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 56px;
+    padding: 40px 56px;
+  }
+  .frame-row__notes {
+    flex: 1;
+    max-width: 380px;
+    padding-top: 64px;
+  }
+  .frame-row__notes h3 {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 28px;
+    font-weight: 500;
+    color: #F4ECE4;
+    margin: 0 0 4px;
+    letter-spacing: 0.005em;
+  }
+  .frame-row__notes h3 .num {
+    color: #D8A857;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    letter-spacing: 0.15em;
+    margin-right: 12px;
+    vertical-align: middle;
+  }
+  .frame-row__notes .sub {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #7a7770;
+    margin-bottom: 16px;
+  }
+  .frame-row__notes p {
+    font-size: 13.5px;
+    line-height: 1.6;
+    color: #c8c1b6;
+    margin: 0 0 14px;
+  }
+  .frame-row__notes ul {
+    margin: 0; padding: 0; list-style: none;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .frame-row__notes li {
+    display: flex; gap: 10px; align-items: baseline;
+    font-size: 12.5px; color: #B0ADA6;
+    line-height: 1.5;
+  }
+  .frame-row__notes li::before {
+    content: '—'; color: #484440;
+  }
+  .swatch {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    padding: 1px 6px 1px 4px;
+    background: #111111;
+    border: 1px solid #222222;
+    border-radius: 4px;
+    color: #E0E0E0;
+  }
+  .swatch::before {
+    content: '';
+    display: inline-block;
+    width: 9px; height: 9px;
+    border-radius: 2px;
+    background: var(--c);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+
+  /* DCArtboard styling override — kill any default padding so frame sits clean */
+  .frame-row .k-frame { flex-shrink: 0; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="marks.jsx"></script>
+<script type="text/babel" src="frame-shell.jsx"></script>
+<script type="text/babel" src="frame-todo-chat.jsx"></script>
+<script type="text/babel" src="frame-memory-splash-about.jsx"></script>
+
+<script type="text/babel">
+const { useState } = React;
+
+function Swatch({ hex, label }) {
+  return (
+    <span className="swatch" style={{ "--c": hex }}>
+      {label || hex}
+    </span>
+  );
+}
+
+function FrameRow({ num, title, sub, intro, notes, children, reverse = false }) {
+  return (
+    <div className="frame-row" style={{ flexDirection: reverse ? "row-reverse" : "row" }} data-screen-label={`${num} ${title}`}>
+      {children}
+      <div className="frame-row__notes">
+        <h3><span className="num">{num}</span>{title}</h3>
+        <div className="sub">{sub}</div>
+        {intro && <p>{intro}</p>}
+        <ul>{notes.map((n, i) => <li key={i}>{n}</li>)}</ul>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <div>
+      <div className="stage-intro" data-screen-label="00 Cover">
+        <div className="stage-intro__eyebrow">Cathedral AI · Kaimahi · Free Android tier</div>
+        <h1>Seven frames for <em>Kaimahi</em></h1>
+        <p>
+          Mobile portrait mockups at <b style={{ color: "#D8A857" }}>412 × 915 dp</b> (Pixel 7 baseline).
+          Dark-first, sovereign palette: Whero crimson, Kōura gold, Ember warm — over a four-step
+          near-black surface stack. Type pairs Cormorant Garamond (display) with Inter (UI) and
+          JetBrains Mono (signal + meta). Brand marks are math-derived: a logarithmic-spiral koru,
+          an 8-petal mathematical spiral, and the SLGWW heraldic sigil. No telemetry, no upsell, no slop.
+        </p>
+        <div className="meta-row">
+          <span>Frames <b>1 → 7</b></span>
+          <span>Baseline <b>412 × 915 dp</b></span>
+          <span>Dark <b>default</b> · light forthcoming where chrome exists</span>
+        </div>
+      </div>
+
+      <FrameRow
+        num="01"
+        title="App shell · drawer open"
+        sub="Highest-priority surface — establishes the system"
+        intro="Drawer occupies ≈85% width on a 55% scrim. Chat sits dimmed behind. Header pairs the koru spiral with the Cormorant wordmark; the tagline is in muted mono caps. Below: the New chat pill (Whero), live project list, then Tools. Footer holds version, Cathedral AI byline, and the SLGWW sigil as a 22dp watermark at 30% opacity."
+        notes={[
+          <>Drawer fill <Swatch hex="#111111" label="Surface 1" /> on scrim <Swatch hex="rgba(0,0,0,.55)" label=".55 black" /></>,
+          <>Koru stroke = brand gradient <Swatch hex="#C1272D" /> → <Swatch hex="#D97742" /> → <Swatch hex="#D8A857" /></>,
+          <>Wordmark · Cormorant Garamond 500 @ 26 px</>,
+          <>Tagline · JetBrains Mono caps, tracked 0.14em, <Swatch hex="#7A7770" label="muted" /></>,
+          <>New chat pill · 44dp tall, fill <Swatch hex="#C1272D" label="Whero" /></>,
+          <>Active drawer item: <Swatch hex="#161616" label="Surface 2" /> bg + 2dp Whero left edge</>,
+          <>Project count badge · Kōura 14% on Kōura <Swatch hex="#D8A857" /></>,
+          <>SLGWW sigil · 22dp · 30% opacity, bottom-right only on this drawer</>,
+        ]}
+      >
+        <FrameAppShell />
+      </FrameRow>
+
+      <FrameRow
+        num="02"
+        title="Project list inside the drawer"
+        sub="Active stack + archived expanded"
+        reverse
+        intro="Same drawer chrome, projects expanded full-height. Active cards: 12dp radius, Surface 1 base; on hover or selection, Surface 2 with a 3dp Whero left edge. Long-press reveals Rename · Archive · Delete affordances on a dashed divider so the gesture isn't hidden. Archived section is expanded here to show its 60% opacity treatment — collapsed by default."
+        notes={[
+          <>Card · <Swatch hex="#111111" label="Surface 1" /> + <Swatch hex="#222222" label="Line" /></>,
+          <>Selected card · Surface 2 + 3dp Whero stripe at left</>,
+          <>Message-count chip · 11dp, Kōura on Kōura-14%</>,
+          <>Relative time · JetBrains Mono 10.5 px <Swatch hex="#7A7770" label="muted" /></>,
+          <>Long-press actions on dashed divider · uppercase mono 10 px</>,
+          <>Delete affordance border <Swatch hex="rgba(193,39,45,0.5)" label="Whero 50%" /></>,
+          <>Archived section · same card style at 60% opacity</>,
+          <>Section labels · JetBrains Mono caps tracked 0.08em</>,
+        ]}
+      >
+        <FrameProjectList />
+      </FrameRow>
+
+      <FrameRow
+        num="03"
+        title="Daily todo · a screen the agent built"
+        sub="New pattern — agent-scaffolded screens"
+        intro="Canonical example of an agent-built screen. Deliberately feels less like chat and more like a tool: serif italic date hero, sparse mono meta, checkboxes with a 3dp Whero stripe on overdue items. Completed items at 55% opacity with strike-through. The provenance card at the bottom uses a soft Kōura border — quiet, but a tappable handle into the schema editor. FAB is a Whero pill with a single shadow."
+        notes={[
+          <>Date hero · Cormorant Garamond italic 26 px <Swatch hex="#F4ECE4" label="Text strong" /></>,
+          <>Counter line · mono caps tracked 0.10em <Swatch hex="#7A7770" label="muted" /></>,
+          <>Todo card · 12dp radius, Surface 1, 1dp Line</>,
+          <>Overdue stripe · 3dp <Swatch hex="#C1272D" label="Whero" /> · meta text in Whero</>,
+          <>Checkbox tick · Kōura fill, dark check glyph</>,
+          <>Done state · 0.55 opacity, line-through in Text disabled</>,
+          <>Provenance card · 1dp Kōura @ 35% — quiet, not decorative</>,
+          <>FAB · 44dp pill, drop shadow Whero @ 55%</>,
+        ]}
+      >
+        <FrameDailyTodo />
+      </FrameRow>
+
+      <FrameRow
+        num="04"
+        title="Chat · repainted"
+        sub="Existing surface, new palette"
+        reverse
+        intro="Top bar pairs koru + model dropdown + folder breadcrumb. User bubbles are Whero-tinted right with a 35% Whero border; model bubbles sit on Surface 1 left with a 4dp tail-corner. Tool-acting steps surface as a quiet Ember stripe. The streaming dot is Ember with a 12px glow — the only place Ember pulses. Composer is a Surface 1 capsule with a brand-gradient send button (the system's one allowed gradient in chrome)."
+        notes={[
+          <>Model bubble · <Swatch hex="#111111" label="Surface 1" /> · radius 14 / 14 / 14 / 4</>,
+          <>User bubble · Whero 14% fill · 35% border · radius 14 / 14 / 4 / 14</>,
+          <>Tool-acting stripe · Ember 8% / 35% border <Swatch hex="#D97742" /></>,
+          <>Streaming dot · Ember 7dp + 12px glow, 1.2 s ease pulse</>,
+          <>Inline data · JetBrains Mono in Kōura for measurements</>,
+          <>Composer capsule · 22dp radius, 1dp <Swatch hex="#2F2F2F" label="Line strong" /></>,
+          <>Send button · 36dp gradient <Swatch hex="#C1272D" /> → <Swatch hex="#D8A857" /></>,
+          <>Model name affordance · 10dp ▾ caret, mono "local" badge</>,
+        ]}
+      >
+        <FrameChat />
+      </FrameRow>
+
+      <FrameRow
+        num="05"
+        title="Memory browser · DAG"
+        sub="Persistent memory · top-down"
+        intro="A top-down view of the persistent-memory graph. Newest nodes at top, older flow downward; edges are 0.9 px curves, Whero-tinted when a person is involved, Kōura otherwise. Each node carries a 2dp left edge in its tone (person / tool-trace / knowledge / muted). The four filter pills above (All · Recent · By tag · Expiring) are mono caps — the active pill takes a Whero 12% fill. Tap any node → bottom sheet (not shown) with full text, edges, expire date."
+        notes={[
+          <>Canvas backdrop · 32px grid on <Swatch hex="#111111" label="Surface 1" /></>,
+          <>Node tones · <Swatch hex="#C1272D" label="person" /> <Swatch hex="#D97742" label="tool/trace" /> <Swatch hex="#D8A857" label="knowledge" /></>,
+          <>Node card · Surface 2 · 8dp radius · 2dp tone left edge</>,
+          <>Edges · 0.9 px Bezier · Whero 45% when person-touching, else Kōura 35%</>,
+          <>Tag label · mono 9 px, tone-coloured, tracked 0.10em</>,
+          <>Time label · mono 9 px <Swatch hex="#7A7770" /></>,
+          <>Active filter pill · Whero 12% fill, 45% border, text Strong</>,
+          <>Top + bottom fade · 22 / 28 px to Surface 1, masks edges leaving canvas</>,
+        ]}
+      >
+        <FrameMemoryBrowser />
+      </FrameRow>
+
+      <FrameRow
+        num="06"
+        title="Splash · cold start"
+        sub="Black, math-spiral, calm"
+        reverse
+        intro="Black background (a touch darker than the app surface — #050505 — to read as cold-start). Math-spiral logo centred, 140dp. Wordmark in Cormorant 44 px, italic tagline beneath. No spinner. The spiral rotates one full revolution per 60 s — a focal calm, not a marketing flourish. A single mono caps byline at the foot establishes provenance."
+        notes={[
+          <>Background <Swatch hex="#050505" label="cold black" /> — one stop below app bg</>,
+          <>Math-spiral · 8 angular petals @ Whero gradient · 8 Kōura circuit traces · centre Kōura pip in 1.6dp dark eye</>,
+          <>Wordmark · Cormorant 500 @ 44 px <Swatch hex="#F4ECE4" /></>,
+          <>Tagline · Cormorant italic 17 px <Swatch hex="#B0ADA6" label="secondary" /></>,
+          <>Foot byline · mono 9.5 px tracked 0.18em <Swatch hex="#484440" label="disabled" /></>,
+          <>Motion · 60 s linear infinite rotation · no easing keyframes</>,
+        ]}
+      >
+        <FrameSplash />
+      </FrameRow>
+
+      <FrameRow
+        num="07"
+        title="About surface"
+        sub="Sovereign-tier · SLGWW corner mark"
+        intro="The only place the SLGWW sigil sits at full opacity (top-right, 36dp). Voice: warm and mathematical, no marketing register. The Cathedral family is honest about what's for sale and what isn't — Scarlet is named, but explicitly not offered. The te reo whakapā section is the one sentimental moment in the system; closes with the whakataukī that runs through the Cathedral family."
+        notes={[
+          <>SLGWW · 36dp full opacity, top-right of app bar — sovereign tier only</>,
+          <>Hero blurb body · 14.5 px Inter <Swatch hex="#E0E0E0" label="Text" /></>,
+          <>Family rail · 3dp left rule in member colour (Whero / Ember / Kōura)</>,
+          <>Scarlet row · 0.75 opacity — present but explicitly muted ("not for sale")</>,
+          <>Section labels · mono caps tracked 0.18em <Swatch hex="#7A7770" /></>,
+          <>Whakataukī · Cormorant italic 16 px in Text · translation in Muted</>,
+          <>License link · dotted Kōura underline — affordance, not chrome</>,
+          <>No telemetry surfacing, no consent dialog, no first-launch upsell</>,
+        ]}
+      >
+        <FrameAbout />
+      </FrameRow>
+
+      <div style={{ height: 80 }} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

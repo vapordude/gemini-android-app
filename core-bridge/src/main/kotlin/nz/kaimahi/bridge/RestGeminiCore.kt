@@ -381,10 +381,16 @@ class RestGeminiCore(
 
     // --- chat persistence ---
     fun listChats(): List<ChatStore.Entry> = chatStore.list()
+    fun listActiveChats(): List<ChatStore.Entry> = chatStore.listActive()
+    fun listArchivedChats(): List<ChatStore.Entry> = chatStore.listArchived()
     fun saveChat(name: String) {
         chatStore.save(name, ChatStore.Snapshot(turns.toList(), uiMessages.toList()))
     }
     fun deleteChat(name: String): Boolean = chatStore.delete(name)
+    fun archiveChat(name: String): Boolean = chatStore.setArchived(name, true)
+    fun unarchiveChat(name: String): Boolean = chatStore.setArchived(name, false)
+    fun renameChat(oldName: String, newName: String): Boolean =
+        chatStore.rename(oldName, newName)
     suspend fun resumeChat(name: String): Boolean {
         val snap = chatStore.load(name) ?: return false
         turns.clear()
