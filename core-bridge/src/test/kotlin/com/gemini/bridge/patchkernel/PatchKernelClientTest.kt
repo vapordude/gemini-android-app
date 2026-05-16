@@ -1,40 +1,91 @@
 package com.gemini.bridge.patchkernel
 
-import com.sun.net.httpserver.HttpServer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import java.net.InetSocketAddress
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.io.OutputStream
+import java.net.ServerSocket
+import kotlin.concurrent.thread
 
+/**
+ * Stub HTTP server hand-rolled on top of `ServerSocket` so we don't have
+ * to depend on the optional `jdk.httpserver` module — that module isn't
+ * always present in the JDK image Gradle's test task forks into.
+ *
+ * The stub speaks just enough HTTP/1.1 for the client: parses the request
+ * line + Content-Length, reads the body, records (method, body), responds
+ * 200 with a small JSON payload (or 200 "ok" for /health).
+ */
 class PatchKernelClientTest {
 
-    private lateinit var server: HttpServer
+    private lateinit var server: ServerSocket
     private var port: Int = 0
-    /** Records every request body the stub server received. */
     private val received = mutableListOf<Pair<String, String>>()
+    @Volatile private var running = true
 
     @Before fun start() {
-        server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        port = server.address.port
+        server = ServerSocket(0)
+        port = server.localPort
+        thread(name = "stub-http") {
+            while (running) {
+                val client = try { server.accept() } catch (_: Exception) { break }
+                client.use { sock ->
+                    val reader = BufferedReader(InputStreamReader(sock.getInputStream()))
+                    val requestLine = reader.readLine() ?: return@use
+                    val parts = requestLine.split(' ')
+                    val method = parts.getOrNull(0).orEmpty()
+                    val path = parts.getOrNull(1).orEmpty()
+                    var contentLength = 0
+                    while (true) {
+                        val h = reader.readLine() ?: break
+                        if (h.isEmpty()) break
+                        if (h.lowercase().startsWith("content-length:")) {
+                            contentLength = h.substringAfter(":").trim().toIntOrNull() ?: 0
+                        }
+                    }
+                    val body = if (contentLength > 0) {
+                        val buf = CharArray(contentLength)
+                        var read = 0
+                        while (read < contentLength) {
+                            val n = reader.read(buf, read, contentLength - read)
+                            if (n < 0) break
+                            read += n
+                        }
+                        String(buf, 0, read)
+                    } else ""
+                    received += method to body
 
-        server.createContext("/health") { ex ->
-            ex.sendResponseHeaders(200, 0); ex.responseBody.write("ok".toByteArray()); ex.close()
+                    val (status, resp) = when {
+                        path == "/health" -> 200 to "ok"
+                        path == "/mcp" -> 200 to """{"ok":true,"echo":$body}"""
+                        else -> 404 to "not found"
+                    }
+                    val out: OutputStream = sock.getOutputStream()
+                    val payload = resp.toByteArray()
+                    val statusText = if (status == 200) "OK" else "Not Found"
+                    val header = buildString {
+                        append("HTTP/1.1 ").append(status).append(' ').append(statusText).append("\r\n")
+                        append("Content-Type: application/json\r\n")
+                        append("Content-Length: ").append(payload.size).append("\r\n")
+                        append("Connection: close\r\n\r\n")
+                    }
+                    out.write(header.toByteArray())
+                    out.write(payload)
+                    out.flush()
+                }
+            }
         }
-        server.createContext("/mcp") { ex ->
-            val body = ex.requestBody.bufferedReader().readText()
-            received += ex.requestMethod to body
-            val resp = """{"ok":true,"echo":$body}""".toByteArray()
-            ex.responseHeaders["Content-Type"] = "application/json"
-            ex.sendResponseHeaders(200, resp.size.toLong())
-            ex.responseBody.write(resp); ex.close()
-        }
-        server.start()
     }
 
-    @After fun stop() { server.stop(0) }
+    @After fun stop() {
+        running = false
+        runCatching { server.close() }
+    }
 
     @Test fun reachable_when_health_responds() {
         val c = PatchKernelClient("http://127.0.0.1:$port")
@@ -42,7 +93,6 @@ class PatchKernelClientTest {
     }
 
     @Test fun unreachable_when_server_isnt_running() {
-        // Use a port nothing is listening on.
         val c = PatchKernelClient("http://127.0.0.1:1")
         assertFalse(c.isReachable())
     }
