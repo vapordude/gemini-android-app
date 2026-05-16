@@ -1,10 +1,10 @@
-package nz.kaimahi.bridge.tools
+package com.gemini.bridge.tools
 
-import nz.kaimahi.bridge.workspace.Workspace
-import nz.kaimahi.domain.ToolCall
-import nz.kaimahi.domain.ToolCallResult
-import nz.kaimahi.domain.ToolCategory
-import nz.kaimahi.domain.ToolSpec
+import com.gemini.bridge.workspace.Workspace
+import com.gemini.domain.ToolCall
+import com.gemini.domain.ToolCallResult
+import com.gemini.domain.ToolCategory
+import com.gemini.domain.ToolSpec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 

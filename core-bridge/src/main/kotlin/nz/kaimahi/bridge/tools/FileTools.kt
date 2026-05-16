@@ -1,10 +1,10 @@
-package nz.kaimahi.bridge.tools
+package com.gemini.bridge.tools
 
-import nz.kaimahi.bridge.workspace.Workspace
-import nz.kaimahi.domain.ToolCall
-import nz.kaimahi.domain.ToolCallResult
-import nz.kaimahi.domain.ToolCategory
-import nz.kaimahi.domain.ToolSpec
+import com.gemini.bridge.workspace.Workspace
+import com.gemini.domain.ToolCall
+import com.gemini.domain.ToolCallResult
+import com.gemini.domain.ToolCategory
+import com.gemini.domain.ToolSpec
 
 class ReadFileTool(private val ws: Workspace) : Tool {
     override val spec = ToolSpec(
@@ -40,10 +40,7 @@ class WriteFileTool(private val ws: Workspace) : Tool {
     override suspend fun execute(call: ToolCall): ToolCallResult = try {
         val path = call.arguments["path"] as? String ?: error("path is required")
         val content = call.arguments["content"] as? String ?: error("content is required")
-        val before = try { ws.read(path) } catch (e: Exception) {
-            if (e is kotlinx.coroutines.CancellationException) throw e
-            null
-        }
+        val before = try { ws.read(path) } catch (e: Exception) { null }
         val entry = ws.write(path, content)
         val diff = Diff.of(before.orEmpty(), content, entry.path)
         val header = if (before == null) "Created ${entry.path} (${entry.size} B)"
