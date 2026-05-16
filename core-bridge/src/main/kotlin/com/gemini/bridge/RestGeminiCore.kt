@@ -109,6 +109,7 @@ class RestGeminiCore(
         register(com.gemini.bridge.tools.ForgetFactTool(memory))
         register(com.gemini.bridge.tools.RecallMemoryTool(memory))
         register(com.gemini.bridge.tools.NoteWriteTool(memory))
+        register(com.gemini.bridge.tools.ListUserFilesTool(this@RestGeminiCore.appContext))
     }
 
     private var apiKey: String = ""
