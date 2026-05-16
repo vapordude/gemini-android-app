@@ -158,7 +158,7 @@ impl Tokenizer {
         }
         // D5 — tokenizer round-trip check. Only emitted in diag builds.
         diagnostics::probe!(diagnostics::Probe::Tokenizer {
-            roundtrip_ok: self.decode(&out).len() > 0 || out.is_empty(),
+            roundtrip_ok: !self.decode(&out).is_empty() || out.is_empty(),
             len: out.len(),
         });
         out
