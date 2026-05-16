@@ -208,9 +208,10 @@ private fun InfoCardWidget(w: WidgetSpec.InfoCard) {
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            if (w.title != null) {
+            val cardTitle = w.title
+            if (cardTitle != null) {
                 Text(
-                    w.title,
+                    cardTitle,
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.Medium,
                     fontSize = 15.sp,
@@ -235,9 +236,10 @@ private fun ItemListWidget(
 ) {
     val tokens = LocalKaimahiColors.current
     val arr = data.optJSONArray(w.dataKey) ?: JSONArray()
-    if (arr.length() == 0 && w.emptyHint != null) {
+    val itemListEmptyHint = w.emptyHint
+    if (arr.length() == 0 && itemListEmptyHint != null) {
         Text(
-            w.emptyHint,
+            itemListEmptyHint,
             fontStyle = FontStyle.Italic,
             color = tokens.muted,
             fontSize = 13.sp,
@@ -285,10 +287,11 @@ private fun ChecklistWidget(
 ) {
     val tokens = LocalKaimahiColors.current
     val arr = data.optJSONArray(w.dataKey) ?: JSONArray()
+    val checklistEmptyHint = w.emptyHint
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (arr.length() == 0 && w.emptyHint != null) {
+        if (arr.length() == 0 && checklistEmptyHint != null) {
             Text(
-                w.emptyHint,
+                checklistEmptyHint,
                 fontStyle = FontStyle.Italic,
                 color = tokens.muted,
                 fontSize = 13.sp,
