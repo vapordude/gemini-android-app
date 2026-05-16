@@ -29,3 +29,7 @@ version = "0.0.1"
 dependencies = [
  "gemma4-core",
 ]
+
+[[package]]
+name = "gemma4-tokenizer"
+version = "0.0.1"

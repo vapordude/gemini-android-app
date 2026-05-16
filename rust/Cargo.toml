@@ -5,6 +5,7 @@ members = [
     "crates/gemma4-core",
     "crates/gemma4-ops",
     "crates/gemma4-model",
+    "crates/gemma4-tokenizer",
     "crates/gemma4-jni",
 ]
 
