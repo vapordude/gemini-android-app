@@ -87,7 +87,8 @@ fun SettingsSheet(
     viewModel: ChatViewModel,
     onDismiss: () -> Unit,
     themeMode: ThemeMode = ThemeMode.SYSTEM,
-    onThemeChange: (ThemeMode) -> Unit = {}
+    onThemeChange: (ThemeMode) -> Unit = {},
+    initialAccordion: String? = null,
 ) {
     val context = LocalContext.current
     val currentModel by viewModel.model.collectAsState()
@@ -107,7 +108,9 @@ fun SettingsSheet(
 
     var customModel by remember { mutableStateOf("") }
     var customImagenModel by remember { mutableStateOf("") }
-    var expanded by remember { mutableStateOf(emptySet<String>()) }
+    var expanded by remember {
+        mutableStateOf(initialAccordion?.let { setOf(it) } ?: emptySet())
+    }
 
     val folderLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
