@@ -6,6 +6,9 @@ import android.util.Base64
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import nz.kaimahi.bridge.codeassist.CodeAssistSession
+import nz.kaimahi.bridge.mcp.McpManager
+import nz.kaimahi.bridge.mcp.McpServerConfig
+import nz.kaimahi.bridge.storage.McpStore
 import nz.kaimahi.bridge.storage.OAuthTokens
 import nz.kaimahi.bridge.termux.TermuxBridge
 import nz.kaimahi.bridge.tools.DeleteFileTool
@@ -97,6 +100,12 @@ class RestGeminiCore(
         )
     }
 
+    /** MCP — adds tools from user-configured Model Context Protocol
+     *  servers into the same `registry`. Both the cloud function-
+     *  calling path and the local agent loop see them transparently. */
+    private val mcpStore: McpStore = McpStore(appContext)
+    val mcp: McpManager = McpManager(mcpStore, registry)
+
     private var apiKey: String = ""
     private var accessToken: String = ""
     private var model: String = defaultModel
@@ -130,6 +139,11 @@ class RestGeminiCore(
         prefs.workspaceUri?.let { uri ->
             runCatching { workspace.setTreeUri(Uri.parse(uri)) }
         }
+        // Pull MCP-discovered tools into the registry in the background
+        // so the first chat send already sees them. Failures are
+        // logged and ignored; the user's locally-defined tools always
+        // work regardless.
+        mcp.refreshInBackground()
     }
 
     fun persistedApiKey(): String? = prefs.apiKey

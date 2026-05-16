@@ -136,9 +136,16 @@ runs through `libkaimahi_native.so`, built from the Rust workspace
 - **Function calling** with 9 built-in tools:
   `read_file`, `write_file`, `edit_file`, `delete_file`,
   `list_directory`, `glob_files`, `grep`, `run_shell_command`
-  (foreground or background), `generate_image` (Imagen). The model
-  decides when to call them. **Cloud path only** — the local agent
-  doesn't drive tools yet.
+  (foreground or background), `generate_image` (Imagen). The local
+  Gemma agent drives the same registry via a marker grammar
+  (`[CALL]name(json)[/CALL]`), so on-device chats can read files,
+  run shell commands, and edit the workspace with the same approval
+  flow as the cloud path.
+- **MCP servers**: add any Model Context Protocol HTTP/SSE server in
+  Settings → MCP. Its tools get namespaced (`<server>__<tool>`) and
+  registered into the same registry — both the cloud function-calling
+  path and the on-device agent see them. Approval gating defaults to
+  on for MCP tools (you don't always know what a remote tool does).
 - **Safety on destructive tools**: every `write_file` / `edit_file` /
   `delete_file` / shell command shows an approval dialog with arguments
   and a diff (for edits) before it runs. One-tap "Auto-approve" toggle
