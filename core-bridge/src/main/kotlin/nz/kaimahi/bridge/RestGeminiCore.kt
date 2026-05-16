@@ -5,6 +5,8 @@ import android.net.Uri
 import android.util.Base64
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
+import nz.kaimahi.bridge.codeassist.CodeAssistSession
+import nz.kaimahi.bridge.storage.OAuthTokens
 import nz.kaimahi.bridge.termux.TermuxBridge
 import nz.kaimahi.bridge.tools.DeleteFileTool
 import nz.kaimahi.bridge.tools.EditFileTool
@@ -101,6 +103,14 @@ class RestGeminiCore(
     private var autoApproveDestructive = false
     private var idCounter = 0L
 
+    /**
+     * Non-null when the current sign-in is gemini-cli credentials.
+     * Requests route through cloudcode-pa.googleapis.com via this
+     * session, which owns refresh + onboarding.
+     */
+    @Volatile private var codeAssist: CodeAssistSession? = null
+    private val codeAssistSessionId: String by lazy { java.util.UUID.randomUUID().toString() }
+
     private val turns = mutableListOf<JSONObject>()
     private val uiMessages = mutableListOf<GeminiMessage>()
     private val sendLock = Mutex()
@@ -124,7 +134,21 @@ class RestGeminiCore(
 
     fun persistedApiKey(): String? = prefs.apiKey
     fun persistedAccessToken(): String? = prefs.accessToken
+    fun persistedRefreshToken(): String? = prefs.refreshToken
+    fun persistedUseCodeAssist(): Boolean = prefs.useCodeAssist
     fun hasPersistedSession(): Boolean = !prefs.apiKey.isNullOrBlank() || !prefs.accessToken.isNullOrBlank()
+    fun isUsingCodeAssist(): Boolean = codeAssist != null
+
+    /**
+     * Mark the core as "local-only ready" so [sendMessage] refuses cloud
+     * calls cleanly when there's no auth. Doesn't touch persisted state;
+     * sign-in from the side menu still works.
+     */
+    fun markLocalOnly() {
+        // Nothing to persist — the in-memory absence of apiKey/accessToken
+        // is the signal. We just want a hook the ViewModel can call so the
+        // intent is explicit and future-proofed.
+    }
 
     private val _events = MutableSharedFlow<GeminiEvent>(
         replay = 0,
@@ -139,10 +163,53 @@ class RestGeminiCore(
         val rememberKey = (config["remember"] as? Boolean) ?: true
         apiKey = (config["api_key"] ?: config["apiKey"] ?: "").toString().trim()
         accessToken = (config["access_token"] ?: config["accessToken"] ?: "").toString().trim()
+        val refreshToken = (config["refresh_token"] as? String)?.trim().orEmpty()
+        val expiryMs = (config["expiry_epoch_ms"] as? Number)?.toLong() ?: 0L
         val requestedModel = (config["model"] as? String)?.ifBlank { null }
         if (requestedModel != null) model = requestedModel
         if (apiKey.isBlank() && accessToken.isBlank()) return GeminiResult.Error("API key or access token is required")
-        // Best-effort live model fetch; if it fails we keep the static fallback.
+
+        // Code Assist branch: triggered by an incoming refresh_token (from
+        // the gemini-cli login flow) or by previously-persisted Code Assist
+        // state being resumed at boot.
+        val codeAssistMode = refreshToken.isNotBlank() ||
+            (apiKey.isBlank() && prefs.useCodeAssist && !prefs.refreshToken.isNullOrBlank())
+        if (codeAssistMode) {
+            val effectiveRefresh = refreshToken.ifBlank { prefs.refreshToken.orEmpty() }
+            val effectiveExpiry = if (expiryMs > 0L) expiryMs else prefs.tokenExpiryMs
+            val tokens = OAuthTokens(
+                accessToken = accessToken,
+                refreshToken = effectiveRefresh,
+                expiryEpochMs = effectiveExpiry,
+                projectId = prefs.codeAssistProjectId,
+            )
+            val session = CodeAssistSession(appContext, prefs, tokens)
+            // Onboard up front so the first sendMessage doesn't pay the
+            // round trip, and so failures surface here rather than mid-chat.
+            val onboard = runCatching { session.ensureOnboarded() }
+            if (onboard.isFailure) {
+                return GeminiResult.Error(
+                    "Could not contact Code Assist: " +
+                        (onboard.exceptionOrNull()?.message ?: "unknown error")
+                )
+            }
+            codeAssist = session
+            // ensureOnboarded may have refreshed the token — pick up the
+            // new value so any direct accessToken use sees it.
+            accessToken = session.currentTokens().accessToken
+            if (rememberKey) {
+                prefs.apiKey = ""
+                prefs.accessToken = accessToken
+                prefs.refreshToken = effectiveRefresh
+                prefs.tokenExpiryMs = effectiveExpiry
+                prefs.useCodeAssist = true
+            }
+            prefs.model = model
+            return GeminiResult.Success("Ready (Code Assist)")
+        }
+
+        // Public Gemini API path.
+        codeAssist = null
         runCatching { discoveredModels = fetchAvailableModels() }
             .onFailure { Log.w(TAG, "model discovery failed: ${it.message}") }
         if (model !in discoveredModels && discoveredModels.isNotEmpty()) {
@@ -151,6 +218,10 @@ class RestGeminiCore(
         if (rememberKey) {
             prefs.apiKey = apiKey
             prefs.accessToken = accessToken
+            prefs.useCodeAssist = false
+            // Clear any stale gemini-cli state from prior sessions.
+            prefs.refreshToken = null
+            prefs.tokenExpiryMs = 0L
         }
         prefs.model = model
         return GeminiResult.Success("Ready")
@@ -297,6 +368,7 @@ class RestGeminiCore(
     fun signOut() {
         apiKey = ""
         accessToken = ""
+        codeAssist = null
         turns.clear()
         uiMessages.clear()
         pending.values.forEach { it.cancel() }
@@ -529,8 +601,124 @@ class RestGeminiCore(
 
     // --- HTTP + parsing ---
 
-    private suspend fun streamOnce(): Pair<String?, List<ToolCall>> = withContext(Dispatchers.IO) {
-        val body = buildRequestBody()
+    private suspend fun streamOnce(): Pair<String?, List<ToolCall>> {
+        val state = StreamState()
+        val ca = codeAssist
+        if (ca != null) {
+            val request = JSONObject(buildRequestBody())
+            try {
+                ca.streamGenerateContent(model, codeAssistSessionId, request) { chunk ->
+                    consumeChunk(chunk.json, state)
+                }
+            } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) throw t
+                throw RuntimeException(t.message ?: "Code Assist stream failed")
+            }
+        } else {
+            streamPublicApi(buildRequestBody(), state)
+        }
+        if (state.parts.length() > 0) {
+            turns.add(JSONObject().put("role", "model").put("parts", state.parts))
+        }
+        if (state.lastTotalTokens > 0) {
+            lastTokenUsage = state.lastTotalTokens
+            _events.tryEmit(GeminiEvent.TokenUsage(state.lastTotalTokens, tokenLimits[model]))
+        }
+        val textPart = state.accumulated.toString().takeIf { it.isNotBlank() }
+        return textPart to state.calls
+    }
+
+    /** Mutable buffers carried across SSE chunks for one stream call. */
+    private class StreamState {
+        val accumulated = StringBuilder()
+        val parts = JSONArray()
+        val calls = mutableListOf<ToolCall>()
+        var liveMessage: GeminiMessage? = null
+        var lastTotalTokens: Int = 0
+    }
+
+    /**
+     * Parse one chunk's `candidates[0].content.parts` and fold each part
+     * into [state] — text becomes the live model message, functionCall
+     * accumulates into the pending tool-call list, inlineData persists
+     * an image attachment.
+     */
+    private fun consumeChunk(json: JSONObject, state: StreamState) {
+        json.optJSONObject("usageMetadata")
+            ?.optInt("totalTokenCount", 0)
+            ?.takeIf { it > 0 }
+            ?.let { state.lastTotalTokens = it }
+        val content = json.optJSONArray("candidates")
+            ?.optJSONObject(0)
+            ?.optJSONObject("content")
+            ?: return
+        val chunkParts = content.optJSONArray("parts") ?: return
+        for (i in 0 until chunkParts.length()) {
+            val part = chunkParts.getJSONObject(i)
+            state.parts.put(part)
+            when {
+                part.has("text") -> {
+                    val t = part.optString("text")
+                    if (t.isEmpty()) continue
+                    state.accumulated.append(t)
+                    if (state.liveMessage == null) {
+                        state.liveMessage = GeminiMessage(
+                            id = nextId(),
+                            text = state.accumulated.toString(),
+                            isUser = false,
+                            timestamp = System.currentTimeMillis(),
+                            role = MessageRole.MODEL,
+                        )
+                        addUiMessage(state.liveMessage!!)
+                    } else {
+                        state.liveMessage = state.liveMessage!!.copy(text = state.accumulated.toString())
+                        replaceUiMessage(state.liveMessage!!)
+                    }
+                }
+                part.has("functionCall") -> {
+                    val fc = part.getJSONObject("functionCall")
+                    val name = fc.optString("name")
+                    val args = fc.optJSONObject("args") ?: JSONObject()
+                    val id = "$name-${System.nanoTime()}-${state.calls.size}"
+                    state.calls.add(ToolCall(id, name, jsonToMap(args)))
+                }
+                part.has("inlineData") -> {
+                    val inline = part.getJSONObject("inlineData")
+                    val mime = inline.optString("mimeType", "image/png")
+                    val b64 = inline.optString("data").orEmpty()
+                    if (b64.isNotBlank()) {
+                        val decoded = runCatching {
+                            android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                        }.getOrNull()
+                        val path = decoded?.let { bytes ->
+                            persistAttachmentBytes("gen-${nextId()}", bytes, mime)
+                        }
+                        if (path != null) {
+                            if (state.liveMessage == null) {
+                                state.liveMessage = GeminiMessage(
+                                    id = nextId(),
+                                    text = state.accumulated.toString(),
+                                    isUser = false,
+                                    timestamp = System.currentTimeMillis(),
+                                    role = MessageRole.MODEL,
+                                    attachmentPaths = listOf(path),
+                                )
+                                addUiMessage(state.liveMessage!!)
+                            } else {
+                                state.liveMessage = state.liveMessage!!.copy(
+                                    attachmentPaths = state.liveMessage!!.attachmentPaths + path,
+                                )
+                                replaceUiMessage(state.liveMessage!!)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Public Gemini API SSE loop. Used when the caller has an API key or a play-services token (no refresh_token). */
+    private suspend fun streamPublicApi(body: String, state: StreamState) = withContext(Dispatchers.IO) {
         val url = "https://generativelanguage.googleapis.com/v1beta/models/" +
             "$model:streamGenerateContent?alt=sse" +
             (if (apiKey.isNotBlank()) "&key=${URLEncoder.encode(apiKey, "UTF-8")}" else "")
@@ -545,11 +733,6 @@ class RestGeminiCore(
         conn.connectTimeout = 20_000
         conn.readTimeout = 120_000
 
-        val accumulated = StringBuilder()
-        val parts = JSONArray()
-        val calls = mutableListOf<ToolCall>()
-        var liveMessage: GeminiMessage? = null
-        var lastTotalTokens = 0
         try {
             conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
             val code = conn.responseCode
@@ -567,96 +750,12 @@ class RestGeminiCore(
                     val data = line.removePrefix("data:").trim()
                     if (data.isEmpty() || data == "[DONE]") continue
                     val json = runCatching { JSONObject(data) }.getOrNull() ?: continue
-                    json.optJSONObject("usageMetadata")
-                        ?.optInt("totalTokenCount", 0)
-                        ?.takeIf { it > 0 }
-                        ?.let { lastTotalTokens = it }
-                    val content = json.optJSONArray("candidates")
-                        ?.optJSONObject(0)
-                        ?.optJSONObject("content")
-                        ?: continue
-                    val chunkParts = content.optJSONArray("parts") ?: continue
-                    for (i in 0 until chunkParts.length()) {
-                        val part = chunkParts.getJSONObject(i)
-                        parts.put(part)
-                        when {
-                            part.has("text") -> {
-                                val t = part.optString("text")
-                                if (t.isEmpty()) continue
-                                accumulated.append(t)
-                                if (liveMessage == null) {
-                                    liveMessage = GeminiMessage(
-                                        id = nextId(),
-                                        text = accumulated.toString(),
-                                        isUser = false,
-                                        timestamp = System.currentTimeMillis(),
-                                        role = MessageRole.MODEL
-                                    )
-                                    addUiMessage(liveMessage!!)
-                                } else {
-                                    liveMessage = liveMessage!!.copy(text = accumulated.toString())
-                                    replaceUiMessage(liveMessage!!)
-                                }
-                            }
-                            part.has("functionCall") -> {
-                                val fc = part.getJSONObject("functionCall")
-                                val name = fc.optString("name")
-                                val args = fc.optJSONObject("args") ?: JSONObject()
-                                val id = "$name-${System.nanoTime()}-${calls.size}"
-                                calls.add(ToolCall(id, name, jsonToMap(args)))
-                            }
-                            part.has("inlineData") -> {
-                                // Native multimodal output (e.g.
-                                // `gemini-2.5-flash-image-preview`): the model
-                                // returns image bytes alongside text parts.
-                                // Persist to disk so the bubble can show a
-                                // thumbnail and the file survives reload.
-                                val inline = part.getJSONObject("inlineData")
-                                val mime = inline.optString("mimeType", "image/png")
-                                val b64 = inline.optString("data").orEmpty()
-                                if (b64.isNotBlank()) {
-                                    val decoded = runCatching {
-                                        android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
-                                    }.getOrNull()
-                                    val path = decoded?.let { bytes ->
-                                        persistAttachmentBytes("gen-${nextId()}", bytes, mime)
-                                    }
-                                    if (path != null) {
-                                        if (liveMessage == null) {
-                                            liveMessage = GeminiMessage(
-                                                id = nextId(),
-                                                text = accumulated.toString(),
-                                                isUser = false,
-                                                timestamp = System.currentTimeMillis(),
-                                                role = MessageRole.MODEL,
-                                                attachmentPaths = listOf(path)
-                                            )
-                                            addUiMessage(liveMessage!!)
-                                        } else {
-                                            liveMessage = liveMessage!!.copy(
-                                                attachmentPaths = liveMessage!!.attachmentPaths + path
-                                            )
-                                            replaceUiMessage(liveMessage!!)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    consumeChunk(json, state)
                 }
             }
         } finally {
             runCatching { conn.disconnect() }
         }
-        if (parts.length() > 0) {
-            turns.add(JSONObject().put("role", "model").put("parts", parts))
-        }
-        if (lastTotalTokens > 0) {
-            lastTokenUsage = lastTotalTokens
-            _events.tryEmit(GeminiEvent.TokenUsage(lastTotalTokens, tokenLimits[model]))
-        }
-        val textPart = accumulated.toString().takeIf { it.isNotBlank() }
-        textPart to calls
     }
 
     private fun buildRequestBody(): String {

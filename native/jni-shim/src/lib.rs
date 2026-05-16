@@ -1,51 +1,337 @@
 //! The only crate that knows about Android/JNI. Other crates build on
 //! desktop for testing.
 //!
-//! Three separate JNI namespaces:
-//!   Java_nz_kaimahi_inference_*
-//!   Java_nz_kaimahi_agent_*
-//!   Java_nz_kaimahi_emdash_*
+//! Kotlin-side namespaces wired here:
 //!
-//! Plus an optional diagnostics namespace when built with `--features diag`.
+//!   nz.kaimahi.inference.NativeInference  → version + load/generate loop
+//!   nz.kaimahi.agent.NativeAgent         → max-iterations stub
+//!   nz.kaimahi.emdash.NativeEmdash       → client version stub
 //!
-//! v0: the namespaces exist with stub returns so the Kotlin side can call
-//! them without `UnsatisfiedLinkError`.
+//! The interesting one is `NativeInference`. The Kotlin façade owns the
+//! session handle returned by `nativeLoadModel(path) -> Long` and feeds
+//! it back into `nativeGenerate(handle, prompt, callback, maxTokens,
+//! temperature, topK, seed)`. The callback receives each decoded piece
+//! as a UTF-8 `String`.
+//!
+//! `nativeFreeModel` releases the session (and the dequantized weights
+//! that go with it). All handles are 0-or-positive; 0 means "load
+//! failed" and is never reused.
 
 #![allow(non_snake_case)]
 
 #[cfg(target_os = "android")]
 mod android {
-    use jni::objects::{JClass, JString};
-    use jni::sys::{jint, jstring};
+    use jni::objects::{JClass, JObject, JString, JValue};
+    use jni::sys::{jfloat, jint, jlong, jstring};
     use jni::JNIEnv;
+    use model_runtime::arch::lm::gemma4::{argmax, sample, SamplerState};
+    use model_runtime::{KvCache, LanguageModel, LoadedModel};
+    use std::path::Path;
+    use std::sync::Mutex;
+
+    /// One loaded inference session. We hold the model + its KV cache
+    /// + a sampler RNG so per-token state isn't shared across handles.
+    struct Session {
+        model: Box<dyn LanguageModel>,
+        kv: KvCache,
+        tokenizer: Option<model_runtime::tokenizer::Tokenizer>,
+        rng: SamplerState,
+        #[allow(dead_code)] // kept for diag dumps + future logging
+        arch_tag: String,
+    }
+
+    static SESSIONS: Mutex<Vec<Option<Session>>> = Mutex::new(Vec::new());
+
+    fn store(sess: Session) -> jlong {
+        let mut g = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
+        for (i, slot) in g.iter_mut().enumerate() {
+            if slot.is_none() {
+                *slot = Some(sess);
+                return (i as jlong) + 1;
+            }
+        }
+        g.push(Some(sess));
+        g.len() as jlong
+    }
+
+    fn take(handle: jlong) -> Option<Session> {
+        let mut g = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
+        let idx = (handle as usize).checked_sub(1)?;
+        g.get_mut(idx).and_then(|s| s.take())
+    }
+
+    fn with<R>(handle: jlong, f: impl FnOnce(&mut Session) -> R) -> Option<R> {
+        let mut g = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
+        let idx = (handle as usize).checked_sub(1)?;
+        let slot = g.get_mut(idx)?.as_mut()?;
+        Some(f(slot))
+    }
 
     #[no_mangle]
     pub extern "system" fn Java_nz_kaimahi_inference_NativeInference_nativeVersion<'a>(
         env: JNIEnv<'a>,
         _class: JClass<'a>,
     ) -> jstring {
-        env.new_string("0.1.0").unwrap().into_raw()
+        env.new_string(env!("CARGO_PKG_VERSION"))
+            .unwrap()
+            .into_raw()
     }
 
+    /// Probe a model file for its arch tag without loading weights.
+    /// Returns "unknown" on any error so the Kotlin side can still
+    /// render a label.
     #[no_mangle]
-    pub extern "system" fn Java_nz_kaimahi_inference_NativeInference_nativeLoadModel<'a>(
+    pub extern "system" fn Java_nz_kaimahi_inference_NativeInference_nativeProbe<'a>(
         mut env: JNIEnv<'a>,
         _class: JClass<'a>,
         path: JString<'a>,
     ) -> jstring {
-        let path: String = env.get_string(&path).map(|s| s.into()).unwrap_or_default();
-        let arch_tag = std::path::Path::new(&path)
-            .file_name()
-            .and_then(|s| s.to_str())
-            .map(|s| {
-                if s.contains("gemma") {
-                    "gemma4"
+        let path_s: String = env.get_string(&path).map(Into::into).unwrap_or_default();
+        let tag = match model_runtime::probe(Path::new(&path_s)) {
+            Ok(_cfg) => infer_arch_tag(&path_s),
+            Err(_) => "unknown".to_string(),
+        };
+        env.new_string(tag).unwrap().into_raw()
+    }
+
+    fn infer_arch_tag(path: &str) -> String {
+        // Re-read the metadata only path so we report what the file
+        // actually declares, not what the filename hints.
+        if let Ok(gguf) = gguf_loader::read(Path::new(path)) {
+            return gguf.arch_tag().unwrap_or("unknown").to_string();
+        }
+        "unknown".to_string()
+    }
+
+    /// Backwards-compat name kept for the Kotlin façade's older bindings.
+    /// Same behaviour as `nativeProbe`: returns the arch tag.
+    #[no_mangle]
+    pub extern "system" fn Java_nz_kaimahi_inference_NativeInference_nativeLoadModel<'a>(
+        env: JNIEnv<'a>,
+        cls: JClass<'a>,
+        path: JString<'a>,
+    ) -> jstring {
+        Java_nz_kaimahi_inference_NativeInference_nativeProbe(env, cls, path)
+    }
+
+    /// Load a model with weights. Returns a positive handle on success or
+    /// `0` on failure (with an error string published via the static
+    /// `lastError` slot, accessible from Kotlin through
+    /// `nativeLastError`).
+    #[no_mangle]
+    pub extern "system" fn Java_nz_kaimahi_inference_NativeInference_nativeOpenSession<'a>(
+        mut env: JNIEnv<'a>,
+        _class: JClass<'a>,
+        path: JString<'a>,
+    ) -> jlong {
+        let path_s: String = match env.get_string(&path) {
+            Ok(s) => s.into(),
+            Err(_) => return 0,
+        };
+        let loaded = match model_runtime::load(Path::new(&path_s)) {
+            Ok(m) => m,
+            Err(e) => {
+                set_last_error(format!("load: {e:?}"));
+                return 0;
+            }
+        };
+        let model = match loaded {
+            LoadedModel::Language(m) => m,
+            LoadedModel::Image(_) => {
+                set_last_error("expected language model, got image model".to_string());
+                return 0;
+            }
+        };
+        // The tokenizer is shared by every step of every session — we
+        // re-read it here from the same file (cheap; GGUF metadata is
+        // already parsed).
+        let tokenizer = match gguf_loader::read(Path::new(&path_s))
+            .ok()
+            .and_then(|g| model_runtime::tokenizer::Tokenizer::from_gguf(&g).ok())
+        {
+            Some(t) => Some(t),
+            None => {
+                // Missing vocab → the model is unusable for text gen.
+                set_last_error("tokenizer.ggml.tokens missing in GGUF".to_string());
+                None
+            }
+        };
+        let arch_tag = model.info().arch_tag.clone();
+        let kv = KvCache::new();
+        let sess = Session {
+            model,
+            kv,
+            tokenizer,
+            rng: SamplerState::new(0),
+            arch_tag,
+        };
+        store(sess)
+    }
+
+    /// Run autoregressive decode for `prompt`. `callback` must expose a
+    /// method `fun onToken(piece: String)` — we look it up by signature
+    /// once and call it per generated piece.
+    ///
+    /// Returns 0 on success, or a non-zero status code on failure (see
+    /// constants below).
+    #[no_mangle]
+    pub extern "system" fn Java_nz_kaimahi_inference_NativeInference_nativeGenerate<'a>(
+        mut env: JNIEnv<'a>,
+        _class: JClass<'a>,
+        handle: jlong,
+        prompt: JString<'a>,
+        callback: JObject<'a>,
+        max_tokens: jint,
+        temperature: jfloat,
+        top_k: jint,
+        seed: jlong,
+    ) -> jint {
+        const STATUS_OK: jint = 0;
+        const STATUS_INVALID_HANDLE: jint = 1;
+        const STATUS_NO_TOKENIZER: jint = 2;
+        const STATUS_EMPTY_PROMPT: jint = 3;
+        const STATUS_INTERNAL: jint = 4;
+
+        let prompt_s: String = match env.get_string(&prompt) {
+            Ok(s) => s.into(),
+            Err(_) => return STATUS_EMPTY_PROMPT,
+        };
+        if prompt_s.is_empty() {
+            return STATUS_EMPTY_PROMPT;
+        }
+
+        // Resolve onToken(String) once.
+        let cb_class = match env.get_object_class(&callback) {
+            Ok(c) => c,
+            Err(_) => return STATUS_INTERNAL,
+        };
+        let method = match env.get_method_id(&cb_class, "onToken", "(Ljava/lang/String;)V") {
+            Ok(m) => m,
+            Err(_) => return STATUS_INTERNAL,
+        };
+
+        // Pull tokenizer + token ids out of the session under the lock
+        // so we can release the lock for the long generation loop.
+        let (mut prompt_ids, eos_id, vocab_size, hidden) = match with(handle, |sess| {
+            let tok = sess.tokenizer.as_ref()?;
+            let info = sess.model.info();
+            let prompt_ids = tok.encode(&prompt_s);
+            Some((prompt_ids, tok.eos_id, info.vocab_size, info.context_length))
+        }) {
+            Some(Some(v)) => v,
+            Some(None) => return STATUS_NO_TOKENIZER,
+            None => return STATUS_INVALID_HANDLE,
+        };
+        let _ = vocab_size;
+        let _ = hidden;
+        if prompt_ids.is_empty() {
+            return STATUS_EMPTY_PROMPT;
+        }
+
+        // Reseed if requested.
+        if seed != 0 {
+            with(handle, |sess| sess.rng = SamplerState::new(seed as u64));
+        }
+
+        // Prefill: run forward on every prompt token but emit nothing.
+        let mut last_token: u32 = 0;
+        for &id in &prompt_ids {
+            let _ = with(handle, |sess| {
+                let logits = sess.model.forward(id, &mut sess.kv);
+                last_token = id;
+                let _ = logits;
+            });
+        }
+
+        let max_new = max_tokens.max(1) as usize;
+        let temp = temperature.max(0.0);
+        let k = top_k.max(1) as usize;
+
+        // Decode loop. We sample using the most recent forward()'s
+        // logits, then feed the sampled token back as the next input.
+        for _ in 0..max_new {
+            let next_id = match with(handle, |sess| {
+                let logits = sess.model.forward(last_token, &mut sess.kv);
+                if temp <= 0.0 {
+                    argmax(logits)
                 } else {
-                    "unknown"
+                    sample(logits, temp, k, &mut sess.rng)
                 }
-            })
-            .unwrap_or("unknown");
-        env.new_string(arch_tag).unwrap().into_raw()
+            }) {
+                Some(id) => id,
+                None => return STATUS_INVALID_HANDLE,
+            };
+            last_token = next_id;
+            // Decode the single new token to a piece. Tokenizer.decode
+            // operates on a slice — we just give it one id.
+            let piece = match with(handle, |sess| {
+                sess.tokenizer.as_ref().map(|t| t.decode(&[next_id]))
+            }) {
+                Some(Some(p)) => p,
+                Some(None) => return STATUS_NO_TOKENIZER,
+                None => return STATUS_INVALID_HANDLE,
+            };
+            // Emit the piece.
+            let jpiece = match env.new_string(&piece) {
+                Ok(j) => j,
+                Err(_) => return STATUS_INTERNAL,
+            };
+            // SAFETY: callable_method validated above; signature matches.
+            let _ = unsafe {
+                env.call_method_unchecked(
+                    &callback,
+                    method,
+                    jni::signature::ReturnType::Primitive(jni::signature::Primitive::Void),
+                    &[JValue::Object(&JObject::from(jpiece)).as_jni()],
+                )
+            };
+            if let Some(eos) = eos_id {
+                if next_id == eos {
+                    break;
+                }
+            }
+        }
+        let _ = prompt_ids.pop(); // silence unused-mut warning on stable
+        STATUS_OK
+    }
+
+    /// Reset the per-session KV cache so the next `nativeGenerate`
+    /// starts a fresh conversation.
+    #[no_mangle]
+    pub extern "system" fn Java_nz_kaimahi_inference_NativeInference_nativeResetSession<'a>(
+        _env: JNIEnv<'a>,
+        _class: JClass<'a>,
+        handle: jlong,
+    ) {
+        let _ = with(handle, |sess| sess.model.reset(&mut sess.kv));
+    }
+
+    #[no_mangle]
+    pub extern "system" fn Java_nz_kaimahi_inference_NativeInference_nativeCloseSession<'a>(
+        _env: JNIEnv<'a>,
+        _class: JClass<'a>,
+        handle: jlong,
+    ) {
+        drop(take(handle));
+    }
+
+    #[no_mangle]
+    pub extern "system" fn Java_nz_kaimahi_inference_NativeInference_nativeLastError<'a>(
+        env: JNIEnv<'a>,
+        _class: JClass<'a>,
+    ) -> jstring {
+        let s = LAST_ERROR
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .unwrap_or_default();
+        env.new_string(s).unwrap().into_raw()
+    }
+
+    static LAST_ERROR: Mutex<Option<String>> = Mutex::new(None);
+
+    fn set_last_error(s: String) {
+        *LAST_ERROR.lock().unwrap_or_else(|e| e.into_inner()) = Some(s);
     }
 
     #[no_mangle]
@@ -61,7 +347,9 @@ mod android {
         env: JNIEnv<'a>,
         _class: JClass<'a>,
     ) -> jstring {
-        env.new_string("0.1.0").unwrap().into_raw()
+        env.new_string(env!("CARGO_PKG_VERSION"))
+            .unwrap()
+            .into_raw()
     }
 }
 

@@ -18,3 +18,4 @@ local-server = { path = "../local-server" }
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = { version = "0.21", default-features = false }
+gguf-loader = { path = "../gguf-loader" }

@@ -6,10 +6,6 @@
     <string name="cd_app_icon">Kaimahi launcher icon</string>
     <string name="login_title">Welcome to Kaimahi</string>
     <string name="login_subtitle">Local agent, cloud agent — your call, both at once.</string>
-    <string name="login_tab_google">Google Account</string>
-    <string name="login_tab_api">API Key</string>
     <string name="login_sign_in_google">Sign in with Google</string>
-    <string name="login_api_key_label">Enter Gemini API Key</string>
-    <string name="login_api_continue">Continue with API Key</string>
     <string name="chat_hint">Type a message…</string>
 </resources>

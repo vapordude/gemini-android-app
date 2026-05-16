@@ -217,14 +217,53 @@ class ChatViewModel(
 
     fun hasPersistedSession(): Boolean = core.hasPersistedSession()
 
+    /**
+     * Path of a GGUF the user has previously imported and chosen as the
+     * default local model. Used by MainActivity to skip the login screen
+     * on cold start when local-only mode is viable.
+     */
+    fun preselectedLocalModelPath(): String? = core.selectedLocalModelPath()
+
+    /**
+     * Skip cloud auth entirely. The chat screen comes up immediately in
+     * local-agent mode; if [path] is non-null, also pin it as the
+     * selected local model. Used by both the "Skip — local model only"
+     * button on the login screen and the auto-bring-up path that fires
+     * when a local model was already picked.
+     */
+    fun enterLocalOnlyMode(path: String?) {
+        if (!path.isNullOrBlank()) {
+            core.setSelectedLocalModelPath(path)
+            _selectedLocalModelPath.value = path
+        }
+        core.markLocalOnly()
+        _inferenceMode.value = InferenceMode.LOCAL_AGENT
+        _isReady.value = true
+    }
+
     fun tryAutoLogin(context: android.content.Context) {
         val savedApi = core.persistedApiKey()
         val savedToken = core.persistedAccessToken()
+        val savedRefresh = core.persistedRefreshToken()
+        val savedUseCodeAssist = core.persistedUseCodeAssist()
 
-        if (!savedApi.isNullOrBlank()) {
-            initCore(mapOf("api_key" to savedApi, "remember" to true))
-        } else if (!savedToken.isNullOrBlank()) {
-            viewModelScope.launch {
+        when {
+            !savedApi.isNullOrBlank() ->
+                initCore(mapOf("api_key" to savedApi, "remember" to true))
+
+            // Gemini-CLI / Code Assist resume: we have a refresh_token
+            // and the prefs say to use cloudcode-pa. The CodeAssistSession
+            // will refresh the access token itself if it's expired.
+            savedUseCodeAssist && !savedRefresh.isNullOrBlank() ->
+                initCore(
+                    mapOf(
+                        "access_token" to (savedToken.orEmpty()),
+                        "refresh_token" to savedRefresh,
+                        "remember" to true,
+                    )
+                )
+
+            !savedToken.isNullOrBlank() -> viewModelScope.launch {
                 val authService = nz.kaimahi.app.ui.login.GoogleAuthService(context)
                 val account = authService.getLastSignedInAccount()
                 if (account != null) {
@@ -232,7 +271,7 @@ class ChatViewModel(
                     if (freshToken != null) {
                         initCore(mapOf("access_token" to freshToken, "remember" to true))
                     } else {
-                        // Let it fail or default to UI if token fails
+                        // Stale; let init() fail and bounce to the login screen.
                         initCore(mapOf("access_token" to savedToken, "remember" to true))
                     }
                 } else {

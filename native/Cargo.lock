@@ -79,6 +79,7 @@ version = "0.1.0"
 dependencies = [
  "agent-core",
  "emdash-client",
+ "gguf-loader",
  "jni",
  "local-server",
  "model-runtime",

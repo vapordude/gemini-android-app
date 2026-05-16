@@ -1,4 +1,4 @@
-package nz.kaimahi.app.ui.login
+package nz.kaimahi.bridge.auth
 
 import android.content.Context
 import android.content.Intent

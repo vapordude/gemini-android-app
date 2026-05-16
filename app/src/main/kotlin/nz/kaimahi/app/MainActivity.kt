@@ -67,8 +67,19 @@ class MainActivity : ComponentActivity() {
                     var loadingDeployments by remember { mutableStateOf(false) }
 
                     val context = LocalContext.current
-                    androidx.compose.runtime.LaunchedEffect(Unit) {
-                        if (!isReady && vm.hasPersistedSession()) vm.tryAutoLogin(context)
+                    // Local-first bring-up: if the user has a GGUF picked,
+                    // open the chat immediately in local-agent mode without
+                    // waiting for cloud auth. They can still sign in later
+                    // from Settings → Account.
+                    LaunchedEffect(Unit) {
+                        if (!isReady) {
+                            val localPath = vm.preselectedLocalModelPath()
+                            if (!localPath.isNullOrBlank()) {
+                                vm.enterLocalOnlyMode(localPath)
+                            } else if (vm.hasPersistedSession()) {
+                                vm.tryAutoLogin(context)
+                            }
+                        }
                     }
                     LaunchedEffect(isReady) {
                         if (!isReady) pane = AppPane.CHAT
@@ -77,6 +88,7 @@ class MainActivity : ComponentActivity() {
                     if (!isReady) {
                         LoginScreen(
                             onLoginSuccess = { config -> vm.initCore(config) },
+                            onLocalOnly = { vm.enterLocalOnlyMode(null) },
                             isLoading = isLoading
                         )
                     } else {

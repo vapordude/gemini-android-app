@@ -87,13 +87,17 @@ impl From<gguf_loader::LoadError> for LoadError {
 
 /// Load any model. Architecture comes from `general.architecture`
 /// metadata. Family is inferred from `general.type` (defaults to "lm").
+/// The returned model has every tensor dequantized to F32 in memory —
+/// see [`arch::lm::gemma4::Gemma4Model::load`] for the memory caveat.
 pub fn load(path: &Path) -> Result<LoadedModel, LoadError> {
-    let gguf = gguf_loader::read(path)?;
+    let gguf = gguf_loader::GgufBytes::read(path)?;
     let arch = gguf
+        .file
         .arch_tag()
         .ok_or(LoadError::MissingMetadata("general.architecture"))?
         .to_string();
     let family = gguf
+        .file
         .get("general.type")
         .and_then(gguf_loader::MetaValue::as_string)
         .unwrap_or("lm")
@@ -109,13 +113,22 @@ pub fn load(path: &Path) -> Result<LoadedModel, LoadError> {
 
     match (family.as_str(), arch.as_str()) {
         ("lm", "gemma4" | "gemma-4" | "gemma" | "gemma2" | "gemma3") => Ok(LoadedModel::Language(
-            Box::new(arch::lm::gemma4::Gemma4Model::from_gguf(&gguf)?),
+            Box::new(arch::lm::gemma4::Gemma4Model::load(&gguf)?),
         )),
         ("diffusion", a) => Err(LoadError::UnknownArchitecture(format!(
             "diffusion arch '{a}' not yet implemented (see arch/diffusion/)"
         ))),
         (_, other) => Err(LoadError::UnknownArchitecture(other.to_string())),
     }
+}
+
+/// Inspect a GGUF file without binding any weights. Returns the arch tag
+/// and (vocab_size, context_length, hidden_size, n_layers). Used by the
+/// inference façade to report metadata before the (potentially slow)
+/// full load.
+pub fn probe(path: &Path) -> Result<arch::lm::gemma4::Gemma4Config, LoadError> {
+    let gguf = gguf_loader::read(path)?;
+    arch::lm::gemma4::Gemma4Config::from_gguf(&gguf)
 }
 
 /// Backwards-compatible LM-only load, for callers that only deal with
