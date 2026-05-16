@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kaimahi · Light & Variants</title>
+<link rel="stylesheet" href="kaimahi.css">
+<style>
+  html, body { margin: 0; padding: 0; background: #07070a; color: #c8c1b6; }
+  body { font-family: 'Inter', system-ui, sans-serif; min-height: 100vh; }
+
+  @keyframes kSpin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+  @keyframes kPulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.6); opacity: 0.4; } }
+
+  .stage-intro { padding: 56px 56px 24px; max-width: 980px; }
+  .stage-intro__eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: #7a7770;
+  }
+  .stage-intro h1 {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 56px; font-weight: 500; color: #F4ECE4;
+    margin: 14px 0 12px; line-height: 1; letter-spacing: 0.005em;
+  }
+  .stage-intro h1 em { color: #D8A857; font-style: italic; font-weight: 400; }
+  .stage-intro p { font-size: 15px; line-height: 1.6; color: #b0ada6; max-width: 720px; }
+
+  .section-band {
+    margin: 36px 56px 0;
+    padding: 18px 0;
+    border-top: 1px solid #1a1a1a;
+    display: flex; gap: 22px; align-items: baseline;
+  }
+  .section-band__kicker {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: #D8A857;
+  }
+  .section-band h2 {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 34px; font-weight: 500; color: #F4ECE4;
+    margin: 0; letter-spacing: 0.005em;
+  }
+  .section-band p {
+    margin: 0; font-size: 13.5px; color: #b0ada6; max-width: 520px; line-height: 1.55;
+  }
+
+  .frame-row {
+    display: flex; align-items: flex-start;
+    gap: 56px; padding: 32px 56px;
+  }
+  .frame-row__notes { flex: 1; max-width: 380px; padding-top: 64px; }
+  .frame-row__notes h3 {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 28px; font-weight: 500; color: #F4ECE4;
+    margin: 0 0 4px; letter-spacing: 0.005em;
+  }
+  .frame-row__notes h3 .num {
+    color: #D8A857;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px; letter-spacing: 0.15em;
+    margin-right: 12px; vertical-align: middle;
+  }
+  .frame-row__notes .sub {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: #7a7770; margin-bottom: 16px;
+  }
+  .frame-row__notes p {
+    font-size: 13.5px; line-height: 1.6; color: #c8c1b6; margin: 0 0 14px;
+  }
+  .frame-row__notes ul {
+    margin: 0; padding: 0; list-style: none;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .frame-row__notes li {
+    display: flex; gap: 10px; align-items: baseline;
+    font-size: 12.5px; color: #B0ADA6; line-height: 1.5;
+  }
+  .frame-row__notes li::before { content: '—'; color: #484440; }
+
+  .swatch {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
+    padding: 1px 6px 1px 4px;
+    background: #111111; border: 1px solid #222222;
+    border-radius: 4px; color: #E0E0E0;
+  }
+  .swatch::before {
+    content: ''; display: inline-block; width: 9px; height: 9px;
+    border-radius: 2px; background: var(--c);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .frame-row .k-frame { flex-shrink: 0; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="marks.jsx"></script>
+<script type="text/babel" src="frame-shell.jsx"></script>
+<script type="text/babel" src="frame-todo-chat.jsx"></script>
+<script type="text/babel" src="frame-memory-splash-about.jsx"></script>
+<script type="text/babel" src="frame-variants.jsx"></script>
+
+<script type="text/babel">
+function Swatch({ hex, label }) {
+  return <span className="swatch" style={{ "--c": hex }}>{label || hex}</span>;
+}
+
+function FrameRow({ num, title, sub, intro, notes, children, reverse = false }) {
+  return (
+    <div className="frame-row" style={{ flexDirection: reverse ? "row-reverse" : "row" }} data-screen-label={`${num} ${title}`}>
+      {children}
+      <div className="frame-row__notes">
+        <h3><span className="num">{num}</span>{title}</h3>
+        <div className="sub">{sub}</div>
+        {intro && <p>{intro}</p>}
+        <ul>{notes.map((n, i) => <li key={i}>{n}</li>)}</ul>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <div>
+      <div className="stage-intro" data-screen-label="00 Cover">
+        <div className="stage-intro__eyebrow">Kaimahi · v0.3 · light variants + fun combinations</div>
+        <h1>Same <em>system</em>, different rooms.</h1>
+        <p>
+          Three light counterparts for the surfaces that actually meet daylight — Daily todo, About,
+          Chat — built on warm-paper surfaces with a darkened Kōura that still clears 3:1 against
+          cream. Then three remixes that pull the same tokens in a different direction: a stealth
+          OLED chat for nightstand reading, a breathing-koru splash that uses the primary mark
+          instead of the math-spiral, and a first-launch hero that treats the empty state as
+          a focal moment rather than an apology.
+        </p>
+      </div>
+
+      <div className="section-band" data-screen-label="08 Section · Light">
+        <div className="section-band__kicker">§ 1</div>
+        <div>
+          <h2>Light register — warm paper, antique gold</h2>
+          <p>
+            Light mode keeps the brand intact: Whero stays loud, Kōura darkens to #8C6418
+            so it reads on cream, Ember warms one step. Surfaces graduate from #F4ECE4 to
+            #FBF6EE — the same four-step rhythm as dark, inverted.
+          </p>
+        </div>
+      </div>
+
+      <FrameRow
+        num="03L"
+        title="Daily todo · light"
+        sub="Warm paper · antique gold"
+        intro="The screen Kaimahi built you, rendered for daylight. The serif italic date hero gains contrast over cream; the overdue Whero stripe stays unchanged — same semantic weight, brighter background. Provenance card now uses an antique-gold border that reads at 5:1 against the paper."
+        notes={[
+          <>Page <Swatch hex="#F4ECE4" label="warm paper" /></>,
+          <>Card · <Swatch hex="#FBF6EE" label="Surface 1L" /> + <Swatch hex="#E2D3B9" label="Line L" /></>,
+          <>Kōura · <Swatch hex="#8C6418" label="antique gold" /> — 5:1 on paper</>,
+          <>Overdue stripe stays <Swatch hex="#B22228" label="Whero L" /> (–1 stop)</>,
+          <>Done state · 0.6 opacity (vs 0.55 dark) — paper hides less</>,
+          <>FAB shadow dims to <Swatch hex="rgba(178,34,40,.40)" label="Whero 40%" /></>,
+          <>Provenance border · 50% Kōura — quiet, but findable</>,
+        ]}
+      >
+        <FrameDailyTodoLight />
+      </FrameRow>
+
+      <FrameRow
+        num="07L"
+        title="About · light"
+        sub="Manuscript register"
+        reverse
+        intro="The light About is where the system most wants to be — type-led, serif italic for ceremonial moments, no chrome competing with the words. SLGWW sigil now renders in dark Kōura against the paper. Whakataukī sits at full strength."
+        notes={[
+          <>SLGWW · dark Kōura on cream, gem stays Whero</>,
+          <>Body · 14.5 px Inter <Swatch hex="#2B2520" label="Text L" /></>,
+          <>Family rail · same three tones, recoloured (Whero L / Ember L / Kōura L)</>,
+          <>Whakataukī · Cormorant italic 18 px <Swatch hex="#1A1410" label="Strong L" /></>,
+          <>Link · dotted Kōura underline — affordance, not chrome</>,
+          <>Same no-telemetry, no-upsell footprint as dark</>,
+        ]}
+      >
+        <FrameAboutLight />
+      </FrameRow>
+
+      <FrameRow
+        num="04L"
+        title="Chat · light"
+        sub="Daylight, outdoor read"
+        intro="For the build-site / kitchen-bench register. User bubbles are a Whero 10% blush with 45% border — quieter than dark's 14/35 because cream reflects more. Tool stripe and streaming dot keep their Ember tone. Send button still rides the brand gradient — the one place a gradient is allowed in chrome — but now sends an icon on cream."
+        notes={[
+          <>User bubble · Whero 10% on Whero 45% border <Swatch hex="#B22228" /></>,
+          <>Tool stripe · Ember 10% / 45% — paper wants more saturation</>,
+          <>Streaming dot · Ember + 12 px glow @ 50% (down from 70%)</>,
+          <>Inline metric · mono Kōura @ <Swatch hex="#8C6418" /></>,
+          <>Composer · Surface 1L, Line strong L border</>,
+          <>Send icon · paper <Swatch hex="#FBF6EE" /> stroke on gradient</>,
+        ]}
+      >
+        <FrameChatLight />
+      </FrameRow>
+
+      <div className="section-band" data-screen-label="11 Section · Variants">
+        <div className="section-band__kicker">§ 2</div>
+        <div>
+          <h2>Three fun combinations</h2>
+          <p>
+            Same tokens, different rooms. Stealth turns the foreground down two stops for
+            nightstand reading. The Koru-breathing splash swaps the math-spiral hero for
+            the primary mark, breathing on a 6 s cycle. The first-launch hero treats the
+            empty state as a moment rather than something to fill.
+          </p>
+        </div>
+      </div>
+
+      <FrameRow
+        num="08"
+        title="Stealth · nightstand chat"
+        sub="OLED true black · dim foreground"
+        intro="For 3 AM thinking. Pure #000 background (OLED-true, true power-down for unlit pixels), foreground dims to a #807872 read — easy on adapted eyes. No chat bubbles; messages sit as a single column with a Kōura-quiet left rule. The Ember thinking dot is the only saturated colour on the screen — and the only thing breathing."
+        notes={[
+          <>Background <Swatch hex="#000000" label="OLED" /> — every dark pixel literally off</>,
+          <>Foreground · <Swatch hex="#807872" label="dim fg" /> never reaches white</>,
+          <>Headline · Cormorant italic — voice over volume</>,
+          <>User message · left-rule on <Swatch hex="#1C1C1C" label="Line L" /></>,
+          <>Thinking dot · Ember + double-glow, 2.4 s slow pulse</>,
+          <>Voice prompt only · "say something quietly…" mic affordance</>,
+          <>No FAB, no badge, no chrome — sleep-respecting</>,
+          <>Memory line · ◌ glyph, 30-day expiry surfaced inline</>,
+        ]}
+      >
+        <FrameStealthChat />
+      </FrameRow>
+
+      <FrameRow
+        num="09"
+        title="Koru-breathing splash"
+        sub="Alt cold start · primary mark"
+        reverse
+        intro="An alternate to splash 06. Uses the primary koru (logarithmic spiral r = a·e^(b·θ)) instead of the math-spiral, and breathes at scale 1.00 → 1.04 over 6 s instead of rotating. A radial Whero/Kōura halo behind the mark also breathes — implies a heartbeat, not a loading state. Equation is set as the foot byline."
+        notes={[
+          <>Background <Swatch hex="#070707" /> — half-stop below the standard splash</>,
+          <>Koru · 150 dp · brand gradient stroke <Swatch hex="#C1272D" /> → <Swatch hex="#D8A857" /></>,
+          <>Halo · radial Whero 22% → Kōura 10% → transparent</>,
+          <>Motion · scale 1.0 → 1.04, ease-in-out, 6 s cycle</>,
+          <>Tagline · Cormorant italic Kōura — different register from main splash</>,
+          <>Foot · the equation itself, mono caps tracked 0.22em</>,
+        ]}
+      >
+        <FrameKoruBreathSplash />
+      </FrameRow>
+
+      <FrameRow
+        num="10"
+        title="First chat · hero empty state"
+        sub="Treat the empty state as a moment"
+        intro={`Replaces a thin "How can I help you today?" with something that earns the screen. Cormorant serif headline with a Kōura italic accent, math-spiral as a 6%-opacity ghost watermark behind. Three suggestion cards demonstrate the three categories of work — chat, recall, agent-acting — each toned to its role. Composer present from the start so the affordance is never hidden.`}
+        notes={[
+          <>Hero · Cormorant 40 px, italic Kōura accent</>,
+          <>Kicker · "Kia ora" in mono Kōura caps tracked 0.22em</>,
+          <>Ghost mark · MathSpiral 310 dp @ 6% — establishes brand without competing</>,
+          <>Suggestion cards · 14 dp radius · tone-toned icon tile</>,
+          <>Whero card · build (agent-scaffolding)</>,
+          <>Kōura card · recall (memory read)</>,
+          <>Ember card · do (shell · agent-acting)</>,
+          <>Composer always-present · no first-launch friction</>,
+        ]}
+      >
+        <FrameFirstChat />
+      </FrameRow>
+
+      <div style={{ height: 80 }} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

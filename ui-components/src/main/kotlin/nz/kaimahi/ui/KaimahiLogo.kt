@@ -58,53 +58,34 @@ fun KaimahiLogo(
         val cx = w / 2f
         val cy = h / 2f
 
-        // Logarithmic spiral. The koru is r = a * e^(b * θ); we sweep θ
-        // from outside in towards the centre. Constants tuned so the
-        // outer hook lands roughly at the bounding circle and the inner
-        // turn closes neatly.
-        val a = s * 0.42f
-        val b = -0.21f  // negative -> inward as θ grows
-        val thetaStart = 0.0
-        val thetaEnd = Math.PI * 3.6  // ~1.8 turns
-        val samples = 220
-        val rotation = Math.PI * 0.55  // tilts the opening to the upper-right
+        // Logarithmic spiral r = a · e^(b · θ). Parameters match the
+        // locked design system (docs/design/marks.jsx): a=0.4, b=0.235,
+        // 2.7 turns sampled at 90 points per turn. Spiral grows
+        // outward; the inner end is the centre of the koru, the outer
+        // hook is the open end. Normalised to a 24-unit viewbox then
+        // scaled by `s`.
+        val viewboxHalf = 12f
+        val scale = s / (viewboxHalf * 2f)
+        val a = 0.4
+        val b = 0.235
+        val turns = 2.7
+        val samplesPerTurn = 90
+        val total = (turns * samplesPerTurn).toInt()
 
         val spiral = Path()
-        var moved = false
-        var t = thetaStart
-        val step = (thetaEnd - thetaStart) / samples
-        while (t <= thetaEnd) {
-            val r = a * Math.exp(b * t)
-            val angle = t + rotation
-            val x = (cx + r * cos(angle)).toFloat()
-            val y = (cy + r * sin(angle)).toFloat()
-            if (!moved) {
-                spiral.moveTo(x, y)
-                moved = true
-            } else {
-                spiral.lineTo(x, y)
-            }
-            t += step
+        for (i in 0..total) {
+            val theta = (i.toDouble() / samplesPerTurn) * Math.PI * 2.0
+            val r = a * Math.exp(b * theta)
+            val px = (cos(theta) * r).toFloat()
+            val py = (sin(theta) * r).toFloat()
+            val x = cx + px * scale
+            val y = cy + py * scale
+            if (i == 0) spiral.moveTo(x, y) else spiral.lineTo(x, y)
         }
         drawPath(
             path = spiral,
             brush = brush,
             style = Stroke(width = sw, cap = StrokeCap.Round),
-        )
-
-        // Inner dot — the koru's centre point, the seed of the unfurl.
-        val innerR = a * Math.exp(b * thetaEnd).toFloat()
-        val innerAngle = (thetaEnd + rotation).toFloat()
-        drawCircle(
-            color = when (style) {
-                KaimahiLogoStyle.Brand -> brand
-                else -> tint ?: brand
-            },
-            radius = (sw * 0.35f).coerceAtLeast(1f),
-            center = Offset(
-                cx + innerR * cos(innerAngle),
-                cy + innerR * sin(innerAngle),
-            ),
         )
     }
 }
@@ -117,144 +98,179 @@ enum class KaimahiLogoStyle {
 
 /**
  * Kaimahi splash mark — an angular geometric spiral derived from the
- * Scarlet training math-shape. Eight petal segments rotated through a
- * power series, rendered in crimson with circuit-trace decorations.
- * Use this for splash screens, About hero, "loading the model" states —
+ * Scarlet training math-shape. Eight kite-shaped petals rotating round
+ * a centre eye, with kōura radial circuit-traces fanning out at the
+ * petal mid-lines. Geometry matches the locked design system
+ * (`docs/design/marks.jsx::MathSpiral`).
+ *
+ * Use for splash screens, About hero, "loading the model" states —
  * places where the mark is the focus, not chrome.
  */
 @Composable
 fun KaimahiMathSpiral(
     modifier: Modifier = Modifier,
-    size: Dp = 96.dp,
+    size: Dp = 128.dp,
     tint: Color? = null,
 ) {
     val tokens = LocalKaimahiColors.current
     val ink = tint ?: tokens.brand
     val trace = tokens.signal
+    val eye = Color(0xFF0A0A0A)
     Canvas(modifier = modifier.size(size)) {
         val w = this.size.width
         val h = this.size.height
         val s = w.coerceAtMost(h)
         val cx = w / 2f
         val cy = h / 2f
-        val petals = 8
-        val outerR = s * 0.42f
-        val innerR = s * 0.16f
-        val rotationStep = (Math.PI * 2 / petals).toFloat()
-        val petalSpread = rotationStep * 0.82f
-        val twist = rotationStep * 0.35f
 
-        for (i in 0 until petals) {
-            val baseAngle = i * rotationStep - Math.PI.toFloat() / 2f
-            val a0 = baseAngle - petalSpread / 2f
-            val a1 = baseAngle + petalSpread / 2f
-            val ax = cx + outerR * cos(a0)
-            val ay = cy + outerR * sin(a0)
-            val bx = cx + outerR * cos(a1)
-            val by = cy + outerR * sin(a1)
-            val cxi = cx + innerR * cos(a1 + twist)
-            val cyi = cy + innerR * sin(a1 + twist)
-            val dxi = cx + innerR * cos(a0 + twist)
-            val dyi = cy + innerR * sin(a0 + twist)
-            val petal = Path().apply {
-                moveTo(ax, ay)
-                lineTo(bx, by)
-                lineTo(cxi, cyi)
-                lineTo(dxi, dyi)
-                close()
+        // Normalise to a 28-unit viewbox so the same kite vertices from
+        // marks.jsx render at any size.
+        val viewboxHalf = 14f
+        val scale = s / (viewboxHalf * 2f)
+
+        // Eight kites at 45° steps. Vertex template in local axis
+        // (along +x outward): [0,0], [3.4,-2], [10,0], [3.4,2].
+        val template = arrayOf(
+            floatArrayOf(0.0f, 0.0f),
+            floatArrayOf(3.4f, -2.0f),
+            floatArrayOf(10.0f, 0.0f),
+            floatArrayOf(3.4f, 2.0f),
+        )
+        for (i in 0 until 8) {
+            val angle = (i * 45.0 * Math.PI / 180.0).toFloat()
+            val ca = cos(angle)
+            val sa = sin(angle)
+            val petal = Path()
+            for (j in template.indices) {
+                val (lx, ly) = template[j].let { it[0] to it[1] }
+                val rx = lx * ca - ly * sa
+                val ry = lx * sa + ly * ca
+                val x = cx + rx * scale
+                val y = cy + ry * scale
+                if (j == 0) petal.moveTo(x, y) else petal.lineTo(x, y)
             }
-            drawPath(
-                path = petal,
-                brush = SolidColor(ink),
+            petal.close()
+            drawPath(petal, brush = SolidColor(ink))
+        }
+
+        // Kōura radial circuit-traces fanning out at the petal mid-lines
+        // (offset 22.5° from each petal). Short tick from r=4.5 to r=11.5
+        // plus a small terminal pip at r=12. Sized to look like PCB tracks.
+        val strokePx = (s * 0.014f).coerceAtLeast(1f)
+        for (i in 0 until 8) {
+            val angle = ((i * 45 + 22.5) * Math.PI / 180.0).toFloat()
+            val ca = cos(angle)
+            val sa = sin(angle)
+            val x1 = cx + (ca * 4.5f) * scale
+            val y1 = cy + (sa * 4.5f) * scale
+            val x2 = cx + (ca * 11.5f) * scale
+            val y2 = cy + (sa * 11.5f) * scale
+            drawLine(
+                color = trace,
+                start = Offset(x1, y1),
+                end = Offset(x2, y2),
+                strokeWidth = strokePx,
+                cap = StrokeCap.Round,
+            )
+            // Terminal pip.
+            val px = cx + (ca * 12.0f) * scale
+            val py = cy + (sa * 12.0f) * scale
+            drawCircle(
+                color = trace,
+                radius = (s * 0.02f).coerceAtLeast(1f),
+                center = Offset(px, py),
             )
         }
 
-        // Circuit-trace decoration: small connecting lines from petal
-        // outer-corners off to the edge, evoking the math-shape's
-        // PCB-like fanout. Drawn in kōura signal at low alpha.
-        val edgeR = s * 0.48f
-        for (i in 0 until petals) {
-            val angle = i * rotationStep - Math.PI.toFloat() / 2f + rotationStep / 2f
-            val fromX = cx + outerR * cos(angle)
-            val fromY = cy + outerR * sin(angle)
-            val toX = cx + edgeR * cos(angle)
-            val toY = cy + edgeR * sin(angle)
-            drawLine(
-                color = trace.copy(alpha = 0.5f),
-                start = Offset(fromX, fromY),
-                end = Offset(toX, toY),
-                strokeWidth = s * 0.012f,
-            )
-        }
+        // Centre eye — black puck on top of kōura disc.
+        drawCircle(
+            color = eye,
+            radius = 1.6f * scale,
+            center = Offset(cx, cy),
+        )
+        drawCircle(
+            color = trace,
+            radius = 1.1f * scale,
+            center = Offset(cx, cy),
+        )
     }
 }
 
 /**
- * Scarlet Sovereign Systems heraldic sigil — a circular mark with the
- * `S/L/G/W/W` letters arranged around a central vertical with a gem.
- * Use sparingly as a corner watermark on "sovereign-tier" surfaces
- * (settings → about, deployment screens, B2B-flavoured docs). Most
- * Kaimahi chrome uses `KaimahiLogo` (the koru) instead.
+ * Scarlet Sovereign Systems heraldic sigil — a kōura ring with a whero
+ * diamond gem at the centre, a vertical kōura bar bisecting the field,
+ * and four corner dots. Geometry matches the locked design system
+ * (`docs/design/marks.jsx::SLGWWSigil`).
+ *
+ * Use sparingly as a corner watermark on sovereign-tier surfaces —
+ * About screen header, deployments, B2B docs. Most chrome uses
+ * `KaimahiLogo` (the koru) instead. Pass an opacity via the standard
+ * `Modifier.alpha(...)` if you want it whispered.
  */
 @Composable
 fun KaimahiSigil(
     modifier: Modifier = Modifier,
     size: Dp = 40.dp,
-    tint: Color? = null,
 ) {
     val tokens = LocalKaimahiColors.current
-    val ink = tint ?: tokens.brand
+    val koura = tokens.signal
+    val whero = tokens.brand
     Canvas(modifier = modifier.size(size)) {
         val w = this.size.width
         val h = this.size.height
         val s = w.coerceAtMost(h)
         val cx = w / 2f
         val cy = h / 2f
-        val ring = s * 0.42f
-        val stroke = (s * 0.025f).coerceAtLeast(1f)
 
-        // Outer ring.
+        // Viewbox-normalised so geometry constants from marks.jsx
+        // (radii 10 / 8.4, corner-dot at 6.4, vertical bar 15 tall)
+        // translate directly. Source viewbox is -12..12 (24 units).
+        val viewboxHalf = 12f
+        val scale = s / (viewboxHalf * 2f)
+
+        // Outer ring at r=10.
         drawCircle(
-            color = ink,
-            radius = ring,
+            color = koura,
+            radius = 10f * scale,
             center = Offset(cx, cy),
-            style = Stroke(width = stroke),
+            style = Stroke(width = 0.6f * scale),
         )
-        // Inner ring (concentric).
+        // Inner ring at r=8.4 (slightly faded).
         drawCircle(
-            color = ink.copy(alpha = 0.4f),
-            radius = ring * 0.75f,
+            color = koura.copy(alpha = 0.6f),
+            radius = 8.4f * scale,
             center = Offset(cx, cy),
-            style = Stroke(width = stroke * 0.7f),
+            style = Stroke(width = 0.3f * scale),
         )
-
-        // Vertical bar through centre — the "spine".
-        drawLine(
-            color = ink,
-            start = Offset(cx, cy - ring * 0.92f),
-            end = Offset(cx, cy + ring * 0.92f),
-            strokeWidth = stroke * 1.1f,
+        // Vertical bar — 1.4 wide × 15 tall, centred.
+        val barHalfW = 0.7f * scale
+        val barHalfH = 7.5f * scale
+        drawRect(
+            color = koura,
+            topLeft = Offset(cx - barHalfW, cy - barHalfH),
+            size = androidx.compose.ui.geometry.Size(barHalfW * 2f, barHalfH * 2f),
         )
-
-        // Diamond gem at the centre.
-        val gem = s * 0.06f
+        // Diamond gem at centre: whero fill, kōura hairline outline.
         val gemPath = Path().apply {
-            moveTo(cx, cy - gem)
-            lineTo(cx + gem, cy)
-            lineTo(cx, cy + gem)
-            lineTo(cx - gem, cy)
+            moveTo(cx, cy - 2.6f * scale)
+            lineTo(cx + 2.4f * scale, cy)
+            lineTo(cx, cy + 2.6f * scale)
+            lineTo(cx - 2.4f * scale, cy)
             close()
         }
-        drawPath(gemPath, brush = SolidColor(ink))
-
-        // Four cardinal dots on the outer ring at NE/NW/SE/SW.
-        val dotR = s * 0.022f
-        val diag = (Math.PI / 4).toFloat()
+        drawPath(gemPath, brush = SolidColor(whero))
+        drawPath(
+            gemPath,
+            brush = SolidColor(koura),
+            style = Stroke(width = 0.35f * scale),
+        )
+        // Four corner dots at (±6.4, ±6.4).
+        val dotR = 0.7f * scale
         listOf(
-            Offset(cx + ring * cos(diag), cy - ring * sin(diag)),
-            Offset(cx - ring * cos(diag), cy - ring * sin(diag)),
-            Offset(cx + ring * cos(diag), cy + ring * sin(diag)),
-            Offset(cx - ring * cos(diag), cy + ring * sin(diag)),
-        ).forEach { drawCircle(color = ink, radius = dotR, center = it) }
+            Offset(cx + 6.4f * scale, cy - 6.4f * scale),
+            Offset(cx + 6.4f * scale, cy + 6.4f * scale),
+            Offset(cx - 6.4f * scale, cy + 6.4f * scale),
+            Offset(cx - 6.4f * scale, cy - 6.4f * scale),
+        ).forEach { drawCircle(color = koura, radius = dotR, center = it) }
     }
 }

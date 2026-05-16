@@ -1,0 +1,348 @@
+/* ============================================================
+   Kaimahi · Android free tier
+   Mobile dark-first tokens. Layered on top of (but distinct from)
+   the Cathedral AI desktop tokens — Kaimahi has its own brand
+   palette: Whero (crimson), Kōura (gold), Ember (warm).
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* ===== Surfaces (dark-first) ===== */
+  --k-bg:        #0A0A0A;
+  --k-surface-1: #111111;
+  --k-surface-2: #161616;
+  --k-surface-3: #1E1E1E;
+  --k-line:      #222222;
+  --k-line-strong: #2F2F2F;
+
+  /* ===== Brand ===== */
+  --k-whero:  #C1272D;   /* primary / brand / destructive */
+  --k-koura:  #D8A857;   /* secondary / signal / learning */
+  --k-ember:  #D97742;   /* tertiary / agent-acting */
+
+  /* ===== Text ===== */
+  --k-text-strong:    #F4ECE4;
+  --k-text:           #E0E0E0;
+  --k-text-secondary: #B0ADA6;
+  --k-text-muted:     #7A7770;
+  --k-text-disabled:  #484440;
+
+  /* ===== State ===== */
+  --k-success: #6B8E5E;
+  --k-danger:  #C1272D;
+
+  /* ===== Gradient (hero / streaming / learning halo only) ===== */
+  --k-brand-gradient: linear-gradient(135deg, #C1272D 0%, #D97742 55%, #D8A857 100%);
+
+  /* ===== Type ===== */
+  --k-font-display: 'Cormorant Garamond', 'Iowan Old Style', Georgia, serif;
+  --k-font-ui:      'Inter', system-ui, -apple-system, sans-serif;
+  --k-font-mono:    'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+
+  /* ===== Shape ===== */
+  --k-r-card: 16px;
+  --k-r-pill: 28px;
+  --k-r-chip: 12px;
+}
+
+/* ============================================================
+   Mobile frame (412 × 915 dp baseline)
+   ============================================================ */
+
+.k-frame {
+  width: 412px;
+  height: 915px;
+  background: var(--k-bg);
+  color: var(--k-text);
+  font-family: var(--k-font-ui);
+  font-size: 15px;
+  line-height: 1.45;
+  border-radius: 32px;
+  overflow: hidden;
+  position: relative;
+  -webkit-font-smoothing: antialiased;
+  box-shadow: 0 0 0 1px #1a1a1a, 0 30px 60px -20px rgba(0,0,0,0.6);
+}
+
+/* Android system status bar — keep simple, mono, muted */
+.k-statusbar {
+  height: 28px;
+  padding: 0 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--k-font-mono);
+  font-size: 11px;
+  color: var(--k-text-secondary);
+  letter-spacing: 0.04em;
+}
+.k-statusbar__right {
+  display: flex; align-items: center; gap: 5px;
+}
+
+/* Android system nav (gesture pill) */
+.k-navbar {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 18px;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+.k-navbar::before {
+  content: '';
+  width: 120px; height: 3px;
+  background: var(--k-text-muted);
+  border-radius: 3px;
+  opacity: 0.5;
+}
+
+/* ============================================================
+   Top app bar
+   ============================================================ */
+.k-appbar {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--k-line);
+  background: var(--k-bg);
+}
+.k-appbar__title {
+  font-family: var(--k-font-display);
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--k-text-strong);
+  line-height: 1;
+  letter-spacing: 0.005em;
+}
+.k-appbar__sub {
+  font-family: var(--k-font-mono);
+  font-size: 10px;
+  color: var(--k-text-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+.k-appbar__icon {
+  width: 24px; height: 24px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--k-text-secondary);
+}
+
+/* ============================================================
+   Buttons / pills
+   ============================================================ */
+.k-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 22px;
+  border-radius: var(--k-r-pill);
+  font-family: var(--k-font-ui);
+  font-size: 14.5px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.k-pill--whero {
+  background: var(--k-whero);
+  color: var(--k-text-strong);
+}
+.k-pill--ghost {
+  background: transparent;
+  color: var(--k-text);
+  border-color: var(--k-line-strong);
+}
+
+/* ============================================================
+   Cards
+   ============================================================ */
+.k-card {
+  background: var(--k-surface-1);
+  border: 1px solid var(--k-line);
+  border-radius: var(--k-r-card);
+  padding: 16px;
+  position: relative;
+}
+.k-card--stripe::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 16px; right: 16px;
+  height: 3px;
+  background: var(--k-whero);
+  border-radius: 0 0 3px 3px;
+}
+
+/* ============================================================
+   Chip
+   ============================================================ */
+.k-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--k-r-chip);
+  background: var(--k-surface-2);
+  border: 1px solid var(--k-line);
+  color: var(--k-text-secondary);
+  font-family: var(--k-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.k-chip--active {
+  background: rgba(193, 39, 45, 0.12);
+  border-color: rgba(193, 39, 45, 0.45);
+  color: var(--k-text-strong);
+}
+
+/* ============================================================
+   Section header label (in-drawer / in-list)
+   ============================================================ */
+.k-section-label {
+  font-family: var(--k-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--k-text-muted);
+  font-weight: 500;
+}
+
+/* ============================================================
+   Drawer scrim
+   ============================================================ */
+.k-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+}
+.k-drawer {
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  width: 350px;          /* ~85% of 412 */
+  background: var(--k-surface-1);
+  border-right: 1px solid var(--k-line);
+  display: flex;
+  flex-direction: column;
+}
+
+/* ============================================================
+   Annotations alongside the frame in the canvas
+   ============================================================ */
+.k-annot {
+  font-family: var(--k-font-mono);
+  font-size: 11px;
+  color: #8a857c;
+  letter-spacing: 0.02em;
+  line-height: 1.5;
+}
+.k-annot__hex {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #161616;
+  border: 1px solid #222;
+  color: #c8c1b6;
+  font-size: 10.5px;
+}
+.k-annot__title {
+  font-family: var(--k-font-display);
+  font-size: 18px;
+  color: var(--k-text-strong);
+  letter-spacing: 0.01em;
+  margin-bottom: 4px;
+}
+
+/* arrows from annotation to UI */
+.k-annot-row {
+  display: flex; align-items: baseline; gap: 8px;
+  margin-top: 6px;
+}
+.k-annot-row::before {
+  content: '—';
+  color: var(--k-text-disabled);
+}
+
+/* utility */
+.k-mono { font-family: var(--k-font-mono); }
+.k-serif { font-family: var(--k-font-display); }
+.k-italic { font-style: italic; }
+
+/* ============================================================
+   LIGHT VARIANT — scoped to .k-frame--light
+   Warm paper / manuscript register. Brand stays Whero/Kōura/Ember,
+   but Kōura is darkened to a 3:1+ contrast on cream.
+   ============================================================ */
+.k-frame--light {
+  --k-bg:           #F4ECE4;   /* warm paper */
+  --k-surface-1:    #FBF6EE;
+  --k-surface-2:    #F0E5D5;
+  --k-surface-3:    #E8DAC4;
+  --k-line:         #E2D3B9;
+  --k-line-strong:  #C9B596;
+
+  --k-whero:        #B22228;   /* very slightly darker for paper */
+  --k-koura:        #8C6418;   /* "antique" gold — read on cream */
+  --k-ember:        #B85A24;
+
+  --k-text-strong:   #1A1410;
+  --k-text:          #2B2520;
+  --k-text-secondary:#5A554D;
+  --k-text-muted:    #8A847A;
+  --k-text-disabled: #B8AE9F;
+
+  --k-brand-gradient: linear-gradient(135deg, #B22228 0%, #B85A24 55%, #8C6418 100%);
+
+  background: var(--k-bg);
+  color: var(--k-text);
+  box-shadow: 0 0 0 1px #E2D3B9, 0 30px 60px -20px rgba(80,60,40,0.25);
+}
+
+.k-frame--light .k-appbar {
+  background: var(--k-bg);
+  border-bottom-color: var(--k-line);
+}
+
+.k-frame--light .k-statusbar {
+  color: var(--k-text-secondary);
+}
+
+.k-frame--light .k-navbar::before {
+  background: var(--k-text-muted);
+  opacity: 0.4;
+}
+
+/* light statusbar icons — fill recolor handled at element level */
+
+/* ============================================================
+   STEALTH VARIANT — true OLED-black for nightstand reading.
+   ============================================================ */
+.k-frame--stealth {
+  --k-bg:           #000000;
+  --k-surface-1:    #050505;
+  --k-surface-2:    #0A0A0A;
+  --k-surface-3:    #101010;
+  --k-line:         #141414;
+  --k-line-strong:  #1C1C1C;
+
+  --k-text-strong:   #B0A8A0;   /* dim foreground — no full white */
+  --k-text:          #807872;
+  --k-text-secondary:#5A554F;
+  --k-text-muted:    #3C3833;
+  --k-text-disabled: #232020;
+
+  background: var(--k-bg);
+  color: var(--k-text);
+  box-shadow: 0 0 0 1px #0a0a0a, 0 30px 60px -20px rgba(0,0,0,0.7);
+}
+.k-frame--stealth .k-appbar { background: var(--k-bg); border-bottom-color: var(--k-line); }
+
+@keyframes kBreathe {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50%      { transform: scale(1.04); opacity: 1; }
+}
