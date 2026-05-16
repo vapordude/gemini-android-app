@@ -1,10 +1,10 @@
-package com.gemini.bridge.tools
+package nz.kaimahi.bridge.tools
 
-import com.gemini.bridge.workspace.Workspace
-import com.gemini.domain.ToolCall
-import com.gemini.domain.ToolCallResult
-import com.gemini.domain.ToolCategory
-import com.gemini.domain.ToolSpec
+import nz.kaimahi.bridge.workspace.Workspace
+import nz.kaimahi.domain.ToolCall
+import nz.kaimahi.domain.ToolCallResult
+import nz.kaimahi.domain.ToolCategory
+import nz.kaimahi.domain.ToolSpec
 
 class ReadFileTool(private val ws: Workspace) : Tool {
     override val spec = ToolSpec(

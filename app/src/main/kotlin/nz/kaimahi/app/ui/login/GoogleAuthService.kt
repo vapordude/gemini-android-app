@@ -1,6 +1,5 @@
 package nz.kaimahi.app.ui.login
 
-import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -47,7 +46,8 @@ class GoogleAuthService(private val context: Context) {
     suspend fun getAccessToken(account: GoogleSignInAccount): String? = withContext(Dispatchers.IO) {
         try {
             val scopes = "oauth2:$SCOPE_CLOUD_PLATFORM $SCOPE_GENERATIVE_LANGUAGE"
-            GoogleAuthUtil.getToken(context, account.account!!, scopes)
+            val androidAccount = account.account ?: return@withContext null
+            GoogleAuthUtil.getToken(context, androidAccount, scopes)
         } catch (e: Exception) {
             e.printStackTrace()
             null
