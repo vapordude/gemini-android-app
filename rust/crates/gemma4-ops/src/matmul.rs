@@ -28,6 +28,7 @@ const NC: usize = 128;
 ///
 /// All buffers are row-major. Panics on shape mismatch — caller is the
 /// model code which knows the exact dims at compile time.
+#[allow(clippy::too_many_arguments)] // dims are intrinsic to GEMM
 pub fn matmul_f32(
     x: &[f32], x_rows: usize, x_cols: usize,
     w: &[f32], w_rows: usize, w_cols: usize,
@@ -81,6 +82,7 @@ pub fn matmul_f32(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // tile dims are intrinsic to the micro-kernel
 fn micro_kernel_f32(
     x_base: &[f32],
     w_base: &[f32],
@@ -105,6 +107,7 @@ fn micro_kernel_f32(
 /// Same shape as [`matmul_f32`] but inputs are BF16 (stored as `u16`).
 /// Accumulation is in F32 — Qwen memo: "accumulation in extended precision
 /// to prevent catastrophic cancellation". Output is BF16.
+#[allow(clippy::too_many_arguments)] // dims are intrinsic to GEMM
 pub fn matmul_bf16_acc_f32(
     x: &[u16], x_rows: usize, x_cols: usize,
     w: &[u16], w_rows: usize, w_cols: usize,

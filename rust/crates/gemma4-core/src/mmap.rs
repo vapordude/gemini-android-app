@@ -2,7 +2,7 @@
 
 use core::ptr::NonNull;
 use std::ffi::CString;
-use std::os::raw::{c_int, c_void};
+use std::os::raw::{c_char, c_int, c_void};
 use std::path::Path;
 
 const O_RDONLY: c_int = 0;
@@ -11,7 +11,7 @@ const MAP_PRIVATE: c_int = 0x02;
 const MAP_FAILED: *mut c_void = !0usize as *mut c_void;
 
 extern "C" {
-    fn open(path: *const i8, flags: c_int) -> c_int;
+    fn open(path: *const c_char, flags: c_int) -> c_int;
     fn close(fd: c_int) -> c_int;
     fn lseek(fd: c_int, offset: i64, whence: c_int) -> i64;
     fn mmap(
@@ -37,7 +37,7 @@ impl FileMmap {
         let c_path = CString::new(path.as_os_str().to_string_lossy().as_bytes())
             .map_err(|_| "path contains NUL byte")?;
         // SAFETY: c_path is a valid NUL-terminated string for `open`.
-        let fd = unsafe { open(c_path.as_ptr() as *const i8, O_RDONLY) };
+        let fd = unsafe { open(c_path.as_ptr(), O_RDONLY) };
         if fd < 0 { return Err("open failed"); }
         // Discover size by seeking to end.
         // SAFETY: fd is a valid descriptor returned by open() above.

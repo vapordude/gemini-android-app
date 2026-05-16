@@ -11,3 +11,6 @@ gemma4-ops = { path = "../gemma4-ops" }
 [lib]
 name = "gemma4_vision"
 path = "src/lib.rs"
+
+[lints]
+workspace = true

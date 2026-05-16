@@ -56,21 +56,18 @@ pub fn gqa_attention_f32(
             let h_kv = h_q / group_size;
 
             // Compute scores[j] = ⟨ q_{s,h_q}, k_{j,h_kv} ⟩ for j = 0..kv_seq_len.
-            for j in 0..kv_seq_len {
+            let q_pos_base = kv_seq_len - seq_len + s;
+            for (j, score) in scores.iter_mut().enumerate().take(kv_seq_len) {
                 let q_off = (s * num_q_heads + h_q) * head_dim;
                 let k_off = (j * num_kv_heads + h_kv) * head_dim;
                 let mut acc: f32 = 0.0;
                 for d in 0..head_dim {
                     acc += q[q_off + d] * k_cache[k_off + d];
                 }
-                // Apply causal mask BEFORE softmax. For one-token decode
+                // Causal mask before softmax. For one-token decode
                 // (seq_len=1), s=0 corresponds to position kv_seq_len-1.
-                if mask_causal {
-                    // Effective query position in the full sequence:
-                    let q_pos = kv_seq_len - seq_len + s;
-                    if j > q_pos { acc = f32::NEG_INFINITY; }
-                }
-                scores[j] = acc;
+                if mask_causal && j > q_pos_base { acc = f32::NEG_INFINITY; }
+                *score = acc;
             }
 
             // softmax with √d_k scaling folded in.
@@ -79,10 +76,9 @@ pub fn gqa_attention_f32(
             // out[s, h_q, :] = Σ_j scores[j] · v_cache[j, h_kv, :]
             let out_off = (s * num_q_heads + h_q) * head_dim;
             for d in 0..head_dim { out[out_off + d] = 0.0; }
-            for j in 0..kv_seq_len {
-                let v_off = (j * num_kv_heads + h_kv) * head_dim;
-                let p = scores[j];
+            for (j, &p) in scores.iter().enumerate().take(kv_seq_len) {
                 if p == 0.0 { continue; } // skip exactly-zero masked positions
+                let v_off = (j * num_kv_heads + h_kv) * head_dim;
                 for d in 0..head_dim {
                     out[out_off + d] += p * v_cache[v_off + d];
                 }

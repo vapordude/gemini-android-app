@@ -11,3 +11,6 @@ publish = false
 [lib]
 name = "gemma4_core"
 path = "src/lib.rs"
+
+[lints]
+workspace = true

@@ -92,15 +92,14 @@ pub fn quantize_q4km(x: &[f32]) -> Vec<u8> {
 
 pub fn dequantize_q4km(bytes: &[u8]) -> Vec<f32> {
     let bb = q4km_block_bytes();
-    if bytes.len() % bb != 0 { return Vec::new(); }
+    if !bytes.len().is_multiple_of(bb) { return Vec::new(); }
     let n_blocks = bytes.len() / bb;
     let mut out = Vec::with_capacity(n_blocks * Q4KM_BLOCK_SIZE);
     for b in 0..n_blocks {
         let block = &bytes[b * bb..(b + 1) * bb];
         let scale_bytes = &block[16..20];
         let scale = f32::from_le_bytes([scale_bytes[0], scale_bytes[1], scale_bytes[2], scale_bytes[3]]);
-        for i in 0..16 {
-            let byte = block[i];
+        for &byte in block.iter().take(16) {
             let lo = ((byte & 0x0F) as i8).wrapping_sub(if byte & 0x08 != 0 { 16 } else { 0 });
             let hi = (((byte >> 4) & 0x0F) as i8).wrapping_sub(if (byte >> 4) & 0x08 != 0 { 16 } else { 0 });
             out.push((lo as f32) * scale);

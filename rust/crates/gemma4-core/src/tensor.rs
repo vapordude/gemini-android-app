@@ -65,9 +65,9 @@ impl<'a, T> Tensor<'a, T> {
     pub fn offset(&self, idx: &[usize]) -> usize {
         debug_assert_eq!(idx.len(), self.shape.rank, "index rank mismatch");
         let mut off = 0usize;
-        for k in 0..self.shape.rank {
-            debug_assert!(idx[k] < self.shape.dims[k], "index out of bounds");
-            off += idx[k] * self.strides[k];
+        for (k, &i_k) in idx.iter().enumerate().take(self.shape.rank) {
+            debug_assert!(i_k < self.shape.dims[k], "index out of bounds");
+            off += i_k * self.strides[k];
         }
         off
     }
@@ -130,7 +130,7 @@ mod tests {
         // For T ∈ R^{d1×d2×d3}, idx(i1,i2,i3) = i1*d2*d3 + i2*d3 + i3
         let data = (0..24u32).collect::<Vec<_>>();
         let t = Tensor::from_slice(&data, &[2, 3, 4]);
-        assert_eq!(t.offset(&[1, 2, 3]), 1 * 12 + 2 * 4 + 3);
+        assert_eq!(t.offset(&[1, 2, 3]), 12 + 2 * 4 + 3);
         assert_eq!(t.data[t.offset(&[1, 2, 3])], 23);
     }
 }

@@ -9,3 +9,6 @@ publish = false
 [lib]
 name = "gemma4_tokenizer"
 path = "src/lib.rs"
+
+[lints]
+workspace = true

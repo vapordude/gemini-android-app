@@ -69,7 +69,7 @@ impl<'a> SafeTensors<'a> {
         let e = self.get(name)?;
         if e.dtype != Dtype::F32 { return None; }
         let raw = &self.bytes[e.start..e.end];
-        if raw.len() % 4 != 0 { return None; }
+        if !raw.len().is_multiple_of(4) { return None; }
         let mut out = Vec::with_capacity(raw.len() / 4);
         for chunk in raw.chunks_exact(4) {
             out.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
@@ -82,7 +82,7 @@ impl<'a> SafeTensors<'a> {
         let e = self.get(name)?;
         if e.dtype != Dtype::BF16 { return None; }
         let raw = &self.bytes[e.start..e.end];
-        if raw.len() % 2 != 0 { return None; }
+        if !raw.len().is_multiple_of(2) { return None; }
         let mut out = Vec::with_capacity(raw.len() / 2);
         for chunk in raw.chunks_exact(2) {
             out.push(u16::from_le_bytes([chunk[0], chunk[1]]));

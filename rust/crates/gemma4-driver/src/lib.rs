@@ -16,7 +16,7 @@
 #![forbid(unsafe_op_in_unsafe_fn)]
 
 use gemma4_model::{Gemma4Config, KvCache};
-use gemma4_ops::sampler::{sample_token, SamplerCfg, Xoshiro};
+use gemma4_ops::sampler::{SamplerCfg, Xoshiro};
 use gemma4_tokenizer::Tokenizer;
 
 pub struct Session {

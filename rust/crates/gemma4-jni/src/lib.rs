@@ -16,6 +16,10 @@
 #![forbid(unsafe_op_in_unsafe_fn)]
 #![allow(non_snake_case)]
 #![allow(non_camel_case_types)]
+// Public API is consumed by the JVM via JNI symbol lookup, not by other
+// Rust callers — clippy can't see those references, so dead_code fires
+// on the entire export surface.
+#![allow(dead_code)]
 
 use std::os::raw::{c_char, c_int, c_void};
 use std::sync::Mutex;

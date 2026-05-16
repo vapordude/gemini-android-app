@@ -13,3 +13,6 @@ gemma4-tokenizer = { path = "../gemma4-tokenizer" }
 [lib]
 name = "gemma4_driver"
 path = "src/lib.rs"
+
+[lints]
+workspace = true

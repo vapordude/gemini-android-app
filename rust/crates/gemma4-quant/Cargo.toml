@@ -10,3 +10,6 @@ gemma4-core = { path = "../gemma4-core" }
 [lib]
 name = "gemma4_quant"
 path = "src/lib.rs"
+
+[lints]
+workspace = true

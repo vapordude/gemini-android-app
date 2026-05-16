@@ -19,7 +19,7 @@
 /// `i ∈ 0..head_dim/2`. Layout: `[max_pos, head_dim/2]` row-major.
 /// Two arrays — cos, sin.
 pub fn rope_freqs_f32(max_pos: usize, head_dim: usize, base: f32) -> (Vec<f32>, Vec<f32>) {
-    assert!(head_dim % 2 == 0, "head_dim must be even");
+    assert!(head_dim.is_multiple_of(2), "head_dim must be even");
     let half = head_dim / 2;
     let mut cos = vec![0.0_f32; max_pos * half];
     let mut sin = vec![0.0_f32; max_pos * half];

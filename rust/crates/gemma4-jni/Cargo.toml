@@ -13,3 +13,6 @@ gemma4-model = { path = "../gemma4-model" }
 name = "gemma4"
 crate-type = ["cdylib", "staticlib"]
 path = "src/lib.rs"
+
+[lints]
+workspace = true

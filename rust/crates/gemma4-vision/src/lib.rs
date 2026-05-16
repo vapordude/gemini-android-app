@@ -132,7 +132,7 @@ pub fn patchify(image: &[f32], cfg: &VisionConfig) -> Vec<f32> {
                     let sx = px * cfg.patch_size + dx;
                     let src_off = (sy * cfg.image_size + sx) * 3;
                     let dst_off = patch_idx * patch_len + (dy * cfg.patch_size + dx) * 3;
-                    out[dst_off + 0] = image[src_off + 0];
+                    out[dst_off]     = image[src_off];
                     out[dst_off + 1] = image[src_off + 1];
                     out[dst_off + 2] = image[src_off + 2];
                 }
