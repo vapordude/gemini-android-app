@@ -195,7 +195,8 @@ class RestGeminiCore(
         prefs.localModelPath = path
     }
     fun listLocalModels(): List<LocalModelFile> =
-        localModelsDir.listFiles().orEmpty()
+        if (!localModelsDir.exists()) emptyList()
+        else localModelsDir.listFiles()?.toList().orEmpty()
             .filter { it.isFile }
             .sortedByDescending { it.lastModified() }
             .map {

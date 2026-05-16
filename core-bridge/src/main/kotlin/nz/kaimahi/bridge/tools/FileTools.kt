@@ -40,7 +40,10 @@ class WriteFileTool(private val ws: Workspace) : Tool {
     override suspend fun execute(call: ToolCall): ToolCallResult = try {
         val path = call.arguments["path"] as? String ?: error("path is required")
         val content = call.arguments["content"] as? String ?: error("content is required")
-        val before = try { ws.read(path) } catch (e: Exception) { null }
+        val before = try { ws.read(path) } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            null
+        }
         val entry = ws.write(path, content)
         val diff = Diff.of(before.orEmpty(), content, entry.path)
         val header = if (before == null) "Created ${entry.path} (${entry.size} B)"
