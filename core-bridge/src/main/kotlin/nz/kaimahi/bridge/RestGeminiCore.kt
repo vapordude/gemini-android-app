@@ -25,6 +25,9 @@ import nz.kaimahi.bridge.tools.WriteFileTool
 import nz.kaimahi.bridge.storage.ChatStore
 import nz.kaimahi.bridge.storage.SecurePrefs
 import nz.kaimahi.bridge.workspace.Workspace
+import nz.kaimahi.domain.AgentMarker
+import nz.kaimahi.domain.AgentMarkerKind
+import nz.kaimahi.domain.AgentMarkerStatus
 import nz.kaimahi.domain.Attachment
 import nz.kaimahi.domain.GeminiCore
 import nz.kaimahi.domain.GeminiEvent
@@ -541,8 +544,19 @@ class RestGeminiCore(
 
                 val responseParts = JSONArray()
                 for (call in calls) {
+                    val running = markerForCall(call)
+                    emitMarker(running)
                     emitThinking("Running ${call.name}…")
                     val result = runSingleCall(call)
+                    // Replace the Running marker in place — same id, new
+                    // status, result snippet folded into detail. The
+                    // chat UI sees one row update, not two rows pile up.
+                    emitMarker(
+                        running.copy(
+                            status = if (result.ok) AgentMarkerStatus.Done else AgentMarkerStatus.Failed,
+                            detail = buildMarkerDetail(call, result),
+                        )
+                    )
                     responseParts.put(
                         JSONObject().put(
                             "functionResponse",
@@ -575,6 +589,99 @@ class RestGeminiCore(
 
     private fun emitThinking(label: String?) {
         _events.tryEmit(GeminiEvent.Thinking(label))
+    }
+
+    private fun emitMarker(marker: AgentMarker) {
+        _events.tryEmit(GeminiEvent.MarkerUpserted(marker))
+    }
+
+    /**
+     * Build a typed [AgentMarker] for a pending tool call. Maps each
+     * known tool name to a dedicated [AgentMarkerKind] so the chat UI
+     * can render a kind-specific icon and a useful one-line label
+     * derived from the actual call arguments (file path, grep pattern,
+     * shell command). Unknown tools fall through to a generic
+     * [AgentMarkerKind.Tool] row that just shows the tool name.
+     */
+    private fun markerForCall(call: ToolCall): AgentMarker {
+        fun arg(name: String): String =
+            call.arguments[name]?.toString().orEmpty()
+        fun shortPath(path: String): String =
+            path.substringAfterLast('/').ifBlank { path }
+        return when (call.name) {
+            "read_file" -> AgentMarker(
+                id = call.id,
+                kind = AgentMarkerKind.ReadingFile,
+                label = "Reading ${shortPath(arg("path"))}",
+            )
+            "write_file" -> AgentMarker(
+                id = call.id,
+                kind = AgentMarkerKind.WritingFile,
+                label = "Writing ${shortPath(arg("path"))}",
+            )
+            "edit_file" -> AgentMarker(
+                id = call.id,
+                kind = AgentMarkerKind.EditingFile,
+                label = "Editing ${shortPath(arg("path"))}",
+            )
+            "delete_file" -> AgentMarker(
+                id = call.id,
+                kind = AgentMarkerKind.DeletingFile,
+                label = "Deleting ${shortPath(arg("path"))}",
+            )
+            "list_dir" -> AgentMarker(
+                id = call.id,
+                kind = AgentMarkerKind.ListingDir,
+                label = "Listing ${arg("path").ifBlank { "directory" }}",
+            )
+            "glob" -> AgentMarker(
+                id = call.id,
+                kind = AgentMarkerKind.Globbing,
+                label = "Globbing ${arg("pattern")}",
+            )
+            "grep" -> AgentMarker(
+                id = call.id,
+                kind = AgentMarkerKind.Grepping,
+                label = "Grepping ${arg("pattern")}",
+            )
+            "run_shell_command" -> {
+                val cmd = arg("command")
+                val truncated = if (cmd.length > 60) cmd.substring(0, 60) + "…" else cmd
+                AgentMarker(
+                    id = call.id,
+                    kind = AgentMarkerKind.ShellCommand,
+                    label = "$ $truncated",
+                )
+            }
+            "generate_image" -> AgentMarker(
+                id = call.id,
+                kind = AgentMarkerKind.GeneratingImage,
+                label = "Generating image",
+            )
+            else -> AgentMarker(
+                id = call.id,
+                kind = AgentMarkerKind.Tool,
+                label = call.name,
+            )
+        }
+    }
+
+    /**
+     * Build the expandable detail string for a finished tool-call
+     * marker. Failure: surface the error message in full so the user
+     * can see what went wrong. Success: truncate the output to keep
+     * the expanded row readable — full output is still available via
+     * the tool-result chat bubble that lands separately.
+     */
+    private fun buildMarkerDetail(call: ToolCall, result: ToolCallResult): String {
+        val args = summariseArgs(call.arguments)
+        val outcome = if (result.ok) {
+            val output = result.output.takeIf { it.isNotBlank() } ?: "ok"
+            if (output.length > 2000) output.substring(0, 2000) + "\n…" else output
+        } else {
+            result.output.ifBlank { "failed" }
+        }
+        return if (args.isBlank()) outcome else "$args\n\n$outcome"
     }
 
     override suspend fun resetSession(): GeminiResult {

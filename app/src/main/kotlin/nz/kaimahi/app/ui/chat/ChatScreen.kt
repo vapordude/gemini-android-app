@@ -151,6 +151,7 @@ fun ChatScreen(
     val workspaceLabel by viewModel.workspaceLabel.collectAsState()
     val workspaceUri by viewModel.workspaceUri.collectAsState()
     val thinking by viewModel.thinking.collectAsState()
+    val agentMarkers by viewModel.agentMarkers.collectAsState()
     val tokenUsage by viewModel.tokenUsage.collectAsState()
     val compressing by viewModel.compressing.collectAsState()
     val pendingAttachments by viewModel.pendingAttachments.collectAsState()
@@ -184,9 +185,9 @@ fun ChatScreen(
     // the last message grows without changing `messages.size`, so include it
     // as a key to keep the view pinned to the bottom during streaming.
     val tailText = messages.lastOrNull()?.text
-    LaunchedEffect(messages.size, tailText, thinking, error) {
+    LaunchedEffect(messages.size, tailText, thinking, error, agentMarkers.size) {
         if (isNearBottom) {
-            val target = messages.size - 1 + extraTail(thinking, error)
+            val target = messages.size - 1 + extraTail(thinking, error, agentMarkers.isNotEmpty())
             if (target >= 0) listState.animateScrollToItem(target)
         }
     }
@@ -444,6 +445,7 @@ fun ChatScreen(
                         messages = messages,
                         thinking = thinking,
                         error = error,
+                        agentMarkers = agentMarkers,
                         listState = listState,
                         onCopy = { text -> copyText(context, text) },
                         onRegenerate = { viewModel.regenerateLast() },
@@ -631,6 +633,7 @@ private fun ChatList(
     messages: List<GeminiMessage>,
     thinking: String?,
     error: String?,
+    agentMarkers: List<nz.kaimahi.domain.AgentMarker>,
     listState: LazyListState,
     onCopy: (String) -> Unit,
     onRegenerate: () -> Unit,
@@ -664,6 +667,9 @@ private fun ChatList(
                     onCopy = onCopy
                 )
             }
+        }
+        if (agentMarkers.isNotEmpty()) item("agent-markers") {
+            AgentMarkerStrip(agentMarkers)
         }
         if (thinking != null) item("thinking") { ThinkingBubble(thinking) }
         if (error != null) item("error") {
@@ -714,8 +720,9 @@ private fun groupMessages(messages: List<GeminiMessage>): List<ChatItem> {
     return out
 }
 
-private fun extraTail(thinking: String?, error: String?): Int {
+private fun extraTail(thinking: String?, error: String?, hasMarkers: Boolean): Int {
     var n = 0
+    if (hasMarkers) n++
     if (thinking != null) n++
     if (error != null) n++
     return n

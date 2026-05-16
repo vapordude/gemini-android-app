@@ -54,4 +54,73 @@ sealed class GeminiEvent {
      * auto-compression banner.
      */
     data class TokenUsage(val total: Int, val limit: Int?) : GeminiEvent()
+    /**
+     * Typed progress marker — "reading x file", "grepping", "editing
+     * config.yaml", "running shell command". Upserted by id: the same
+     * marker arrives first with [AgentMarkerStatus.Running] (no detail
+     * yet) and then again with status Done/Failed and the detail filled
+     * in. The UI shows a one-line summary and expands to detail on tap.
+     * Replaces the single-string `Thinking` label as the canonical
+     * agent-activity surface; `Thinking` stays for backward compat.
+     */
+    data class MarkerUpserted(val marker: AgentMarker) : GeminiEvent()
+    /** Clear a single marker by id (e.g. once it scrolls off relevance). */
+    data class MarkerCleared(val id: String) : GeminiEvent()
+}
+
+/**
+ * A typed status marker the agent emits while it works. Surfaces in the
+ * chat UI as a row with a kind icon, a one-line label always visible,
+ * and an optional expandable detail block. The status enum lets the row
+ * render an in-progress spinner vs a done check vs a failure cross.
+ */
+data class AgentMarker(
+    val id: String,
+    val kind: AgentMarkerKind,
+    /** Always-visible primary label, e.g. "Reading config.yaml". */
+    val label: String,
+    /**
+     * Optional expandable detail — diff text, stdout, match list, the
+     * full tool arguments JSON, etc. UI hides this until the row is
+     * tapped to expand.
+     */
+    val detail: String? = null,
+    val status: AgentMarkerStatus = AgentMarkerStatus.Running,
+    val timestamp: Long = System.currentTimeMillis(),
+)
+
+enum class AgentMarkerKind {
+    /** Model is producing text output. */
+    Responding,
+    /** Internal reasoning, no tool call yet. */
+    Thinking,
+    /** read_file tool. */
+    ReadingFile,
+    /** write_file tool. */
+    WritingFile,
+    /** edit_file tool. */
+    EditingFile,
+    /** delete_file tool. */
+    DeletingFile,
+    /** list_dir tool. */
+    ListingDir,
+    /** glob tool. */
+    Globbing,
+    /** grep tool. */
+    Grepping,
+    /** run_shell_command tool. */
+    ShellCommand,
+    /** generate_image tool. */
+    GeneratingImage,
+    /** Any tool without a dedicated kind — uses the tool name as label. */
+    Tool,
+}
+
+enum class AgentMarkerStatus {
+    /** Work in progress — UI shows a spinner. */
+    Running,
+    /** Completed successfully — UI shows a check. */
+    Done,
+    /** Completed with an error — UI shows a cross + the error in detail. */
+    Failed,
 }

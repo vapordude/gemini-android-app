@@ -9,6 +9,8 @@ import androidx.lifecycle.viewModelScope
 import nz.kaimahi.app.ui.local.InferenceMode
 import nz.kaimahi.bridge.LocalModelFile
 import nz.kaimahi.bridge.RestGeminiCore
+import nz.kaimahi.domain.AgentMarker
+import nz.kaimahi.domain.AgentMarkerStatus
 import nz.kaimahi.domain.Attachment
 import nz.kaimahi.domain.GeminiEvent
 import nz.kaimahi.domain.GeminiMessage
@@ -90,6 +92,16 @@ class ChatViewModel(
     private val _thinking = MutableStateFlow<String?>(null)
     val thinking: StateFlow<String?> = _thinking.asStateFlow()
 
+    /**
+     * Live typed agent activity. Each entry is one piece of work the
+     * agent is doing or has just done — reading a file, grepping,
+     * editing, running a shell command. The UI renders the list as
+     * expandable rows so the user can tap any one to see the detail.
+     * Cleared on `startNewChat`.
+     */
+    private val _agentMarkers = MutableStateFlow<List<AgentMarker>>(emptyList())
+    val agentMarkers: StateFlow<List<AgentMarker>> = _agentMarkers.asStateFlow()
+
     private val _tokenUsage = MutableStateFlow(
         TokenUsageState(core.currentTokenUsage().first, core.currentTokenUsage().second)
     )
@@ -167,6 +179,22 @@ class ChatViewModel(
                     is GeminiEvent.Notice -> _error.value = ev.message
                     is GeminiEvent.TokenUsage ->
                         _tokenUsage.value = TokenUsageState(ev.total, ev.limit)
+                    is GeminiEvent.MarkerUpserted -> {
+                        // Upsert by id. New markers append, status changes
+                        // replace in place so the UI doesn't flicker the
+                        // row out and back in when a Running marker
+                        // transitions to Done.
+                        val current = _agentMarkers.value
+                        val idx = current.indexOfFirst { it.id == ev.marker.id }
+                        _agentMarkers.value = if (idx >= 0) {
+                            current.toMutableList().apply { this[idx] = ev.marker }
+                        } else {
+                            current + ev.marker
+                        }
+                    }
+                    is GeminiEvent.MarkerCleared -> {
+                        _agentMarkers.value = _agentMarkers.value.filterNot { it.id == ev.id }
+                    }
                 }
             }
         }
@@ -310,6 +338,7 @@ class ChatViewModel(
         _pendingCall.value = null
         _thinking.value = null
         _pendingAttachments.value = emptyList()
+        _agentMarkers.value = emptyList()
     }
 
     fun sendMessage(text: String) {
