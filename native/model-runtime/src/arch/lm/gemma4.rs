@@ -190,9 +190,7 @@ impl Gemma4Config {
                 let first = arr
                     .first()
                     .and_then(MetaValue::as_u32)
-                    .ok_or(LoadError::MissingMetadata(
-                        "gemma4.feed_forward_length[0]",
-                    ))?;
+                    .ok_or(LoadError::MissingMetadata("gemma4.feed_forward_length[0]"))?;
                 // Sanity: warn (via a clean error) only if non-uniform,
                 // since downstream scratch buffers assume a single dim.
                 if arr.iter().any(|v| v.as_u32() != Some(first)) {
