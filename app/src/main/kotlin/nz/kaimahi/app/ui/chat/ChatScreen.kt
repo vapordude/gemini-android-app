@@ -39,6 +39,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.Build
@@ -151,6 +152,7 @@ fun ChatScreen(
     val workspaceLabel by viewModel.workspaceLabel.collectAsState()
     val workspaceUri by viewModel.workspaceUri.collectAsState()
     val thinking by viewModel.thinking.collectAsState()
+    val agentMarkers by viewModel.agentMarkers.collectAsState()
     val tokenUsage by viewModel.tokenUsage.collectAsState()
     val compressing by viewModel.compressing.collectAsState()
     val pendingAttachments by viewModel.pendingAttachments.collectAsState()
@@ -159,6 +161,11 @@ fun ChatScreen(
         ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) viewModel.attachImageFromUri(context, uri)
+    }
+    val docPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) viewModel.attachDocumentFromUri(context, uri)
     }
     val folderPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -179,14 +186,26 @@ fun ChatScreen(
         }
     }
 
+    // Auto-clear errors after a few seconds so they don't accumulate
+    // as noise. The user can dismiss earlier; retry is still available
+    // via the retry button on the error bubble itself. 8s is long
+    // enough to read a typical error and decide, short enough that
+    // the chat doesn't carry stale state forward indefinitely.
+    LaunchedEffect(error) {
+        if (error != null) {
+            kotlinx.coroutines.delay(8000L)
+            viewModel.clearError()
+        }
+    }
+
     // Only auto-scroll when the user is already near the bottom — otherwise
     // they get yanked out of whatever they were reading. The streamed text of
     // the last message grows without changing `messages.size`, so include it
     // as a key to keep the view pinned to the bottom during streaming.
     val tailText = messages.lastOrNull()?.text
-    LaunchedEffect(messages.size, tailText, thinking, error) {
+    LaunchedEffect(messages.size, tailText, thinking, error, agentMarkers.size) {
         if (isNearBottom) {
-            val target = messages.size - 1 + extraTail(thinking, error)
+            val target = messages.size - 1 + extraTail(thinking, error, agentMarkers.isNotEmpty())
             if (target >= 0) listState.animateScrollToItem(target)
         }
     }
@@ -417,6 +436,29 @@ fun ChatScreen(
                             )
                         )
                     },
+                    onAttachDoc = {
+                        // MIME list covers markdown / plain text / source-code
+                        // and common config formats. Image-of-doc files go
+                        // through the image picker instead — multimodal
+                        // models do OCR natively, no separate path needed.
+                        docPicker.launch(
+                            arrayOf(
+                                "text/markdown",
+                                "text/x-markdown",
+                                "text/plain",
+                                "text/x-rst",
+                                "text/x-python",
+                                "text/x-kotlin",
+                                "text/x-java-source",
+                                "text/x-c",
+                                "text/x-rust",
+                                "application/json",
+                                "application/x-yaml",
+                                "text/yaml",
+                                "text/*",
+                            )
+                        )
+                    },
                     onRemoveAttachment = { id -> viewModel.removeAttachment(id) },
                     onSend = {
                         if (textState.isNotBlank() || pendingAttachments.isNotEmpty()) {
@@ -444,6 +486,7 @@ fun ChatScreen(
                         messages = messages,
                         thinking = thinking,
                         error = error,
+                        agentMarkers = agentMarkers,
                         listState = listState,
                         onCopy = { text -> copyText(context, text) },
                         onRegenerate = { viewModel.regenerateLast() },
@@ -631,6 +674,7 @@ private fun ChatList(
     messages: List<GeminiMessage>,
     thinking: String?,
     error: String?,
+    agentMarkers: List<nz.kaimahi.domain.AgentMarker>,
     listState: LazyListState,
     onCopy: (String) -> Unit,
     onRegenerate: () -> Unit,
@@ -665,6 +709,7 @@ private fun ChatList(
                 )
             }
         }
+        agentMarkerItems(agentMarkers)
         if (thinking != null) item("thinking") { ThinkingBubble(thinking) }
         if (error != null) item("error") {
             ErrorBubble(error, onRetry = onRetry, onDismiss = onDismissError)
@@ -714,8 +759,9 @@ private fun groupMessages(messages: List<GeminiMessage>): List<ChatItem> {
     return out
 }
 
-private fun extraTail(thinking: String?, error: String?): Int {
+private fun extraTail(thinking: String?, error: String?, hasMarkers: Boolean): Int {
     var n = 0
+    if (hasMarkers) n++
     if (thinking != null) n++
     if (error != null) n++
     return n
@@ -1119,6 +1165,7 @@ fun BottomChatBar(
     onTextChange: (String) -> Unit,
     onAddClick: () -> Unit,
     onAttachImage: () -> Unit,
+    onAttachDoc: () -> Unit,
     onRemoveAttachment: (String) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit
@@ -1160,6 +1207,13 @@ fun BottomChatBar(
                             Icon(
                                 Icons.Default.Add,
                                 contentDescription = "Quick actions",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        IconButton(onClick = onAttachDoc, enabled = !isLoading) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Article,
+                                contentDescription = "Attach document",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -1257,8 +1311,12 @@ private fun AttachmentChip(attachment: PendingAttachment, onRemove: () -> Unit) 
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)
         ) {
+            // Text-doc attachments get a document icon, binary
+            // (image) attachments keep the image icon. The MIME type
+            // is the discriminator — set at attach time.
+            val isText = attachment.mimeType.startsWith("text/")
             Icon(
-                Icons.Default.Image,
+                if (isText) Icons.AutoMirrored.Filled.Article else Icons.Default.Image,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(18.dp)

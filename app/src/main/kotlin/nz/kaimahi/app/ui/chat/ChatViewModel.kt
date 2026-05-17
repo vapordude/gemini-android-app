@@ -9,6 +9,8 @@ import androidx.lifecycle.viewModelScope
 import nz.kaimahi.app.ui.local.InferenceMode
 import nz.kaimahi.bridge.LocalModelFile
 import nz.kaimahi.bridge.RestGeminiCore
+import nz.kaimahi.domain.AgentMarker
+import nz.kaimahi.domain.AgentMarkerStatus
 import nz.kaimahi.domain.Attachment
 import nz.kaimahi.domain.GeminiEvent
 import nz.kaimahi.domain.GeminiMessage
@@ -90,6 +92,16 @@ class ChatViewModel(
     private val _thinking = MutableStateFlow<String?>(null)
     val thinking: StateFlow<String?> = _thinking.asStateFlow()
 
+    /**
+     * Live typed agent activity. Each entry is one piece of work the
+     * agent is doing or has just done — reading a file, grepping,
+     * editing, running a shell command. The UI renders the list as
+     * expandable rows so the user can tap any one to see the detail.
+     * Cleared on `startNewChat`.
+     */
+    private val _agentMarkers = MutableStateFlow<List<AgentMarker>>(emptyList())
+    val agentMarkers: StateFlow<List<AgentMarker>> = _agentMarkers.asStateFlow()
+
     private val _tokenUsage = MutableStateFlow(
         TokenUsageState(core.currentTokenUsage().first, core.currentTokenUsage().second)
     )
@@ -167,6 +179,30 @@ class ChatViewModel(
                     is GeminiEvent.Notice -> _error.value = ev.message
                     is GeminiEvent.TokenUsage ->
                         _tokenUsage.value = TokenUsageState(ev.total, ev.limit)
+                    is GeminiEvent.MarkerUpserted -> {
+                        // Upsert by id. New markers append, status changes
+                        // replace in place so the UI doesn't flicker the
+                        // row out and back in when a Running marker
+                        // transitions to Done. Cap accumulation at
+                        // MAX_AGENT_MARKERS so a long session doesn't
+                        // grow unbounded — the oldest markers drop off
+                        // the start of the list.
+                        val current = _agentMarkers.value
+                        val idx = current.indexOfFirst { it.id == ev.marker.id }
+                        val updated = if (idx >= 0) {
+                            current.toMutableList().apply { this[idx] = ev.marker }
+                        } else {
+                            current + ev.marker
+                        }
+                        _agentMarkers.value = if (updated.size > MAX_AGENT_MARKERS) {
+                            updated.takeLast(MAX_AGENT_MARKERS)
+                        } else {
+                            updated
+                        }
+                    }
+                    is GeminiEvent.MarkerCleared -> {
+                        _agentMarkers.value = _agentMarkers.value.filterNot { it.id == ev.id }
+                    }
                 }
             }
         }
@@ -310,24 +346,37 @@ class ChatViewModel(
         _pendingCall.value = null
         _thinking.value = null
         _pendingAttachments.value = emptyList()
+        _agentMarkers.value = emptyList()
     }
 
     fun sendMessage(text: String) {
         val attachments = _pendingAttachments.value
         if (text.isBlank() && attachments.isEmpty()) return
         if (sendJob?.isActive == true) return
+        // Split text-document attachments from binary (image) attachments.
+        // Text gets folded into the prompt; binary goes through the
+        // existing inlineData API payload.
+        val (textDocs, binaries) = attachments.partition { it.mimeType.startsWith("text/") }
+        val effectiveText = if (textDocs.isEmpty()) text else buildString {
+            for (doc in textDocs) {
+                append("## Attached: ").append(doc.displayName).append("\n\n")
+                append(doc.bytes.toString(Charsets.UTF_8).trimEnd())
+                append("\n\n---\n\n")
+            }
+            append(text)
+        }
         if (_inferenceMode.value == InferenceMode.LOCAL_AGENT) {
-            sendLocalMessage(text, attachments)
+            sendLocalMessage(effectiveText, binaries)
             return
         }
-        lastUserPrompt = text
-        val payload = attachments.map { Attachment(it.bytes, it.mimeType, it.localPath) }
+        lastUserPrompt = effectiveText
+        val payload = binaries.map { Attachment(it.bytes, it.mimeType, it.localPath) }
         _pendingAttachments.value = emptyList()
         sendJob = viewModelScope.launch {
             _isLoading.value = true
             try {
-                val result = if (payload.isEmpty()) core.sendMessage(text)
-                    else core.sendMessage(text, payload)
+                val result = if (payload.isEmpty()) core.sendMessage(effectiveText)
+                    else core.sendMessage(effectiveText, payload)
                 when (result) {
                     is GeminiResult.Success -> {}
                     is GeminiResult.Error -> _error.value = result.message
@@ -482,6 +531,43 @@ class ChatViewModel(
             }
             if (loaded.bytes.size > MAX_ATTACHMENT_BYTES) {
                 _error.value = "Image too large (max 15 MB)"
+                return@launch
+            }
+            _pendingAttachments.value = _pendingAttachments.value + loaded
+        }
+    }
+
+    /**
+     * Attach a text document — markdown, plain text, source code, RST,
+     * design specs. Read as UTF-8 and folded into the next outgoing
+     * message text as a clearly-delimited block, so the model sees the
+     * actual content rather than a binary file reference. Works
+     * uniformly across cloud Gemini and local-agent paths because
+     * everything ends up as prompt text.
+     *
+     * Image-of-document attachments should go through
+     * [attachImageFromUri] instead — modern multimodal models do OCR
+     * natively, so a screenshot of a design doc is just an image.
+     */
+    fun attachDocumentFromUri(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            val loaded = withContext(Dispatchers.IO) { readAttachment(context, uri) }
+            if (loaded == null) {
+                _error.value = "Could not read the selected document"
+                return@launch
+            }
+            if (loaded.bytes.size > MAX_ATTACHMENT_BYTES) {
+                _error.value = "Document too large (max 15 MB)"
+                return@launch
+            }
+            // Validate that the bytes are actually decodable as text.
+            // Binary garbage gets rejected here so we never try to fold
+            // it into a prompt.
+            val decoded = runCatching { loaded.bytes.toString(Charsets.UTF_8) }.getOrNull()
+            if (decoded == null || decoded.any { it.code == 0 }) {
+                _error.value = "That doesn't look like a text document. For images of " +
+                    "designs or screenshots, use the image attachment instead — the model " +
+                    "reads them natively."
                 return@launch
             }
             _pendingAttachments.value = _pendingAttachments.value + loaded
@@ -749,6 +835,15 @@ class ChatViewModel(
 }
 
 private const val MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024
+
+/**
+ * Soft cap on accumulated agent activity markers within a chat
+ * session. Beyond this, the oldest markers drop off so the LazyColumn
+ * doesn't carry an unbounded list across hundreds of tool-call
+ * cycles. 50 covers any single dense turn plus a few rounds of
+ * context — for full session replay, use the trace export.
+ */
+private const val MAX_AGENT_MARKERS = 50
 
 data class PendingAttachment(
     val id: String,

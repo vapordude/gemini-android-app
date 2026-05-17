@@ -1,6 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive launcher icon. Cathedral dark background (#0E1416) +
+  Kaimahi koru in the brand gradient (whero → ember → kōura).
+  Monochrome variant for Android 13+ themed icons uses the same
+  geometry, single colour, OS-tinted.
+
+  Background is intentionally near-black, not red — the brand
+  uses whero on dark, never red-on-red (that's the Soviet-flag
+  failure mode the design notes explicitly call out).
+-->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@drawable/ic_launcher_background" />
-    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
-    <monochrome android:drawable="@mipmap/ic_launcher_foreground" />
+    <foreground android:drawable="@drawable/ic_launcher_koru" />
+    <monochrome android:drawable="@drawable/ic_launcher_koru_mono" />
 </adaptive-icon>

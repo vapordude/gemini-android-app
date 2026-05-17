@@ -86,7 +86,15 @@ impl From<gguf_loader::LoadError> for LoadError {
 }
 
 /// Load any model. Architecture comes from `general.architecture`
-/// metadata. Family is inferred from `general.type` (defaults to "lm").
+/// metadata. Dispatch is purely on architecture name — the
+/// `general.type` field that earlier revisions consulted is not
+/// reliably populated by upstream GGUF packers (a Gemma 4 quant in
+/// the wild often has no `general.type` at all, or has it set to the
+/// architecture name, or to an empty string). Gating on it produced
+/// false `UnknownArchitecture` errors for files whose architecture
+/// *was* recognised. When diffusion architectures land, they grow a
+/// new arm here.
+///
 /// The returned model has every tensor dequantized to F32 in memory —
 /// see [`arch::lm::gemma4::Gemma4Model::load`] for the memory caveat.
 pub fn load(path: &Path) -> Result<LoadedModel, LoadError> {
@@ -95,12 +103,6 @@ pub fn load(path: &Path) -> Result<LoadedModel, LoadError> {
         .file
         .arch_tag()
         .ok_or(LoadError::MissingMetadata("general.architecture"))?
-        .to_string();
-    let family = gguf
-        .file
-        .get("general.type")
-        .and_then(gguf_loader::MetaValue::as_string)
-        .unwrap_or("lm")
         .to_string();
 
     // D1 — model loaded. Per the diag plan, capture arch + ISA + thread
@@ -111,14 +113,15 @@ pub fn load(path: &Path) -> Result<LoadedModel, LoadError> {
         threads: 1,
     });
 
-    match (family.as_str(), arch.as_str()) {
-        ("lm", "gemma4" | "gemma-4" | "gemma" | "gemma2" | "gemma3") => Ok(LoadedModel::Language(
-            Box::new(arch::lm::gemma4::Gemma4Model::load(&gguf)?),
-        )),
-        ("diffusion", a) => Err(LoadError::UnknownArchitecture(format!(
-            "diffusion arch '{a}' not yet implemented (see arch/diffusion/)"
+    match classify_arch(arch.as_str()) {
+        Ok("lm/gemma4") => Ok(LoadedModel::Language(Box::new(
+            arch::lm::gemma4::Gemma4Model::load(&gguf)?,
         ))),
-        (_, other) => Err(LoadError::UnknownArchitecture(other.to_string())),
+        // Unreachable today; lands when classify_arch grows new arms.
+        Ok(other) => Err(LoadError::UnknownArchitecture(format!(
+            "internal: unhandled dispatch arm '{other}'"
+        ))),
+        Err(other) => Err(LoadError::UnknownArchitecture(other.to_string())),
     }
 }
 
@@ -139,5 +142,45 @@ pub fn load_language(path: &Path) -> Result<Box<dyn LanguageModel>, LoadError> {
         LoadedModel::Image(_) => Err(LoadError::UnknownArchitecture(
             "expected a language model, got an image model".to_string(),
         )),
+    }
+}
+
+/// Classify a `general.architecture` string into the loader arm that
+/// should handle it. Pulled out of `load()` so the dispatch table is
+/// independently testable — a regression that re-introduces a gate
+/// (like the old `general.type` check that broke real-world GGUFs)
+/// surfaces here without needing a synthetic model file.
+#[doc(hidden)]
+pub fn classify_arch(arch: &str) -> Result<&'static str, &str> {
+    match arch {
+        "gemma4" | "gemma-4" | "gemma" | "gemma2" | "gemma3" => Ok("lm/gemma4"),
+        other => Err(other),
+    }
+}
+
+#[cfg(test)]
+mod dispatch_tests {
+    use super::*;
+
+    #[test]
+    fn gemma4_dispatches_to_lm_gemma4() {
+        assert_eq!(classify_arch("gemma4"), Ok("lm/gemma4"));
+    }
+
+    #[test]
+    fn gemma_family_strings_all_dispatch_to_lm_gemma4() {
+        for arch in &["gemma", "gemma2", "gemma3", "gemma4", "gemma-4"] {
+            assert_eq!(
+                classify_arch(arch),
+                Ok("lm/gemma4"),
+                "arch {arch:?} should dispatch to lm/gemma4"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_arch_returns_the_offending_string() {
+        assert_eq!(classify_arch("llama3"), Err("llama3"));
+        assert_eq!(classify_arch(""), Err(""));
     }
 }
