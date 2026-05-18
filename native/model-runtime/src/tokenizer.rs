@@ -422,11 +422,10 @@ mod tests {
 
     #[test]
     fn decode_piece_handles_out_of_range_id() {
-        let t = fixture(&["<unk>", "<s>", "</s>"], &[
-            TokenType::Unknown,
-            TokenType::Control,
-            TokenType::Control,
-        ]);
+        let t = fixture(
+            &["<unk>", "<s>", "</s>"],
+            &[TokenType::Unknown, TokenType::Control, TokenType::Control],
+        );
         assert_eq!(t.decode_piece(999_999), "");
     }
 }
