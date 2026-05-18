@@ -68,10 +68,7 @@ mod android {
             match catch_unwind(AssertUnwindSafe(move || $body)) {
                 Ok(v) => v,
                 Err(payload) => {
-                    set_last_error(format!(
-                        "panic across FFI: {}",
-                        panic_message(&*payload)
-                    ));
+                    set_last_error(format!("panic across FFI: {}", panic_message(&*payload)));
                     $default
                 }
             }
@@ -254,110 +251,110 @@ mod android {
         seed: jlong,
     ) -> jint {
         ffi_guard!(STATUS_INTERNAL, {
-        let prompt_s: String = match env.get_string(&prompt) {
-            Ok(s) => s.into(),
-            Err(_) => return STATUS_EMPTY_PROMPT,
-        };
-        if prompt_s.is_empty() {
-            return STATUS_EMPTY_PROMPT;
-        }
-
-        // Resolve onToken(String) once.
-        let cb_class = match env.get_object_class(&callback) {
-            Ok(c) => c,
-            Err(_) => return STATUS_INTERNAL,
-        };
-        let method = match env.get_method_id(&cb_class, "onToken", "(Ljava/lang/String;)V") {
-            Ok(m) => m,
-            Err(_) => return STATUS_INTERNAL,
-        };
-
-        // Pull tokenizer + token ids out of the session under the lock
-        // so we can release the lock for the long generation loop.
-        let (mut prompt_ids, eos_id, vocab_size, hidden) = match with(handle, |sess| {
-            let tok = sess.tokenizer.as_ref()?;
-            let info = sess.model.info();
-            let prompt_ids = tok.encode(&prompt_s);
-            Some((prompt_ids, tok.eos_id, info.vocab_size, info.context_length))
-        }) {
-            Some(Some(v)) => v,
-            Some(None) => return STATUS_NO_TOKENIZER,
-            None => return STATUS_INVALID_HANDLE,
-        };
-        let _ = vocab_size;
-        let _ = hidden;
-        if prompt_ids.is_empty() {
-            return STATUS_EMPTY_PROMPT;
-        }
-
-        // Reseed if requested.
-        if seed != 0 {
-            with(handle, |sess| sess.rng = SamplerState::new(seed as u64));
-        }
-
-        // Prefill: run forward on every prompt token but emit nothing.
-        let mut last_token: u32 = 0;
-        for &id in &prompt_ids {
-            let _ = with(handle, |sess| {
-                let logits = sess.model.forward(id, &mut sess.kv);
-                last_token = id;
-                let _ = logits;
-            });
-        }
-
-        let max_new = max_tokens.max(1) as usize;
-        let temp = temperature.max(0.0);
-        let k = top_k.max(1) as usize;
-
-        // Decode loop. We sample using the most recent forward()'s
-        // logits, then feed the sampled token back as the next input.
-        for _ in 0..max_new {
-            let next_id = match with(handle, |sess| {
-                let logits = sess.model.forward(last_token, &mut sess.kv);
-                if temp <= 0.0 {
-                    argmax(logits)
-                } else {
-                    sample(logits, temp, k, &mut sess.rng)
-                }
-            }) {
-                Some(id) => id,
-                None => return STATUS_INVALID_HANDLE,
+            let prompt_s: String = match env.get_string(&prompt) {
+                Ok(s) => s.into(),
+                Err(_) => return STATUS_EMPTY_PROMPT,
             };
-            last_token = next_id;
-            // Decode the single new token as a streaming piece. We use
-            // `decode_piece` (not `decode(&[next_id])`) because the bulk
-            // decoder strips one leading space, which would collapse the
-            // space between every word in streamed output —
-            // `▁hello ▁world` → `helloworld` instead of `hello world`.
-            let piece = match with(handle, |sess| {
-                sess.tokenizer.as_ref().map(|t| t.decode_piece(next_id))
+            if prompt_s.is_empty() {
+                return STATUS_EMPTY_PROMPT;
+            }
+
+            // Resolve onToken(String) once.
+            let cb_class = match env.get_object_class(&callback) {
+                Ok(c) => c,
+                Err(_) => return STATUS_INTERNAL,
+            };
+            let method = match env.get_method_id(&cb_class, "onToken", "(Ljava/lang/String;)V") {
+                Ok(m) => m,
+                Err(_) => return STATUS_INTERNAL,
+            };
+
+            // Pull tokenizer + token ids out of the session under the lock
+            // so we can release the lock for the long generation loop.
+            let (mut prompt_ids, eos_id, vocab_size, hidden) = match with(handle, |sess| {
+                let tok = sess.tokenizer.as_ref()?;
+                let info = sess.model.info();
+                let prompt_ids = tok.encode(&prompt_s);
+                Some((prompt_ids, tok.eos_id, info.vocab_size, info.context_length))
             }) {
-                Some(Some(p)) => p,
+                Some(Some(v)) => v,
                 Some(None) => return STATUS_NO_TOKENIZER,
                 None => return STATUS_INVALID_HANDLE,
             };
-            // Emit the piece.
-            let jpiece = match env.new_string(&piece) {
-                Ok(j) => j,
-                Err(_) => return STATUS_INTERNAL,
-            };
-            // SAFETY: callable_method validated above; signature matches.
-            let _ = unsafe {
-                env.call_method_unchecked(
-                    &callback,
-                    method,
-                    jni::signature::ReturnType::Primitive(jni::signature::Primitive::Void),
-                    &[JValue::Object(&JObject::from(jpiece)).as_jni()],
-                )
-            };
-            if let Some(eos) = eos_id {
-                if next_id == eos {
-                    break;
+            let _ = vocab_size;
+            let _ = hidden;
+            if prompt_ids.is_empty() {
+                return STATUS_EMPTY_PROMPT;
+            }
+
+            // Reseed if requested.
+            if seed != 0 {
+                with(handle, |sess| sess.rng = SamplerState::new(seed as u64));
+            }
+
+            // Prefill: run forward on every prompt token but emit nothing.
+            let mut last_token: u32 = 0;
+            for &id in &prompt_ids {
+                let _ = with(handle, |sess| {
+                    let logits = sess.model.forward(id, &mut sess.kv);
+                    last_token = id;
+                    let _ = logits;
+                });
+            }
+
+            let max_new = max_tokens.max(1) as usize;
+            let temp = temperature.max(0.0);
+            let k = top_k.max(1) as usize;
+
+            // Decode loop. We sample using the most recent forward()'s
+            // logits, then feed the sampled token back as the next input.
+            for _ in 0..max_new {
+                let next_id = match with(handle, |sess| {
+                    let logits = sess.model.forward(last_token, &mut sess.kv);
+                    if temp <= 0.0 {
+                        argmax(logits)
+                    } else {
+                        sample(logits, temp, k, &mut sess.rng)
+                    }
+                }) {
+                    Some(id) => id,
+                    None => return STATUS_INVALID_HANDLE,
+                };
+                last_token = next_id;
+                // Decode the single new token as a streaming piece. We use
+                // `decode_piece` (not `decode(&[next_id])`) because the bulk
+                // decoder strips one leading space, which would collapse the
+                // space between every word in streamed output —
+                // `▁hello ▁world` → `helloworld` instead of `hello world`.
+                let piece = match with(handle, |sess| {
+                    sess.tokenizer.as_ref().map(|t| t.decode_piece(next_id))
+                }) {
+                    Some(Some(p)) => p,
+                    Some(None) => return STATUS_NO_TOKENIZER,
+                    None => return STATUS_INVALID_HANDLE,
+                };
+                // Emit the piece.
+                let jpiece = match env.new_string(&piece) {
+                    Ok(j) => j,
+                    Err(_) => return STATUS_INTERNAL,
+                };
+                // SAFETY: callable_method validated above; signature matches.
+                let _ = unsafe {
+                    env.call_method_unchecked(
+                        &callback,
+                        method,
+                        jni::signature::ReturnType::Primitive(jni::signature::Primitive::Void),
+                        &[JValue::Object(&JObject::from(jpiece)).as_jni()],
+                    )
+                };
+                if let Some(eos) = eos_id {
+                    if next_id == eos {
+                        break;
+                    }
                 }
             }
-        }
-        let _ = prompt_ids.pop(); // silence unused-mut warning on stable
-        STATUS_OK
+            let _ = prompt_ids.pop(); // silence unused-mut warning on stable
+            STATUS_OK
         })
     }
 
