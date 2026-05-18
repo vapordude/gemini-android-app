@@ -6,8 +6,10 @@ import nz.kaimahi.domain.InferenceEngine
 import nz.kaimahi.domain.ModelHandle
 import nz.kaimahi.domain.RuntimeInfo
 import nz.kaimahi.domain.Token
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
@@ -15,6 +17,17 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.withContext
+
+/**
+ * Hard upper bound on any single `nativeGenerate` call. If generation
+ * is still running when this fires, [NativeInference.nativeRequestCancel]
+ * gets called and the Rust decode loop breaks at its next token. On
+ * any reasonable hardware + model combination, generation completes
+ * well under this; the cap exists so a pathological state (model
+ * stuck in a loop, runaway max-tokens budget, hung session) doesn't
+ * burn the device's battery and CPU indefinitely.
+ */
+private const val GENERATE_HARD_TIMEOUT_MS: Long = 5L * 60 * 1000 // 5 minutes
 
 /**
  * Local inference engine backed by `libkaimahi_native.so`. Each call to
@@ -118,15 +131,36 @@ class RustInferenceEngine(private val appContext: Context) : InferenceEngine {
         // Run the native call on its own coroutine inside this flow's
         // scope so cancellation from the collector propagates.
         val job = launch(Dispatchers.IO) {
-            val status = NativeInference.nativeGenerate(
-                h,
-                request.prompt,
-                callback,
-                maxOf(request.maxNewTokens, 1),
-                request.temperature.coerceAtLeast(0.0f),
-                request.topK.coerceAtLeast(1),
-                request.seed,
-            )
+            // Watchdog: at deadline, request cooperative cancel. The
+            // Rust decode loop polls the cancel flag once per token
+            // (K3) so it'll break at the next iteration, nativeGenerate
+            // returns naturally, and we don't end up with a Java
+            // thread blocked indefinitely on a JNI call we can't
+            // forcibly interrupt.
+            val watchdog = launch {
+                try {
+                    delay(GENERATE_HARD_TIMEOUT_MS)
+                    if (NativeInference.loaded) {
+                        NativeInference.nativeRequestCancel(h)
+                    }
+                } catch (_: CancellationException) {
+                    // nativeGenerate finished in time; watchdog
+                    // cancelled below. Normal path.
+                }
+            }
+            val status = try {
+                NativeInference.nativeGenerate(
+                    h,
+                    request.prompt,
+                    callback,
+                    maxOf(request.maxNewTokens, 1),
+                    request.temperature.coerceAtLeast(0.0f),
+                    request.topK.coerceAtLeast(1),
+                    request.seed,
+                )
+            } finally {
+                watchdog.cancel()
+            }
             val cause: Throwable? = if (status != NativeInference.Status.OK) {
                 val tag = when (status) {
                     NativeInference.Status.INVALID_HANDLE -> "invalid handle"
