@@ -127,7 +127,13 @@ class ChatViewModel(
 
     private var sendJob: Job? = null
     private var lastUserPrompt: String? = null
-    private val localInference by lazy { RustInferenceEngine(appContext) }
+    // Hold the Lazy delegate explicitly so onCleared() can check
+    // isInitialized() before close() — accessing localInference would
+    // otherwise trigger initialization just to release the native
+    // session, defeating the purpose.
+    private val localInferenceLazy: Lazy<RustInferenceEngine> =
+        lazy { RustInferenceEngine(appContext) }
+    private val localInference: RustInferenceEngine by localInferenceLazy
     private var localLoadedModelPath: String? = null
 
     val availableTools: List<ToolSpec> get() = core.availableTools()
@@ -830,6 +836,27 @@ class ChatViewModel(
         if (!selected.isNullOrBlank() && _localModels.value.none { it.path == selected }) {
             core.setSelectedLocalModelPath(null)
             _selectedLocalModelPath.value = null
+        }
+    }
+
+    /**
+     * Release the native inference session + cancel any in-flight
+     * generation when the ViewModel is destroyed. Without this, every
+     * ViewModel lifecycle that touched local inference leaks the
+     * Rust-side session — model weights + KV cache + mmaps stay
+     * resident until process death. On a 4 GB phone running an E4B
+     * GGUF (≈3.5 GB), one leaked session is enough to OOM the next
+     * ChatViewModel construction.
+     *
+     * The Lazy delegate's `isInitialized()` check is load-bearing: a
+     * naked `localInference.close()` here would *trigger* the lazy
+     * init just to release something that never existed, every time.
+     */
+    override fun onCleared() {
+        super.onCleared()
+        sendJob?.cancel()
+        if (localInferenceLazy.isInitialized()) {
+            localInference.close()
         }
     }
 }

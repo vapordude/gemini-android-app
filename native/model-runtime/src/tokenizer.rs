@@ -275,6 +275,26 @@ impl Tokenizer {
         }
         out
     }
+
+    /// Decode a single token as a streaming piece. Preserves leading
+    /// spaces (SentencePiece word boundaries → ASCII spaces).
+    ///
+    /// Use this in autoregressive decode loops where the runtime emits
+    /// one token at a time. The bulk [`decode`] strips a single leading
+    /// space at the start of the whole output, which is correct for
+    /// "decode this entire sequence" but wrong for streaming: every
+    /// piece that started a new word would lose its space, collapsing
+    /// `▁hello ▁world` into `helloworld` instead of `hello world`.
+    ///
+    /// `decode_piece` keeps the leading space; callers that need to
+    /// suppress whitespace at the very start of a response can strip
+    /// it themselves on the first emission.
+    pub fn decode_piece(&self, id: u32) -> String {
+        match self.vocab.get(id as usize) {
+            Some(t) => t.replace(SP_SPACE, " "),
+            None => String::new(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -364,5 +384,48 @@ mod tests {
         let ids = t.encode("xyz");
         assert!(!ids.is_empty());
         assert!(ids.iter().all(|&id| id == t.unk_id.unwrap()));
+    }
+
+    #[test]
+    fn streaming_decode_preserves_inter_word_spaces() {
+        // Regression: per-token decode used to call `decode(&[id])`, which
+        // strips a single leading space — that collapsed every word
+        // boundary in streaming output. `decode_piece` must keep them.
+        let t = fixture(
+            &["<unk>", "<s>", "</s>", "▁hello", "▁world", "!"],
+            &[
+                TokenType::Unknown,
+                TokenType::Control,
+                TokenType::Control,
+                TokenType::Normal,
+                TokenType::Normal,
+                TokenType::Normal,
+            ],
+        );
+        // Find ids by literal text so the test doesn't depend on order.
+        let id_hello = *t.by_text.get("▁hello").unwrap();
+        let id_world = *t.by_text.get("▁world").unwrap();
+        let id_bang = *t.by_text.get("!").unwrap();
+
+        let mut streamed = String::new();
+        for &id in &[id_hello, id_world, id_bang] {
+            streamed.push_str(&t.decode_piece(id));
+        }
+        // First piece keeps its leading space (caller may strip if needed);
+        // critically, the space BETWEEN "hello" and "world" is preserved.
+        assert_eq!(streamed, " hello world!");
+
+        // Sanity: bulk decode still strips just the single leading space.
+        let bulk = t.decode(&[id_hello, id_world, id_bang]);
+        assert_eq!(bulk, "hello world!");
+    }
+
+    #[test]
+    fn decode_piece_handles_out_of_range_id() {
+        let t = fixture(
+            &["<unk>", "<s>", "</s>"],
+            &[TokenType::Unknown, TokenType::Control, TokenType::Control],
+        );
+        assert_eq!(t.decode_piece(999_999), "");
     }
 }
