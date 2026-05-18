@@ -73,7 +73,22 @@ class RustInferenceEngine(private val appContext: Context) : InferenceEngine {
                 archTag = loadedArch,
             )
         },
+        mmapPinned = isPinnedNow(),
     )
+
+    /**
+     * Reports whether the active session's mmap was `mlock`-ed. Cheap —
+     * just hits the Rust side's `mmap_pinned` flag set at open time. No
+     * lock needed: the handle field is atomic and stale reads can only
+     * return `false` (a session that's been closed has its slot taken
+     * out and `nativeIsPinned` returns `false` for an invalid handle).
+     */
+    fun isPinnedNow(): Boolean {
+        if (!NativeInference.loaded) return false
+        val h = handle.get()
+        if (h == 0L) return false
+        return runCatching { NativeInference.nativeIsPinned(h) }.getOrDefault(false)
+    }
 
     override suspend fun listModels(): List<ModelHandle> =
         modelsDir.listFiles().orEmpty().filter { it.isFile }.map {

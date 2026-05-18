@@ -9,6 +9,7 @@ rust-version.workspace = true
 tensor-core = { path = "../tensor-core" }
 gguf-loader = { path = "../gguf-loader" }
 diagnostics = { path = "../diagnostics" }
+mmap = { path = "../mmap" }
 
 [features]
 default = []

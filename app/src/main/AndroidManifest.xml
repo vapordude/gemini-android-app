@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
 
     <queries>
@@ -48,5 +50,20 @@
                 <data android:scheme="${appAuthRedirectScheme}" />
             </intent-filter>
         </activity>
+
+        <!--
+            Local on-device inference anchor. Foreground service raises the
+            process's `oom_adj` so `lmkd` doesn't reap us while a multi-GB
+            mmap is resident. `specialUse` is the honest type for "we are
+            running an on-device LLM"; `dataSync` would be a lie.
+        -->
+        <service
+            android:name=".inference.LocalInferenceService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="on_device_llm_inference" />
+        </service>
     </application>
 </manifest>

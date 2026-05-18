@@ -13,6 +13,10 @@ sealed class TraceEvent {
         val archTag: String,
         val isa: String,
         val threads: Int,
+        /** Process-wide resident set size sampled right after load. 0 if unknown. */
+        val residentBytes: Long = 0L,
+        /** True iff the model's mmap was mlock-pinned. Almost always false on stock Android. */
+        val mmapPinned: Boolean = false,
     ) : TraceEvent()
 
     data class GenerateFinished(

@@ -8,6 +8,9 @@
 use std::fs::File;
 use std::io::{self, BufReader, Read, Seek};
 use std::path::Path;
+use std::sync::Arc;
+
+pub use mmap::FileMmap;
 
 const MAGIC: u32 = 0x46554747; // "GGUF" little-endian
 const SUPPORTED_VERSION: u32 = 3;
@@ -204,28 +207,26 @@ impl GgufFile {
     }
 }
 
-/// In-memory copy of a GGUF file plus the parsed header. The tensor
-/// payload sits at `bytes[tensor_data_start..]`, with each tensor's
-/// region starting at `bytes[tensor_data_start + tensor.offset]` and
-/// running for `tensor.byte_size()` bytes.
+/// Memory-mapped view of a GGUF file plus the parsed header. The tensor
+/// payload sits at `mmap.as_slice()[tensor_data_start..]`, with each
+/// tensor's region starting at `mmap.as_slice()[tensor_data_start +
+/// tensor.offset]` and running for `tensor.byte_size()` bytes.
 ///
-/// Loading the whole file into a `Vec<u8>` is wasteful for multi-GB
-/// quants, but it sidesteps the mmap lifetime ceremony and works
-/// identically on Android and host. The real production path is a
-/// memory-mapped view; this struct's API is shaped so that swap is a
-/// one-call substitution.
+/// `mmap` is an `Arc<FileMmap>` so the runtime can hand cloned handles
+/// to per-tensor `WeightView`s without copying. `munmap` fires when the
+/// last clone drops.
 pub struct GgufBytes {
     pub file: GgufFile,
-    pub bytes: Vec<u8>,
+    pub mmap: Arc<FileMmap>,
 }
 
 impl GgufBytes {
     pub fn read(path: &Path) -> Result<Self, LoadError> {
-        let bytes = std::fs::read(path)?;
-        // Re-parse the header from the in-memory buffer rather than
-        // re-opening the file. Simpler than juggling a Cursor.
+        let mmap = Arc::new(FileMmap::open(path)?);
+        // Re-parse the header by re-opening the file. The header read
+        // touches a few KB at the start and is happy with a BufReader.
         let file = read(path)?;
-        Ok(Self { file, bytes })
+        Ok(Self { file, mmap })
     }
 
     /// Raw on-disk slice for `name`, or `None` if the tensor is missing
@@ -236,10 +237,17 @@ impl GgufBytes {
         let start = self.file.tensor_data_start as usize + t.offset as usize;
         let len = t.byte_size();
         let end = start.checked_add(len)?;
-        if end > self.bytes.len() {
+        let all = self.mmap.as_slice();
+        if end > all.len() {
             return None;
         }
-        Some(&self.bytes[start..end])
+        Some(&all[start..end])
+    }
+
+    /// Clone the shared mmap handle so a tensor view can hold its own
+    /// `Arc` and keep the mapping alive for as long as the view exists.
+    pub fn mmap_handle(&self) -> Arc<FileMmap> {
+        Arc::clone(&self.mmap)
     }
 }
 

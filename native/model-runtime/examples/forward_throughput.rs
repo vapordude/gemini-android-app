@@ -21,7 +21,7 @@ fn main() {
         n_kv_heads: 2,
         head_dim_swa: 16,
         head_dim_full: 16, // intentionally same to avoid head-dim heterogeneity here
-        mlp_intermediate: 128,
+        mlp_intermediate_max: 128,
         context_length: 32,
         rope_base_swa: 10_000.0,
         rope_base_full: 1_000_000.0,

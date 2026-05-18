@@ -22,7 +22,7 @@
 #[cfg(target_os = "android")]
 mod android {
     use jni::objects::{JClass, JObject, JString, JValue};
-    use jni::sys::{jfloat, jint, jlong, jstring};
+    use jni::sys::{jboolean, jfloat, jint, jlong, jstring, JNI_FALSE, JNI_TRUE};
     use jni::JNIEnv;
     use model_runtime::arch::lm::gemma4::{argmax, sample, SamplerState};
     use model_runtime::{KvCache, LanguageModel, LoadedModel};
@@ -434,6 +434,25 @@ mod android {
     ) {
         ffi_guard!((), {
             drop(take(handle));
+        })
+    }
+
+    /// True iff `mlock` succeeded for the model's backing mmap. On
+    /// unprivileged Android this is almost always `false`; the chat
+    /// UI uses it to display `pinned` vs `reclaimable`.
+    #[no_mangle]
+    pub extern "system" fn Java_nz_kaimahi_inference_NativeInference_nativeIsPinned<'a>(
+        _env: JNIEnv<'a>,
+        _class: JClass<'a>,
+        handle: jlong,
+    ) -> jboolean {
+        ffi_guard!(JNI_FALSE, {
+            let pinned = with(handle, |sess| sess.model.info().mmap_pinned).unwrap_or(false);
+            if pinned {
+                JNI_TRUE
+            } else {
+                JNI_FALSE
+            }
         })
     }
 
