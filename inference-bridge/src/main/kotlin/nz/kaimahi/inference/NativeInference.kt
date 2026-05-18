@@ -33,6 +33,15 @@ internal object NativeInference {
     @JvmStatic external fun nativeCloseSession(handle: Long)
     @JvmStatic external fun nativeResetSession(handle: Long)
 
+    /**
+     * Ask an in-flight `nativeGenerate` on `handle` to stop at the next
+     * decoded token. Cheap atomic flag set on the Rust side; the
+     * decode loop polls it per iteration. Safe to call when no
+     * generate is active — the flag is cleared at the start of every
+     * generate.
+     */
+    @JvmStatic external fun nativeRequestCancel(handle: Long)
+
     // ---- generate ----
     @JvmStatic external fun nativeGenerate(
         handle: Long,

@@ -141,7 +141,18 @@ class RustInferenceEngine(private val appContext: Context) : InferenceEngine {
             trySend(Token(text = "", done = true))
             close(cause)
         }
-        awaitClose { job.cancel() }
+        awaitClose {
+            // Cooperative cancellation: tell the Rust decode loop to
+            // stop at its next token. Without this, the Rust thread
+            // keeps generating tokens that get silently dropped after
+            // the flow collector goes away, holding the JNI thread and
+            // wasting compute until the natural max-tokens limit.
+            val h = handle.get()
+            if (h != 0L && NativeInference.loaded) {
+                NativeInference.nativeRequestCancel(h)
+            }
+            job.cancel()
+        }
     }.flowOn(Dispatchers.IO)
 
     /** Reset the per-session KV cache without unloading the model. */

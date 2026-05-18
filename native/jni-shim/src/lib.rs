@@ -30,7 +30,8 @@ mod android {
     use std::panic::{catch_unwind, AssertUnwindSafe};
     use std::path::Path;
     use std::ptr;
-    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
 
     /// Status codes for `nativeGenerate`. Must mirror
     /// `inference-bridge/.../NativeInference.kt::Status`.
@@ -77,6 +78,11 @@ mod android {
 
     /// One loaded inference session. We hold the model + its KV cache
     /// + a sampler RNG so per-token state isn't shared across handles.
+    ///
+    /// `cancel` is checked once per decode iteration so a Kotlin-side
+    /// `nativeRequestCancel(handle)` can break the generation loop
+    /// cleanly without killing the JVM thread. The flag is reset at
+    /// the start of every `nativeGenerate`.
     struct Session {
         model: Box<dyn LanguageModel>,
         kv: KvCache,
@@ -84,6 +90,7 @@ mod android {
         rng: SamplerState,
         #[allow(dead_code)] // kept for diag dumps + future logging
         arch_tag: String,
+        cancel: Arc<AtomicBool>,
     }
 
     static SESSIONS: Mutex<Vec<Option<Session>>> = Mutex::new(Vec::new());
@@ -227,6 +234,7 @@ mod android {
                 tokenizer,
                 rng: SamplerState::new(0),
                 arch_tag,
+                cancel: Arc::new(AtomicBool::new(false)),
             };
             store(sess)
         })
@@ -269,6 +277,19 @@ mod android {
                 Err(_) => return STATUS_INTERNAL,
             };
 
+            // Reset the cancel flag at the start of every generate and
+            // clone the Arc so the decode loop can check it lock-free.
+            // If `nativeRequestCancel(handle)` runs concurrently it
+            // sets the flag through the same Arc; the next loop
+            // iteration sees it and breaks cleanly.
+            let cancel = match with(handle, |sess| {
+                sess.cancel.store(false, Ordering::Relaxed);
+                sess.cancel.clone()
+            }) {
+                Some(c) => c,
+                None => return STATUS_INVALID_HANDLE,
+            };
+
             // Pull tokenizer + token ids out of the session under the lock
             // so we can release the lock for the long generation loop.
             let (mut prompt_ids, eos_id, vocab_size, hidden) = match with(handle, |sess| {
@@ -309,6 +330,14 @@ mod android {
             // Decode loop. We sample using the most recent forward()'s
             // logits, then feed the sampled token back as the next input.
             for _ in 0..max_new {
+                // Cooperative cancellation point. Cheap atomic load per
+                // token; the Kotlin side flips this via
+                // `nativeRequestCancel(handle)` when the collecting
+                // coroutine is cancelled (app backgrounded, user
+                // closed chat, model swap requested, etc).
+                if cancel.load(Ordering::Relaxed) {
+                    break;
+                }
                 let next_id = match with(handle, |sess| {
                     let logits = sess.model.forward(last_token, &mut sess.kv);
                     if temp <= 0.0 {
@@ -355,6 +384,22 @@ mod android {
             }
             let _ = prompt_ids.pop(); // silence unused-mut warning on stable
             STATUS_OK
+        })
+    }
+
+    /// Request an in-flight `nativeGenerate` to stop at the next
+    /// token. Sets a cheap atomic flag the decode loop polls each
+    /// iteration. Safe to call from any thread and from outside an
+    /// active generate — the flag is reset at the start of every
+    /// `nativeGenerate`.
+    #[no_mangle]
+    pub extern "system" fn Java_nz_kaimahi_inference_NativeInference_nativeRequestCancel<'a>(
+        _env: JNIEnv<'a>,
+        _class: JClass<'a>,
+        handle: jlong,
+    ) {
+        ffi_guard!((), {
+            let _ = with(handle, |sess| sess.cancel.store(true, Ordering::Relaxed));
         })
     }
 
