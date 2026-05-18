@@ -350,6 +350,21 @@ mod android {
                     None => return STATUS_INVALID_HANDLE,
                 };
                 last_token = next_id;
+                // Stop on EOS / any other structural token (turn boundary,
+                // image placeholder, pad, unknown). These shouldn't appear
+                // in the streamed text — they're either end-of-response
+                // markers or signs the model has gone off the rails.
+                // Either way, don't emit them to the UI and stop decoding.
+                let is_structural = match with(handle, |sess| {
+                    sess.tokenizer.as_ref().map(|t| t.is_special(next_id))
+                }) {
+                    Some(Some(b)) => b,
+                    Some(None) => return STATUS_NO_TOKENIZER,
+                    None => return STATUS_INVALID_HANDLE,
+                };
+                if is_structural || eos_id == Some(next_id) {
+                    break;
+                }
                 // Decode the single new token as a streaming piece. We use
                 // `decode_piece` (not `decode(&[next_id])`) because the bulk
                 // decoder strips one leading space, which would collapse the
@@ -376,11 +391,6 @@ mod android {
                         &[JValue::Object(&JObject::from(jpiece)).as_jni()],
                     )
                 };
-                if let Some(eos) = eos_id {
-                    if next_id == eos {
-                        break;
-                    }
-                }
             }
             let _ = prompt_ids.pop(); // silence unused-mut warning on stable
             STATUS_OK
