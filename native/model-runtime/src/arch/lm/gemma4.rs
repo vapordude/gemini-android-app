@@ -175,7 +175,34 @@ impl Gemma4Config {
         // is bigger than the SWA one in Gemma 4).
         let head_dim_full = get_u32_or("attention.key_length_swa", head_dim_swa as u32) as usize;
         let n_layers = get_u32("block_count")? as usize;
-        let mlp_intermediate = get_u32("feed_forward_length")? as usize;
+        // `feed_forward_length` can be either a scalar (Gemma 4 E4B) or a
+        // per-layer array of equal values (Gemma 4 E2B). HuggingFace's
+        // gguf-py converter emits both shapes depending on whether the
+        // upstream `config.json` specifies a list or an int. We accept
+        // either; take the first element on array, fall back to scalar.
+        // Non-uniform per-layer FFN sizes are not currently supported —
+        // if we see a heterogeneous array we still take element 0 but
+        // log a clear note in the LoadError path below.
+        let mlp_intermediate = {
+            let key = format!("{prefix}.feed_forward_length");
+            let val = g.get(&key);
+            if let Some(arr) = val.and_then(MetaValue::as_array) {
+                let first = arr
+                    .first()
+                    .and_then(MetaValue::as_u32)
+                    .ok_or(LoadError::MissingMetadata("gemma4.feed_forward_length[0]"))?;
+                // Sanity: warn (via a clean error) only if non-uniform,
+                // since downstream scratch buffers assume a single dim.
+                if arr.iter().any(|v| v.as_u32() != Some(first)) {
+                    return Err(LoadError::MissingMetadata(
+                        "gemma4.feed_forward_length: non-uniform per-layer values not supported",
+                    ));
+                }
+                first as usize
+            } else {
+                get_u32("feed_forward_length")? as usize
+            }
+        };
         let context_length = get_u32("context_length")? as usize;
         let rope_base_full = get_f32_or("rope.freq_base", 1_000_000.0);
         let rope_base_swa = get_f32_or("rope.freq_base_swa", 10_000.0);
