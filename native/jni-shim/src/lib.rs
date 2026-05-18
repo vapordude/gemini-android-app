@@ -122,9 +122,13 @@ mod android {
         _class: JClass<'a>,
     ) -> jstring {
         ffi_guard!(ptr::null_mut(), {
-            env.new_string(env!("CARGO_PKG_VERSION"))
-                .unwrap()
-                .into_raw()
+            match env.new_string(env!("CARGO_PKG_VERSION")) {
+                Ok(j) => j.into_raw(),
+                Err(_) => {
+                    set_last_error("nativeVersion: JString alloc failed".to_string());
+                    ptr::null_mut()
+                }
+            }
         })
     }
 
@@ -143,7 +147,13 @@ mod android {
                 Ok(_cfg) => infer_arch_tag(&path_s),
                 Err(_) => "unknown".to_string(),
             };
-            env.new_string(tag).unwrap().into_raw()
+            match env.new_string(&tag) {
+                Ok(j) => j.into_raw(),
+                Err(_) => {
+                    set_last_error(format!("nativeProbe: JString alloc failed for tag='{tag}'"));
+                    ptr::null_mut()
+                }
+            }
         })
     }
 
@@ -386,7 +396,15 @@ mod android {
                 .unwrap_or_else(|e| e.into_inner())
                 .clone()
                 .unwrap_or_default();
-            env.new_string(s).unwrap().into_raw()
+            // If JString allocation itself fails (likely JVM OOM) we
+            // cannot record a new error via set_last_error and re-emit
+            // through nativeLastError — that would recurse on the same
+            // failure mode. Just return null and let the caller see
+            // "(no last error)" via the stale slot.
+            match env.new_string(&s) {
+                Ok(j) => j.into_raw(),
+                Err(_) => ptr::null_mut(),
+            }
         })
     }
 
@@ -410,9 +428,13 @@ mod android {
         _class: JClass<'a>,
     ) -> jstring {
         ffi_guard!(ptr::null_mut(), {
-            env.new_string(env!("CARGO_PKG_VERSION"))
-                .unwrap()
-                .into_raw()
+            match env.new_string(env!("CARGO_PKG_VERSION")) {
+                Ok(j) => j.into_raw(),
+                Err(_) => {
+                    set_last_error("nativeClientVersion: JString alloc failed".to_string());
+                    ptr::null_mut()
+                }
+            }
         })
     }
 }
