@@ -81,9 +81,8 @@ impl FileMmap {
         if p == MAP_FAILED {
             return Err(io::Error::last_os_error());
         }
-        let base = NonNull::new(p as *mut u8).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::Other, "mmap returned null with non-FAILED")
-        })?;
+        let base = NonNull::new(p as *mut u8)
+            .ok_or_else(|| io::Error::other("mmap returned null with non-FAILED"))?;
         let len = size as usize;
         // SAFETY: base/len are the freshly-mmapped region. madvise is advisory;
         // we ignore its return.
