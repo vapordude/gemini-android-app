@@ -262,10 +262,13 @@ mod android {
                 None => return STATUS_INVALID_HANDLE,
             };
             last_token = next_id;
-            // Decode the single new token to a piece. Tokenizer.decode
-            // operates on a slice — we just give it one id.
+            // Decode the single new token as a streaming piece. We use
+            // `decode_piece` (not `decode(&[next_id])`) because the bulk
+            // decoder strips one leading space, which would collapse the
+            // space between every word in streamed output —
+            // `▁hello ▁world` → `helloworld` instead of `hello world`.
             let piece = match with(handle, |sess| {
-                sess.tokenizer.as_ref().map(|t| t.decode(&[next_id]))
+                sess.tokenizer.as_ref().map(|t| t.decode_piece(next_id))
             }) {
                 Some(Some(p)) => p,
                 Some(None) => return STATUS_NO_TOKENIZER,
