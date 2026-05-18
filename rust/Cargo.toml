@@ -10,7 +10,6 @@ members = [
     "crates/gemma4-vision",
     "crates/gemma4-audio",
     "crates/gemma4-driver",
-    "crates/gemma4-jni",
 ]
 
 # Workspace lints + profile. Every member crate forbids external dependencies
