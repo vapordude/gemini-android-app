@@ -492,10 +492,8 @@ impl ForwardScratch {
 // ---------------------------------------------------------------------
 
 fn dequant_type(t: GgmlType) -> Result<DequantType, LoadError> {
-    DequantType::from_ggml(t as u32).ok_or(LoadError::UnknownArchitecture(format!(
-        "unsupported tensor dtype: {}",
-        t.tag()
-    )))
+    DequantType::from_ggml(t as u32)
+        .ok_or_else(|| LoadError::UnsupportedQuantization(t.tag().to_string()))
 }
 
 fn missing(name: &str) -> LoadError {
@@ -503,7 +501,13 @@ fn missing(name: &str) -> LoadError {
 }
 
 fn map_dequant(e: DequantError) -> LoadError {
-    LoadError::UnknownArchitecture(format!("dequant: {e}"))
+    // Dequant errors during a tensor read are almost always a dtype the
+    // runtime doesn't support; surface that classification so the UI
+    // can distinguish dtype gaps from architecture-level failures.
+    match e {
+        DequantError::UnsupportedType(t) => LoadError::UnsupportedQuantization(t.to_string()),
+        other => LoadError::UnknownArchitecture(format!("dequant: {other}")),
+    }
 }
 
 /// Read a tensor into `Vec<f32>`. Use for small tensors (norms,

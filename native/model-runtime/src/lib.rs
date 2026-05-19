@@ -82,6 +82,14 @@ pub enum LoadError {
     Gguf(gguf_loader::LoadError),
     UnknownArchitecture(String),
     MissingMetadata(&'static str),
+    /// A tensor in the GGUF uses a quantization scheme this runtime
+    /// doesn't yet dequantize (e.g. Q3_K, Q5_K, IQ-family). Distinct
+    /// from `UnknownArchitecture` because the architecture is fine —
+    /// it's the dtype mix that needs new dequant code. The string
+    /// carries the dtype tag (`"Q5_K"`, etc.) so the UI can show
+    /// something meaningful without the runtime having to enumerate
+    /// every future quant.
+    UnsupportedQuantization(String),
 }
 
 impl From<gguf_loader::LoadError> for LoadError {
