@@ -154,7 +154,13 @@ impl Gemma4Config {
     /// prefix conventions documented in the plan; rejects non-Gemma-4
     /// arch tags with a clear error.
     pub fn from_gguf(g: &GgufFile) -> Result<Self, LoadError> {
-        let prefix = "gemma4";
+        // Use the file's declared architecture as the metadata prefix
+        // (e.g. `gemma`, `gemma2`, `gemma3`, `gemma4`). Earlier revisions
+        // hardcoded `"gemma4"` which broke loading for fine-tunes derived
+        // from Gemma 2/3/un-numbered Gemma — the dispatcher accepts those
+        // tags and routes here, but every metadata lookup then missed
+        // because the file's keys live under their own prefix.
+        let prefix = g.arch_tag().unwrap_or("gemma4");
         let get_u32 = |suffix: &str| -> Result<u32, LoadError> {
             g.get(&format!("{prefix}.{suffix}"))
                 .and_then(MetaValue::as_u32)
@@ -183,24 +189,37 @@ impl Gemma4Config {
         let head_dim_full = get_u32_or("attention.key_length_swa", head_dim_swa as u32) as usize;
         let n_layers = get_u32("block_count")? as usize;
         // `feed_forward_length` can be a scalar (Gemma 4 E4B), a uniform
-        // per-layer array (stock Gemma 4 E2B), or a non-uniform per-layer
+        // per-layer array (stock Gemma 4 E2B), a non-uniform per-layer
         // array (abliterated / heretic fine-tunes that prune individual
-        // layers). We accept all three: in the array case, take the max
-        // for scratch sizing, and let `LayerWeights.ffn_dim` (set at load
-        // time from the actual `ffn_gate` tensor dims) drive the forward
-        // pass per-layer.
+        // layers), or absent entirely (some converters skip it, since
+        // the tensors carry the same information). Fall through in
+        // order: array max → scalar → derive from tensor headers. The
+        // per-layer `LayerWeights.ffn_dim` is always set from the actual
+        // `ffn_gate` tensor dims at load time, so this value only sizes
+        // the upper bound for scratch buffers.
         let mlp_intermediate_max = {
             let key = format!("{prefix}.feed_forward_length");
             let val = g.get(&key);
-            if let Some(arr) = val.and_then(MetaValue::as_array) {
+            let from_array = val.and_then(MetaValue::as_array).and_then(|arr| {
                 arr.iter()
                     .filter_map(MetaValue::as_u32)
                     .max()
-                    .ok_or(LoadError::MissingMetadata("gemma4.feed_forward_length[]"))?
-                    as usize
-            } else {
-                get_u32("feed_forward_length")? as usize
-            }
+                    .map(|v| v as usize)
+            });
+            let from_scalar = val.and_then(MetaValue::as_u32).map(|v| v as usize);
+            let from_tensors = (0..n_layers)
+                .filter_map(|i| {
+                    g.tensor(&format!("blk.{i}.ffn_gate.weight"))
+                        .and_then(|t| t.dims.get(1).copied())
+                })
+                .max()
+                .map(|d| d as usize);
+            from_array
+                .or(from_scalar)
+                .or(from_tensors)
+                .ok_or(LoadError::MissingMetadata(
+                    "feed_forward_length not in metadata AND no ffn_gate tensors found",
+                ))?
         };
         let context_length = get_u32("context_length")? as usize;
         let rope_base_full = get_f32_or("rope.freq_base", 1_000_000.0);
