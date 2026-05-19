@@ -161,6 +161,25 @@ impl<T> SessionTable<T> {
         }
         Some(Arc::clone(&slot.cancel))
     }
+
+    /// For generate-start: atomically reset the cancel flag to `false`
+    /// and hand back a clone of the same Arc, under one lock acquisition.
+    ///
+    /// The two-step "clone then store(false)" pattern was racy: a
+    /// concurrent `nativeRequestCancel` that landed between those two
+    /// operations would get its `store(true)` immediately wiped by the
+    /// reset. Doing both under the table mutex closes the window.
+    pub fn reset_and_clone_cancel(&self, handle: Handle) -> Option<Arc<AtomicBool>> {
+        let (idx, gen) = decode(handle)?;
+        let g = self.slots.lock().unwrap_or_else(|e| e.into_inner());
+        let slot = g.get(idx)?;
+        if slot.gen != gen {
+            return None;
+        }
+        slot.cancel
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        Some(Arc::clone(&slot.cancel))
+    }
 }
 
 impl<T> Default for SessionTable<T> {
@@ -295,6 +314,35 @@ mod tests {
     #[test]
     fn decode_rejects_zero() {
         assert_eq!(decode(0), None);
+    }
+
+    #[test]
+    fn reset_and_clone_cancel_clears_prior_flag() {
+        // Establishes the basic correctness of the atomic reset:
+        // a previously-set cancel must be cleared by reset_and_clone_cancel,
+        // and the returned Arc must point at the same flag the table holds.
+        let t: SessionTable<u32> = SessionTable::new();
+        let h = t.store(1);
+        // Simulate a stray cancel having landed before this generate starts.
+        let stray = t.clone_cancel(h).unwrap();
+        stray.store(true, Ordering::Relaxed);
+        // reset_and_clone_cancel clears + clones in one acquisition.
+        let fresh = t.reset_and_clone_cancel(h).unwrap();
+        assert!(!fresh.load(Ordering::Relaxed));
+        // Same Arc identity — both view the same atomic.
+        assert!(Arc::ptr_eq(&stray, &fresh));
+        // A subsequent store(true) through ANY clone is observable to both.
+        stray.store(true, Ordering::Relaxed);
+        assert!(fresh.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn reset_and_clone_cancel_rejects_stale_handle() {
+        let t: SessionTable<u32> = SessionTable::new();
+        let h1 = t.store(1);
+        let _ = t.take(h1);
+        let _h2 = t.store(2);
+        assert!(t.reset_and_clone_cancel(h1).is_none());
     }
 
     #[test]

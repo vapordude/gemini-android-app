@@ -258,13 +258,16 @@ mod android {
             // and removes the session before generation finishes, the
             // Arc we hold here is still observable to any concurrent
             // `nativeRequestCancel` that already cloned the same Arc.
-            let cancel = match SESSIONS.clone_cancel(handle) {
+            //
+            // Reset is atomic with the clone (single lock acquisition):
+            // a concurrent `nativeRequestCancel` landing between a
+            // separate clone-then-reset pair would have its store(true)
+            // immediately wiped. `reset_and_clone_cancel` closes that
+            // window.
+            let cancel = match SESSIONS.reset_and_clone_cancel(handle) {
                 Some(c) => c,
                 None => return STATUS_INVALID_HANDLE,
             };
-            // Reset the cancel flag at the start of every generate so
-            // an earlier cancel doesn't pre-empt this one.
-            cancel.store(false, Ordering::Relaxed);
 
             // Pull tokenizer + token ids out of the session under the lock
             // so we can release the lock for the long generation loop.
@@ -290,18 +293,30 @@ mod android {
                 return STATUS_INVALID_HANDLE;
             }
 
-            // Prefill: run forward on every prompt token but emit nothing.
+            // Prefill: forward every prompt token EXCEPT the last. The
+            // final prompt token becomes `last_token` and is forwarded
+            // once at the start of the decode loop, where its logits
+            // are sampled for the first generated token.
+            //
+            // Forwarding the final prompt token in BOTH the prefill and
+            // the decode loop would advance the model's KV cache an
+            // extra position for that token (it'd sit twice at adjacent
+            // positions), and the first sample would attend to both
+            // copies — biasing generation toward repeating that token.
+            //
             // If the session goes away mid-prefill (concurrent close)
             // bail with INVALID_HANDLE rather than silently no-op and
             // proceed to decode with stale state.
-            let mut last_token: u32 = 0;
-            for &id in &prompt_ids {
+            let mut last_token: u32 = *prompt_ids
+                .last()
+                .expect("prompt_ids non-empty: checked above");
+            let prefill_count = prompt_ids.len() - 1;
+            for &id in &prompt_ids[..prefill_count] {
                 if cancel.load(Ordering::Relaxed) {
                     return STATUS_OK;
                 }
                 let stepped = SESSIONS.with(handle, |sess| {
                     let _ = sess.model.forward(id, &mut sess.kv);
-                    last_token = id;
                 });
                 if stepped.is_none() {
                     return STATUS_INVALID_HANDLE;
