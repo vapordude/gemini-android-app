@@ -532,7 +532,15 @@ class ChatViewModel(
                     tools = core.localToolSpecs(),
                     streamer = nz.kaimahi.bridge.agent.LocalAgentLoop.TokenStreamer { prompt ->
                         kotlinx.coroutines.flow.flow {
-                            inference.generate(GenerateRequest(prompt = prompt)).collect { token ->
+                            // Time-based seed so identical re-runs aren't bit-identical.
+                            // GenerateRequest's default `seed = 0L` maps to a fixed
+                            // hardcoded PRNG constant on the Rust side, which made
+                            // two different GGUFs read as producing the same output
+                            // (same prompt + same seed + low temperature = same
+                            // deterministic-ish stream).
+                            inference.generate(
+                                GenerateRequest(prompt = prompt, seed = System.nanoTime())
+                            ).collect { token ->
                                 if (token.text.isNotEmpty()) {
                                     tokenCount++
                                     emit(token.text)
