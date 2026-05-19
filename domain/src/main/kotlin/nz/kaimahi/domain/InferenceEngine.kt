@@ -17,6 +17,13 @@ data class RuntimeInfo(
     val isa: String,
     val threads: Int,
     val modelLoaded: ModelHandle?,
+    /**
+     * True iff the loaded model's mmap was `mlock`-ed. On stock
+     * unprivileged Android this is almost always `false` because
+     * `RLIMIT_MEMLOCK` is 64 KiB — the chat UI uses this to render
+     * `pinned` vs `reclaimable` honestly.
+     */
+    val mmapPinned: Boolean = false,
 )
 
 data class GenerateRequest(

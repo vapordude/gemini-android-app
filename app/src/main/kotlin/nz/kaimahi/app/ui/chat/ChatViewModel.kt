@@ -125,6 +125,16 @@ class ChatViewModel(
     private val _localTraceEvents = MutableStateFlow<List<TraceEvent>>(emptyList())
     val localTraceEvents: StateFlow<List<TraceEvent>> = _localTraceEvents.asStateFlow()
 
+    /**
+     * Live memory + anchor signal for the local-inference chip in the
+     * chat top bar. `null` whenever no local session is loaded — the
+     * chip then renders nothing, rather than showing "0 GB" misleadingly.
+     * Refreshed every 2 s from the metrics poller below.
+     */
+    private val _memoryMetrics = MutableStateFlow<MemoryMetrics?>(null)
+    val memoryMetrics: StateFlow<MemoryMetrics?> = _memoryMetrics.asStateFlow()
+    private var memoryPollerJob: Job? = null
+
     private var sendJob: Job? = null
     private var lastUserPrompt: String? = null
     // Hold the Lazy delegate explicitly so onCleared() can check
@@ -213,6 +223,69 @@ class ChatViewModel(
             }
         }
         viewModelScope.launch { refreshLocalModelsNow() }
+        // Memory poller: only active while the user is in LOCAL_AGENT
+        // mode. Stops itself when mode flips back to CLOUD_GEMINI so we
+        // don't pay 2 s wake-ups for nothing. The chip composable reads
+        // the StateFlow and renders only when non-null.
+        viewModelScope.launch {
+            inferenceMode.collect { mode ->
+                memoryPollerJob?.cancel()
+                if (mode == InferenceMode.LOCAL_AGENT) {
+                    // Dispatchers.IO: the poller's `getMemoryInfo` and
+                    // `getProcessMemoryInfo` are binder calls into system_server
+                    // and can block long enough to jank the UI if they run on
+                    // the main dispatcher.
+                    memoryPollerJob = viewModelScope.launch(Dispatchers.IO) {
+                        runMemoryPoller()
+                    }
+                } else {
+                    _memoryMetrics.value = null
+                }
+            }
+        }
+    }
+
+    private suspend fun runMemoryPoller() {
+        val am = appContext.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+            ?: return
+        while (true) {
+            val sysInfo = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+            val rss = sampleResidentBytes()
+            val pinned = if (localInferenceLazy.isInitialized()) {
+                runCatching { localInference.isPinnedNow() }.getOrDefault(false)
+            } else {
+                false
+            }
+            _memoryMetrics.value = MemoryMetrics(
+                rssBytes = rss,
+                totalMemBytes = sysInfo.totalMem,
+                availMemBytes = sysInfo.availMem,
+                lowMemory = sysInfo.lowMemory,
+                pinned = pinned,
+                // Approximation: we're in LOCAL_AGENT and the activity
+                // started the service, so the foreground anchor is up.
+                // A proper check would require binding back to the
+                // service — that's heavier than this chip warrants.
+                fgServiceUp = true,
+            )
+            kotlinx.coroutines.delay(2_000)
+        }
+    }
+
+    /**
+     * Process-wide resident set size, in bytes. Cheap to sample (the
+     * AMS-side `getProcessMemoryInfo` round-trips kernel `smaps_rollup`
+     * once). Returns 0 on any failure path so the chip can fall back to
+     * "—" rather than crashing.
+     */
+    private fun sampleResidentBytes(): Long {
+        val am = appContext.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+            ?: return 0L
+        val pid = android.os.Process.myPid()
+        val infos = runCatching { am.getProcessMemoryInfo(intArrayOf(pid)) }.getOrNull()
+        val info = infos?.firstOrNull() ?: return 0L
+        // totalPss is in KB. Multiply once to land in bytes.
+        return info.totalPss.toLong() * 1024L
     }
 
     fun initCore(config: Map<String, Any>) {
@@ -442,7 +515,9 @@ class ChatViewModel(
                         timestampMs = System.currentTimeMillis(),
                         archTag = loaded.archTag.ifBlank { "unknown" },
                         isa = runtime?.isa ?: "unknown",
-                        threads = runtime?.threads ?: Runtime.getRuntime().availableProcessors()
+                        threads = runtime?.threads ?: Runtime.getRuntime().availableProcessors(),
+                        residentBytes = sampleResidentBytes(),
+                        mmapPinned = runtime?.mmapPinned ?: false,
                     )
                 }
                 val modelMessageId = "local-model-${System.nanoTime()}"
@@ -463,7 +538,15 @@ class ChatViewModel(
                     tools = core.localToolSpecs(),
                     streamer = nz.kaimahi.bridge.agent.LocalAgentLoop.TokenStreamer { prompt ->
                         kotlinx.coroutines.flow.flow {
-                            inference.generate(GenerateRequest(prompt = prompt)).collect { token ->
+                            // Time-based seed so identical re-runs aren't bit-identical.
+                            // GenerateRequest's default `seed = 0L` maps to a fixed
+                            // hardcoded PRNG constant on the Rust side, which made
+                            // two different GGUFs read as producing the same output
+                            // (same prompt + same seed + low temperature = same
+                            // deterministic-ish stream).
+                            inference.generate(
+                                GenerateRequest(prompt = prompt, seed = System.nanoTime())
+                            ).collect { token ->
                                 if (token.text.isNotEmpty()) {
                                     tokenCount++
                                     emit(token.text)
@@ -885,6 +968,20 @@ data class PendingAttachment(
 }
 
 data class TokenUsageState(val total: Int, val limit: Int?)
+
+/**
+ * Snapshot of process memory state for the local-inference chip in the
+ * chat top bar. `pinned` and `fgServiceUp` are signals; `lowMemory`
+ * reflects Android's `ActivityManager.MemoryInfo.lowMemory` flag.
+ */
+data class MemoryMetrics(
+    val rssBytes: Long,
+    val totalMemBytes: Long,
+    val availMemBytes: Long,
+    val lowMemory: Boolean,
+    val pinned: Boolean,
+    val fgServiceUp: Boolean,
+)
 
 fun ChatViewModel.exportAsMarkdown(): String {
     val ts = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US)

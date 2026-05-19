@@ -34,6 +34,11 @@ pub struct RuntimeInfo {
     pub threads: usize,
     pub vocab_size: usize,
     pub context_length: usize,
+    /// True iff the underlying mmap was `mlock`-ed at open time. On
+    /// stock unprivileged Android `RLIMIT_MEMLOCK` is 64 KiB so this is
+    /// almost always `false` — pages stay reclaimable, the foreground
+    /// service is what keeps the process alive.
+    pub mmap_pinned: bool,
 }
 
 pub struct KvCache {

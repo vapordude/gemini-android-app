@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -156,6 +157,7 @@ fun ChatScreen(
     val tokenUsage by viewModel.tokenUsage.collectAsState()
     val compressing by viewModel.compressing.collectAsState()
     val pendingAttachments by viewModel.pendingAttachments.collectAsState()
+    val memoryMetrics by viewModel.memoryMetrics.collectAsState()
 
     val imagePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -357,6 +359,11 @@ fun ChatScreen(
                                         )
                                     }
                                 }
+                                // Sub-row: memory indicator chip. Only visible while
+                                // a local model is loaded (memoryMetrics non-null).
+                                // Sits in the Column directly under the model-name Box
+                                // so it appears below — not overlaid on — the title row.
+                                memoryMetrics?.let { MemoryIndicatorChip(it) }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Box {
                                         Text(
@@ -1443,6 +1450,88 @@ private fun InferenceModeBadge(mode: InferenceMode) {
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
         )
     }
+}
+
+/**
+ * Live memory + anchor readout under the model name. Renders only when
+ * a local model is loaded. Shows resident bytes, pinned/reclaimable
+ * status, foreground-service anchor, and the system low-memory flag —
+ * one line, dot-separated, with coloured status dots.
+ *
+ * Example: `2.9 GB · ●reclaimable · ●fg`
+ * Under pressure: `2.9 GB · ●reclaimable · ●fg · ●lowMem`
+ */
+@Composable
+private fun MemoryIndicatorChip(metrics: MemoryMetrics) {
+    val rssText = if (metrics.rssBytes > 0) formatBytesMemory(metrics.rssBytes) else "—"
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(top = 1.dp, start = 4.dp, end = 4.dp)
+    ) {
+        Text(
+            rssText,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            " · ",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        StatusDot(
+            color = if (metrics.pinned) Color(0xFF4CAF50) else Color(0xFFFFB300),
+            label = if (metrics.pinned) "pinned" else "reclaimable",
+        )
+        if (metrics.fgServiceUp) {
+            Text(
+                " · ",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            StatusDot(color = Color(0xFF4CAF50), label = "fg")
+        }
+        if (metrics.lowMemory) {
+            Text(
+                " · ",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            StatusDot(color = Color(0xFFE53935), label = "lowMem")
+        }
+    }
+}
+
+@Composable
+private fun StatusDot(color: Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .background(color, CircleShape)
+        )
+        Spacer(Modifier.width(3.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * Renders a memory byte count in 1024-based units (B/KB/MB/GB). The
+ * other `formatBytes(size: Int)` in this file uses 1000-based units for
+ * attachment sizes — kept separate by name to make the unit basis
+ * explicit at the call site rather than relying on overload resolution.
+ */
+private fun formatBytesMemory(bytes: Long): String {
+    if (bytes <= 0) return "0 B"
+    val gb = bytes.toDouble() / (1024.0 * 1024.0 * 1024.0)
+    if (gb >= 1.0) return String.format(java.util.Locale.US, "%.1f GB", gb)
+    val mb = bytes.toDouble() / (1024.0 * 1024.0)
+    if (mb >= 1.0) return String.format(java.util.Locale.US, "%.0f MB", mb)
+    val kb = bytes.toDouble() / 1024.0
+    return String.format(java.util.Locale.US, "%.0f KB", kb)
 }
 
 /**

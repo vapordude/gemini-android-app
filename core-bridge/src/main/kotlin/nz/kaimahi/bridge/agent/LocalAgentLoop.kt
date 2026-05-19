@@ -146,11 +146,21 @@ class LocalAgentLoop(
     }
 
     private fun formatPrompt(system: String, history: String): String =
+        // Gemma 4 chat template: `<start_of_turn>user ... <end_of_turn>`
+        // pair around the user content, then an open `<start_of_turn>model`
+        // turn for the assistant to continue. The on-device runtime is
+        // Gemma-4-only, so hardcoding the template here is correct;
+        // a follow-up will read `tokenizer.chat_template` from the GGUF
+        // for portability. The previous `"User: ... Assistant: "` format
+        // pushed every model off-distribution, masking weight differences
+        // across GGUF swaps and collapsing output to a shared boilerplate
+        // prior — which read as "same forward regardless of GGUF".
         buildString {
-            appendLine(system)
-            appendLine()
-            appendLine("User: $history")
-            append("Assistant: ")
+            append("<start_of_turn>user\n")
+            append(system)
+            append("\n\n")
+            append(history)
+            append("<end_of_turn>\n<start_of_turn>model\n")
         }
 
     private fun argsJson(call: ToolCall): String {

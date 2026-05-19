@@ -31,9 +31,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.core.content.ContextCompat
+import nz.kaimahi.app.inference.LocalInferenceService
 import nz.kaimahi.app.ui.about.AboutScreen
 import nz.kaimahi.app.ui.chat.ChatScreen
 import nz.kaimahi.app.ui.chat.ChatViewModel
+import nz.kaimahi.app.ui.local.InferenceMode
 import nz.kaimahi.app.ui.drawer.DrawerProject
 import nz.kaimahi.app.ui.drawer.KaimahiDestination
 import nz.kaimahi.app.ui.drawer.KaimahiDrawerContent
@@ -93,6 +96,20 @@ private fun KaimahiApp(
     val isLoading by vm.isLoading.collectAsState()
     val localTraces by vm.localTraceEvents.collectAsState()
     val context = LocalContext.current
+    val inferenceMode by vm.inferenceMode.collectAsState()
+
+    // Anchor: when the user is in LOCAL_AGENT mode, run a foreground
+    // service so lmkd doesn't reap us under memory pressure while a
+    // multi-GB mmap is resident. The service is purely a process-tier
+    // boost — the Rust session lives inside RustInferenceEngine.
+    LaunchedEffect(inferenceMode) {
+        val intent = android.content.Intent(context, LocalInferenceService::class.java)
+        if (inferenceMode == InferenceMode.LOCAL_AGENT) {
+            ContextCompat.startForegroundService(context, intent)
+        } else {
+            context.stopService(intent)
+        }
+    }
 
     // Splash gate — shown once per process. The math-spiral rotates at
     // 60s/turn so 1.5s of dwell reads as "loading", not "loading

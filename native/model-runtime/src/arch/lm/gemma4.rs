@@ -24,7 +24,8 @@
 
 use crate::tokenizer::Tokenizer;
 use crate::{KvCache, LanguageModel, LoadError, RuntimeInfo, TokenId};
-use gguf_loader::{GgmlType, GgufBytes, GgufFile, MetaValue};
+use gguf_loader::{FileMmap, GgmlType, GgufBytes, GgufFile, MetaValue};
+use std::sync::Arc;
 use tensor_core::isa;
 use tensor_core::kernels::{
     attention::sdpa_decode_f32, matmul::matvec_f32, rmsnorm::rmsnorm_f32, softmax::softmax_f32,
@@ -56,7 +57,13 @@ pub struct Gemma4Config {
     pub head_dim_swa: usize,
     /// Head dim for `full_attention` layers (config.json `global_head_dim`).
     pub head_dim_full: usize,
-    pub mlp_intermediate: usize,
+    /// Max FFN dim across all layers — sized for scratch buffers only.
+    /// The per-layer FFN dim lives on `LayerWeights.ffn_dim`, populated
+    /// from the actual `blk.{i}.ffn_gate` tensor shape at load time.
+    /// Abliterated / heretic fine-tunes carry per-layer-varying FFN
+    /// widths; we accept those by treating the GGUF `feed_forward_length`
+    /// array as a hint and trusting the tensors.
+    pub mlp_intermediate_max: usize,
     pub context_length: usize,
     /// RoPE base for `sliding_attention` layers (10_000 by default).
     pub rope_base_swa: f32,
@@ -175,30 +182,22 @@ impl Gemma4Config {
         // is bigger than the SWA one in Gemma 4).
         let head_dim_full = get_u32_or("attention.key_length_swa", head_dim_swa as u32) as usize;
         let n_layers = get_u32("block_count")? as usize;
-        // `feed_forward_length` can be either a scalar (Gemma 4 E4B) or a
-        // per-layer array of equal values (Gemma 4 E2B). HuggingFace's
-        // gguf-py converter emits both shapes depending on whether the
-        // upstream `config.json` specifies a list or an int. We accept
-        // either; take the first element on array, fall back to scalar.
-        // Non-uniform per-layer FFN sizes are not currently supported —
-        // if we see a heterogeneous array we still take element 0 but
-        // log a clear note in the LoadError path below.
-        let mlp_intermediate = {
+        // `feed_forward_length` can be a scalar (Gemma 4 E4B), a uniform
+        // per-layer array (stock Gemma 4 E2B), or a non-uniform per-layer
+        // array (abliterated / heretic fine-tunes that prune individual
+        // layers). We accept all three: in the array case, take the max
+        // for scratch sizing, and let `LayerWeights.ffn_dim` (set at load
+        // time from the actual `ffn_gate` tensor dims) drive the forward
+        // pass per-layer.
+        let mlp_intermediate_max = {
             let key = format!("{prefix}.feed_forward_length");
             let val = g.get(&key);
             if let Some(arr) = val.and_then(MetaValue::as_array) {
-                let first = arr
-                    .first()
-                    .and_then(MetaValue::as_u32)
-                    .ok_or(LoadError::MissingMetadata("gemma4.feed_forward_length[0]"))?;
-                // Sanity: warn (via a clean error) only if non-uniform,
-                // since downstream scratch buffers assume a single dim.
-                if arr.iter().any(|v| v.as_u32() != Some(first)) {
-                    return Err(LoadError::MissingMetadata(
-                        "gemma4.feed_forward_length: non-uniform per-layer values not supported",
-                    ));
-                }
-                first as usize
+                arr.iter()
+                    .filter_map(MetaValue::as_u32)
+                    .max()
+                    .ok_or(LoadError::MissingMetadata("gemma4.feed_forward_length[]"))?
+                    as usize
             } else {
                 get_u32("feed_forward_length")? as usize
             }
@@ -245,7 +244,7 @@ impl Gemma4Config {
             n_kv_heads,
             head_dim_swa,
             head_dim_full,
-            mlp_intermediate,
+            mlp_intermediate_max,
             context_length,
             rope_base_swa,
             rope_base_full,
@@ -302,9 +301,19 @@ fn read_layer_types(g: &GgufFile, prefix: &str, n_layers: usize) -> Vec<LayerTyp
 
 /// A weight matrix in one of the storage modes we support. The forward
 /// pass dispatches on the variant to pick the right matvec kernel.
+///
+/// `Q4K` carries an `Arc<FileMmap>` plus the (offset, len) into the
+/// mapped GGUF — no per-tensor copy. The Arc refcount keeps the mapping
+/// alive until the last view drops; `Drop` on `FileMmap` then `munmap`s.
 enum WeightView {
     F32(Vec<f32>),
-    Q4K { bytes: Vec<u8>, n: usize, k: usize },
+    Q4K {
+        mmap: Arc<FileMmap>,
+        offset: usize,
+        len: usize,
+        n: usize,
+        k: usize,
+    },
 }
 
 impl WeightView {
@@ -316,9 +325,16 @@ impl WeightView {
                 let k = x.len();
                 matvec_f32(x, w, y, n, k);
             }
-            WeightView::Q4K { bytes, n, k } => {
+            WeightView::Q4K {
+                mmap,
+                offset,
+                len,
+                n,
+                k,
+            } => {
                 debug_assert_eq!(*n, y.len(), "Q4K matvec n mismatch");
                 debug_assert_eq!(*k, x.len(), "Q4K matvec k mismatch");
+                let bytes = &mmap.as_slice()[*offset..*offset + *len];
                 matvec_q4_k_row_major(bytes, *n, *k, x, y);
             }
         }
@@ -342,6 +358,11 @@ struct LayerWeights {
     w_gate: WeightView,
     w_up: WeightView,
     w_down: WeightView,
+    /// Per-layer FFN dim — equal to the first dim of `ffn_gate.weight`
+    /// for this layer. Stock Gemma 4 has this uniform across layers;
+    /// abliterated fine-tunes (DECKARD-Expresso, Disinhibited, etc.)
+    /// vary it per layer. Drives the SwiGLU loop bound in forward.
+    ffn_dim: usize,
 
     /// Per-layer scalar applied to the residual after the FFN. Absent
     /// on most fine-tunes.
@@ -379,6 +400,10 @@ pub struct Gemma4Model {
     cfg: Gemma4Config,
     arch_tag: String,
     isa: IsaTier,
+    /// Cloned handle to the underlying mmap so the model can report
+    /// `pinned` without the loader sticking around. `None` for the
+    /// metadata-only `from_gguf` constructor used in smoke tests.
+    mmap: Option<Arc<FileMmap>>,
     global: GlobalWeights,
     layers: Vec<LayerWeights>,
     /// One entry per layer. `Some` for KV-owning layers, `None` for
@@ -431,9 +456,9 @@ impl ForwardScratch {
             v: vec![0.0; max_kv],
             attn_out: vec![0.0; max_q],
             o: vec![0.0; cfg.hidden_size],
-            gate: vec![0.0; cfg.mlp_intermediate],
-            up: vec![0.0; cfg.mlp_intermediate],
-            swiglu: vec![0.0; cfg.mlp_intermediate],
+            gate: vec![0.0; cfg.mlp_intermediate_max],
+            up: vec![0.0; cfg.mlp_intermediate_max],
+            swiglu: vec![0.0; cfg.mlp_intermediate_max],
             ffn_out: vec![0.0; cfg.hidden_size],
             ple_row: vec![0.0; cfg.ple_dim.saturating_mul(cfg.n_layers).max(1)],
             ple_layer_input: vec![0.0; cfg.ple_dim.saturating_mul(cfg.n_layers).max(1)],
@@ -493,8 +518,12 @@ fn read_projection(g: &GgufBytes, name: &str) -> Result<WeightView, LoadError> {
         let k = dims[0];
         let n = dims[1];
         if k % Q4K_BLOCK == 0 {
+            let offset = g.file.tensor_data_start as usize + info.offset as usize;
+            let len = info.byte_size();
             return Ok(WeightView::Q4K {
-                bytes: bytes.to_vec(),
+                mmap: g.mmap_handle(),
+                offset,
+                len,
                 n,
                 k,
             });
@@ -537,6 +566,7 @@ impl Gemma4Model {
             cfg,
             arch_tag,
             isa,
+            mmap: None,
             global: GlobalWeights {
                 embed: Vec::new(),
                 output_norm: Vec::new(),
@@ -557,7 +587,7 @@ impl Gemma4Model {
 
     /// Load every tensor the forward pass needs.
     pub fn load(g: &GgufBytes) -> Result<Self, LoadError> {
-        let cfg = Gemma4Config::from_gguf(&g.file)?;
+        let mut cfg = Gemma4Config::from_gguf(&g.file)?;
         let arch_tag = g.file.arch_tag().unwrap_or("gemma4").to_string();
         let isa = isa::detect();
 
@@ -593,6 +623,11 @@ impl Gemma4Model {
         };
 
         let mut layers = Vec::with_capacity(cfg.n_layers);
+        // Track the largest FFN dim we actually see in the tensor headers.
+        // If `feed_forward_length` metadata under-reports vs. the real
+        // `ffn_gate.weight.dims[1]` for any layer, we'd otherwise panic on
+        // `gate[..ffn_dim]` in the forward pass.
+        let mut observed_ffn_max: usize = 0;
         for i in 0..cfg.n_layers {
             let p = |suffix: &str| format!("blk.{i}.{suffix}");
             let owns_kv = cfg.owns_kv(i);
@@ -618,6 +653,19 @@ impl Gemma4Model {
             let w_gate = read_projection(g, &p("ffn_gate.weight"))?;
             let w_up = read_projection(g, &p("ffn_up.weight"))?;
             let w_down = read_projection(g, &p("ffn_down.weight"))?;
+            // Per-layer FFN dim. GGUF stores Linear as `[in, out]` so
+            // `ffn_gate.weight.dims[1]` is the projection's output width
+            // — i.e. this layer's FFN intermediate dim. Read it from the
+            // tensor header so abliterated GGUFs with varying per-layer
+            // widths compose correctly.
+            let ffn_gate_name = p("ffn_gate.weight");
+            let ffn_dim = g
+                .file
+                .tensor(&ffn_gate_name)
+                .and_then(|t| t.dims.get(1).copied())
+                .map(|d| d as usize)
+                .ok_or_else(|| missing(&format!("{ffn_gate_name} dims[1]")))?;
+            observed_ffn_max = observed_ffn_max.max(ffn_dim);
             let out_scale = read_optional_scalar(g, &p("out_scale.weight"))?;
 
             let per_layer_inp_gate = read_optional_projection(g, &p("per_layer_inp_gate.weight"))?;
@@ -638,6 +686,7 @@ impl Gemma4Model {
                 w_gate,
                 w_up,
                 w_down,
+                ffn_dim,
                 out_scale,
                 per_layer_inp_gate,
                 per_layer_proj,
@@ -652,14 +701,23 @@ impl Gemma4Model {
         let kv_alias = build_kv_alias(&cfg);
         let kv = build_kv_slots(&cfg);
 
+        // Reconcile scratch sizing with what the tensors actually carry.
+        // The GGUF `feed_forward_length` metadata is taken as an upper
+        // bound but tensor headers are authoritative — if any layer's
+        // real `ffn_gate.weight.dims[1]` exceeds the metadata, grow the
+        // scratch so the forward pass's `gate[..ffn_dim]` slice stays in
+        // bounds.
+        cfg.mlp_intermediate_max = cfg.mlp_intermediate_max.max(observed_ffn_max);
         let scratch = ForwardScratch::new(&cfg);
         let logits = vec![0.0; cfg.vocab_size];
         let tokenizer = Tokenizer::from_gguf(&g.file).ok();
 
+        let mmap = Some(g.mmap_handle());
         let model_built = Self {
             cfg,
             arch_tag,
             isa,
+            mmap,
             global,
             layers,
             kv,
@@ -1144,23 +1202,26 @@ impl LanguageModel for Gemma4Model {
                 cfg.rms_eps,
             );
             // FFN gate: gemma4.cpp `gate = ggml_mul_mat(ffn_gate, cur)`.
-            // Row-major w_gate is `[mlp_intermediate, hidden]`.
+            // Row-major w_gate is `[ffn_dim, hidden]`. We slice the
+            // scratch buffers down to this layer's FFN dim so matvec's
+            // y.len() matches the weight's `n` even on abliterated
+            // fine-tunes where per-layer FFN widths vary.
+            let ffn_dim = self.layers[layer].ffn_dim;
             self.layers[layer]
                 .w_gate
-                .matvec(&self.scratch.h, &mut self.scratch.gate);
+                .matvec(&self.scratch.h, &mut self.scratch.gate[..ffn_dim]);
             // FFN up: gemma4.cpp `up = ggml_mul_mat(ffn_up, cur)`.
             self.layers[layer]
                 .w_up
-                .matvec(&self.scratch.h, &mut self.scratch.up);
-            for i in 0..cfg.mlp_intermediate {
+                .matvec(&self.scratch.h, &mut self.scratch.up[..ffn_dim]);
+            for i in 0..ffn_dim {
                 self.scratch.swiglu[i] = gelu(self.scratch.gate[i]) * self.scratch.up[i];
             }
             // FFN down: gemma4.cpp `cur = ggml_mul_mat(ffn_down,
-            // gelu(gate)*up)`. Row-major w_down is `[hidden,
-            // mlp_intermediate]`.
+            // gelu(gate)*up)`. Row-major w_down is `[hidden, ffn_dim]`.
             self.layers[layer]
                 .w_down
-                .matvec(&self.scratch.swiglu, &mut self.scratch.ffn_out);
+                .matvec(&self.scratch.swiglu[..ffn_dim], &mut self.scratch.ffn_out);
             let mut ffn_normed = vec![0.0_f32; hidden];
             rmsnorm_f32(
                 &self.scratch.ffn_out,
@@ -1239,6 +1300,7 @@ impl LanguageModel for Gemma4Model {
             threads: 1,
             vocab_size: self.cfg.vocab_size,
             context_length: self.cfg.context_length,
+            mmap_pinned: self.mmap.as_ref().map(|m| m.pinned()).unwrap_or(false),
         }
     }
 }
@@ -1409,7 +1471,7 @@ mod tests {
             n_kv_heads: 2,
             head_dim_swa: 8,
             head_dim_full: 16,
-            mlp_intermediate: 64,
+            mlp_intermediate_max: 64,
             context_length: 8,
             rope_base_swa: 10000.0,
             rope_base_full: 1_000_000.0,

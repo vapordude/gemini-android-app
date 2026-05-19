@@ -35,7 +35,21 @@ fun TraceEventRow(event: TraceEvent, modifier: Modifier = Modifier) {
         )
         when (event) {
             is TraceEvent.ModelLoaded -> Text(
-                "model_loaded arch=${event.archTag} isa=${event.isa} threads=${event.threads}",
+                buildString {
+                    append("model_loaded arch=").append(event.archTag)
+                    append(" isa=").append(event.isa)
+                    append(" threads=").append(event.threads)
+                    if (event.residentBytes > 0) {
+                        val mb = event.residentBytes.toDouble() / (1024.0 * 1024.0)
+                        append(" rss=")
+                        if (mb >= 1024.0) {
+                            append("%.1f".format(mb / 1024.0)).append("GB")
+                        } else {
+                            append(mb.toLong()).append("MB")
+                        }
+                    }
+                    append(if (event.mmapPinned) " pinned" else " reclaimable")
+                },
                 style = MaterialTheme.typography.bodySmall,
             )
             is TraceEvent.GenerateFinished -> Text(

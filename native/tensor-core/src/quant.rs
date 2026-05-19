@@ -5,6 +5,7 @@
 
 pub mod q4_0;
 pub mod q4_k;
+pub mod q6_k;
 pub mod q8_0;
 
 use crate::half::f16_to_f32;
@@ -36,6 +37,7 @@ pub enum DequantType {
     Q8_0,
     Q4_0,
     Q4_K,
+    Q6_K,
 }
 
 impl DequantType {
@@ -48,6 +50,7 @@ impl DequantType {
             2 => Some(Self::Q4_0),
             8 => Some(Self::Q8_0),
             12 => Some(Self::Q4_K),
+            14 => Some(Self::Q6_K),
             30 => Some(Self::BF16),
             _ => None,
         }
@@ -61,6 +64,7 @@ impl DequantType {
             Self::Q8_0 => "Q8_0",
             Self::Q4_0 => "Q4_0",
             Self::Q4_K => "Q4_K",
+            Self::Q6_K => "Q6_K",
         }
     }
 }
@@ -172,6 +176,25 @@ pub fn dequantize_to_f32(
             }
             let mut out = vec![0.0f32; numel];
             q4_k::dequantize(&src[..expected], &mut out);
+            Ok(out)
+        }
+        DequantType::Q6_K => {
+            if numel % q6_k::SUPER_BLOCK != 0 {
+                return Err(DequantError::BadLength {
+                    expected: q6_k::SUPER_BLOCK,
+                    got: numel,
+                });
+            }
+            let supers = numel / q6_k::SUPER_BLOCK;
+            let expected = supers * q6_k::BYTES_PER_SUPER_BLOCK;
+            if src.len() < expected {
+                return Err(DequantError::BadLength {
+                    expected,
+                    got: src.len(),
+                });
+            }
+            let mut out = vec![0.0f32; numel];
+            q6_k::dequantize(&src[..expected], &mut out);
             Ok(out)
         }
     }

@@ -34,6 +34,14 @@ internal object NativeInference {
     @JvmStatic external fun nativeResetSession(handle: Long)
 
     /**
+     * True iff the underlying mmap was `mlock`-ed at open time. On stock
+     * unprivileged Android `RLIMIT_MEMLOCK` is 64 KiB so this is almost
+     * always `false`; the chat UI uses it to display `pinned` vs
+     * `reclaimable` honestly. Returns `false` for a 0 / stale handle.
+     */
+    @JvmStatic external fun nativeIsPinned(handle: Long): Boolean
+
+    /**
      * Ask an in-flight `nativeGenerate` on `handle` to stop at the next
      * decoded token. Cheap atomic flag set on the Rust side; the
      * decode loop polls it per iteration. Safe to call when no
