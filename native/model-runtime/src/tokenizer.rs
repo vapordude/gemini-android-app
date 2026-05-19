@@ -164,6 +164,27 @@ impl Tokenizer {
         out
     }
 
+    /// Encode `text`, prepending the model's BOS token id (when the
+    /// GGUF declares one). Gemma 4 — and most modern instruction-tuned
+    /// LLMs — expect every sequence to start with BOS. The bare
+    /// `encode()` doesn't prepend it; callers building a fresh prompt
+    /// should use this method instead.
+    ///
+    /// If the GGUF didn't declare a BOS id (rare, but possible for
+    /// custom fine-tunes), this falls back to `encode()` unchanged.
+    pub fn encode_with_bos(&self, text: &str) -> Vec<u32> {
+        let mut ids = self.encode(text);
+        if let Some(bos) = self.bos_id {
+            // Don't double-prepend if the prompt already starts with
+            // BOS (e.g. a chat-template that has its own `<bos>` token
+            // baked in literally).
+            if ids.first() != Some(&bos) {
+                ids.insert(0, bos);
+            }
+        }
+        ids
+    }
+
     fn encode_normal_segment(&self, prepared: &str, out: &mut Vec<u32>) {
         let mut sub = prepared;
         while !sub.is_empty() {
@@ -336,6 +357,59 @@ mod tests {
         let ids = t.encode("hello");
         assert_eq!(ids.len(), 1);
         assert_eq!(t.vocab[ids[0] as usize], "▁hello");
+    }
+
+    #[test]
+    fn encode_with_bos_prepends_bos_token() {
+        let t = fixture(
+            &["<unk>", "<s>", "</s>", "▁hello"],
+            &[
+                TokenType::Unknown,
+                TokenType::Control,
+                TokenType::Control,
+                TokenType::Normal,
+            ],
+        );
+        let ids = t.encode_with_bos("hello");
+        assert_eq!(ids.first().copied(), t.bos_id);
+        assert!(
+            ids.len() > 1,
+            "should have BOS + at least one content token"
+        );
+    }
+
+    #[test]
+    fn encode_with_bos_does_not_double_prepend() {
+        let t = fixture(
+            &["<unk>", "<s>", "</s>", "▁hello"],
+            &[
+                TokenType::Unknown,
+                TokenType::Control,
+                TokenType::Control,
+                TokenType::Normal,
+            ],
+        );
+        // If a caller literally embeds `<s>` at the start of the text,
+        // the tokenizer's special-prefix matcher will emit the BOS id
+        // as the first token already — encode_with_bos must not add a
+        // second BOS in front.
+        let ids = t.encode_with_bos("<s>hello");
+        let bos = t.bos_id.unwrap();
+        assert_eq!(ids[0], bos);
+        assert_ne!(ids.get(1).copied(), Some(bos), "no double-BOS");
+    }
+
+    #[test]
+    fn encode_with_bos_falls_back_when_bos_absent() {
+        let mut t = fixture(
+            &["<unk>", "▁hello"],
+            &[TokenType::Unknown, TokenType::Normal],
+        );
+        t.bos_id = None;
+        let plain = t.encode("hello");
+        let with_bos = t.encode_with_bos("hello");
+        // No BOS to prepend → identical output.
+        assert_eq!(plain, with_bos);
     }
 
     #[test]

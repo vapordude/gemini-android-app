@@ -271,9 +271,14 @@ mod android {
 
             // Pull tokenizer + token ids out of the session under the lock
             // so we can release the lock for the long generation loop.
+            // `encode_with_bos` prepends the model's BOS token — Gemma 4
+            // (and most modern instruction-tuned LLMs) expect every
+            // sequence to start with BOS, otherwise the model is being
+            // fed prompts mid-distribution and the first-token quality
+            // degrades silently.
             let (prompt_ids, eos_id) = match SESSIONS.with(handle, |sess| {
                 let tok = sess.tokenizer.as_ref()?;
-                let prompt_ids = tok.encode(&prompt_s);
+                let prompt_ids = tok.encode_with_bos(&prompt_s);
                 Some((prompt_ids, tok.eos_id))
             }) {
                 Some(Some(v)) => v,
