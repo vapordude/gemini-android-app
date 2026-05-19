@@ -587,7 +587,7 @@ impl Gemma4Model {
 
     /// Load every tensor the forward pass needs.
     pub fn load(g: &GgufBytes) -> Result<Self, LoadError> {
-        let cfg = Gemma4Config::from_gguf(&g.file)?;
+        let mut cfg = Gemma4Config::from_gguf(&g.file)?;
         let arch_tag = g.file.arch_tag().unwrap_or("gemma4").to_string();
         let isa = isa::detect();
 
@@ -623,6 +623,11 @@ impl Gemma4Model {
         };
 
         let mut layers = Vec::with_capacity(cfg.n_layers);
+        // Track the largest FFN dim we actually see in the tensor headers.
+        // If `feed_forward_length` metadata under-reports vs. the real
+        // `ffn_gate.weight.dims[1]` for any layer, we'd otherwise panic on
+        // `gate[..ffn_dim]` in the forward pass.
+        let mut observed_ffn_max: usize = 0;
         for i in 0..cfg.n_layers {
             let p = |suffix: &str| format!("blk.{i}.{suffix}");
             let owns_kv = cfg.owns_kv(i);
@@ -653,12 +658,14 @@ impl Gemma4Model {
             // — i.e. this layer's FFN intermediate dim. Read it from the
             // tensor header so abliterated GGUFs with varying per-layer
             // widths compose correctly.
+            let ffn_gate_name = p("ffn_gate.weight");
             let ffn_dim = g
                 .file
-                .tensor(&p("ffn_gate.weight"))
+                .tensor(&ffn_gate_name)
                 .and_then(|t| t.dims.get(1).copied())
                 .map(|d| d as usize)
-                .ok_or_else(|| missing("ffn_gate.weight dims[1]"))?;
+                .ok_or_else(|| missing(&format!("{ffn_gate_name} dims[1]")))?;
+            observed_ffn_max = observed_ffn_max.max(ffn_dim);
             let out_scale = read_optional_scalar(g, &p("out_scale.weight"))?;
 
             let per_layer_inp_gate = read_optional_projection(g, &p("per_layer_inp_gate.weight"))?;
@@ -694,6 +701,13 @@ impl Gemma4Model {
         let kv_alias = build_kv_alias(&cfg);
         let kv = build_kv_slots(&cfg);
 
+        // Reconcile scratch sizing with what the tensors actually carry.
+        // The GGUF `feed_forward_length` metadata is taken as an upper
+        // bound but tensor headers are authoritative — if any layer's
+        // real `ffn_gate.weight.dims[1]` exceeds the metadata, grow the
+        // scratch so the forward pass's `gate[..ffn_dim]` slice stays in
+        // bounds.
+        cfg.mlp_intermediate_max = cfg.mlp_intermediate_max.max(observed_ffn_max);
         let scratch = ForwardScratch::new(&cfg);
         let logits = vec![0.0; cfg.vocab_size];
         let tokenizer = Tokenizer::from_gguf(&g.file).ok();

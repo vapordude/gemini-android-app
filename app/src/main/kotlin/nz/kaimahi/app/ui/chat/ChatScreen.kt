@@ -259,9 +259,6 @@ fun ChatScreen(
                                         )
                                         InferenceModeBadge(inferenceMode)
                                     }
-                                    // Sub-row: memory indicator chip. Only visible while
-                                    // a local model is loaded (memoryMetrics non-null).
-                                    memoryMetrics?.let { MemoryIndicatorChip(it) }
                                     DropdownMenu(
                                         expanded = modelMenuOpen,
                                         onDismissRequest = { modelMenuOpen = false }
@@ -362,6 +359,11 @@ fun ChatScreen(
                                         )
                                     }
                                 }
+                                // Sub-row: memory indicator chip. Only visible while
+                                // a local model is loaded (memoryMetrics non-null).
+                                // Sits in the Column directly under the model-name Box
+                                // so it appears below — not overlaid on — the title row.
+                                memoryMetrics?.let { MemoryIndicatorChip(it) }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Box {
                                         Text(
@@ -1461,7 +1463,7 @@ private fun InferenceModeBadge(mode: InferenceMode) {
  */
 @Composable
 private fun MemoryIndicatorChip(metrics: MemoryMetrics) {
-    val rssText = if (metrics.rssBytes > 0) formatBytes(metrics.rssBytes) else "—"
+    val rssText = if (metrics.rssBytes > 0) formatBytesMemory(metrics.rssBytes) else "—"
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.padding(top = 1.dp, start = 4.dp, end = 4.dp)
@@ -1516,7 +1518,13 @@ private fun StatusDot(color: Color, label: String) {
     }
 }
 
-private fun formatBytes(bytes: Long): String {
+/**
+ * Renders a memory byte count in 1024-based units (B/KB/MB/GB). The
+ * other `formatBytes(size: Int)` in this file uses 1000-based units for
+ * attachment sizes — kept separate by name to make the unit basis
+ * explicit at the call site rather than relying on overload resolution.
+ */
+private fun formatBytesMemory(bytes: Long): String {
     if (bytes <= 0) return "0 B"
     val gb = bytes.toDouble() / (1024.0 * 1024.0 * 1024.0)
     if (gb >= 1.0) return String.format(java.util.Locale.US, "%.1f GB", gb)

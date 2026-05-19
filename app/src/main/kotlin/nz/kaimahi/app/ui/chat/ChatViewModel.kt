@@ -231,7 +231,13 @@ class ChatViewModel(
             inferenceMode.collect { mode ->
                 memoryPollerJob?.cancel()
                 if (mode == InferenceMode.LOCAL_AGENT) {
-                    memoryPollerJob = viewModelScope.launch { runMemoryPoller() }
+                    // Dispatchers.IO: the poller's `getMemoryInfo` and
+                    // `getProcessMemoryInfo` are binder calls into system_server
+                    // and can block long enough to jank the UI if they run on
+                    // the main dispatcher.
+                    memoryPollerJob = viewModelScope.launch(Dispatchers.IO) {
+                        runMemoryPoller()
+                    }
                 } else {
                     _memoryMetrics.value = null
                 }

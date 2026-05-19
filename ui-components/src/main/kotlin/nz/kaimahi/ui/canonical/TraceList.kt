@@ -40,9 +40,13 @@ fun TraceEventRow(event: TraceEvent, modifier: Modifier = Modifier) {
                     append(" isa=").append(event.isa)
                     append(" threads=").append(event.threads)
                     if (event.residentBytes > 0) {
+                        val mb = event.residentBytes.toDouble() / (1024.0 * 1024.0)
                         append(" rss=")
-                        append(event.residentBytes / (1024L * 1024L))
-                        append("MB")
+                        if (mb >= 1024.0) {
+                            append("%.1f".format(mb / 1024.0)).append("GB")
+                        } else {
+                            append(mb.toLong()).append("MB")
+                        }
                     }
                     append(if (event.mmapPinned) " pinned" else " reclaimable")
                 },

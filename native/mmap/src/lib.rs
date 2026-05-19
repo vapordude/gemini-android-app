@@ -13,6 +13,7 @@ use core::ptr::NonNull;
 use std::ffi::CString;
 use std::io;
 use std::os::raw::{c_char, c_int, c_void};
+use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 const O_RDONLY: c_int = 0;
@@ -48,7 +49,11 @@ pub struct FileMmap {
 
 impl FileMmap {
     pub fn open(path: &Path) -> io::Result<Self> {
-        let c_path = CString::new(path.as_os_str().to_string_lossy().as_bytes())
+        // Use raw OS bytes (not `to_string_lossy`) so non-UTF-8 filenames
+        // on Unix pass through unchanged. Android filesystem paths are
+        // ASCII/UTF-8 in practice, but lossy conversion would silently
+        // corrupt any non-UTF-8 sequence with U+FFFD.
+        let c_path = CString::new(path.as_os_str().as_bytes())
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains NUL byte"))?;
         // SAFETY: c_path is a valid NUL-terminated string for `open`.
         let fd = unsafe { open(c_path.as_ptr(), O_RDONLY) };
