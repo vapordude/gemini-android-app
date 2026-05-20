@@ -473,9 +473,16 @@ impl PackedEmbedding {
 
 /// Per-layer weight tensors. K and V are `Option` because shared-KV
 /// reusing layers don't carry their own `wk`/`wv`.
+///
+/// Post-norms are `Option` because some Gemma 4 retrains / distills
+/// (DECKARD-Expresso, Disinhibited variants, etc.) drop them entirely
+/// — they were ablated to study attention/FFN behaviour without the
+/// extra normalization step, and the resulting checkpoints carry the
+/// model just fine. When absent, the forward pass passes the attn/FFN
+/// output through unchanged before the residual add.
 struct LayerWeights {
     attn_norm: Vec<f32>,
-    attn_post_norm: Vec<f32>,
+    attn_post_norm: Option<Vec<f32>>,
     attn_q_norm: Vec<f32>,
     attn_k_norm: Option<Vec<f32>>, // None for KV-reusing layers
     w_q: WeightView,
@@ -484,7 +491,7 @@ struct LayerWeights {
     w_o: WeightView,
 
     ffn_norm: Vec<f32>,
-    ffn_post_norm: Vec<f32>,
+    ffn_post_norm: Option<Vec<f32>>,
     w_gate: WeightView,
     w_up: WeightView,
     w_down: WeightView,
@@ -841,7 +848,10 @@ impl Gemma4Model {
             let owns_kv = cfg.owns_kv(i);
 
             let attn_norm = read_f32(g, &p("attn_norm.weight"))?;
-            let attn_post_norm = read_f32(g, &p("attn_post_norm.weight"))?;
+            // Post-norm is optional — some retrains/distills drop it.
+            // When absent, the forward pass skips the RMSNorm step
+            // (treats it as identity) before the residual add.
+            let attn_post_norm = read_optional_f32(g, &p("attn_post_norm.weight"))?;
             let attn_q_norm = read_f32(g, &p("attn_q_norm.weight"))?;
             let attn_k_norm = if owns_kv {
                 Some(read_f32(g, &p("attn_k_norm.weight"))?)
@@ -857,7 +867,8 @@ impl Gemma4Model {
             let w_v = read_optional_projection(g, &p("attn_v.weight"))?;
             let w_o = read_projection(g, &p("attn_output.weight"))?;
             let ffn_norm = read_f32(g, &p("ffn_norm.weight"))?;
-            let ffn_post_norm = read_f32(g, &p("ffn_post_norm.weight"))?;
+            // Post-norm optional (paired with attn_post_norm above).
+            let ffn_post_norm = read_optional_f32(g, &p("ffn_post_norm.weight"))?;
             let w_gate = read_projection(g, &p("ffn_gate.weight"))?;
             let w_up = read_projection(g, &p("ffn_up.weight"))?;
             let w_down = read_projection(g, &p("ffn_down.weight"))?;
@@ -1384,16 +1395,20 @@ impl LanguageModel for Gemma4Model {
                 .w_o
                 .matvec(&self.scratch.attn_out[..q_total], &mut self.scratch.o);
 
-            // attn_post_norm + residual.
-            let mut o_normed = vec![0.0_f32; hidden];
-            rmsnorm_f32(
-                &self.scratch.o,
-                &self.layers[layer].attn_post_norm,
-                &mut o_normed,
-                cfg.rms_eps,
-            );
-            for i in 0..hidden {
-                self.scratch.x[i] = o_normed[i] + residual_attn[i];
+            // attn_post_norm + residual. The post-norm is absent on
+            // some retrains; when None we pass the attn output through
+            // unchanged before the residual add (identity replacement
+            // for the RMSNorm step).
+            if let Some(weight) = self.layers[layer].attn_post_norm.as_ref() {
+                let mut o_normed = vec![0.0_f32; hidden];
+                rmsnorm_f32(&self.scratch.o, weight, &mut o_normed, cfg.rms_eps);
+                for i in 0..hidden {
+                    self.scratch.x[i] = o_normed[i] + residual_attn[i];
+                }
+            } else {
+                for (i, r) in residual_attn.iter().enumerate().take(hidden) {
+                    self.scratch.x[i] = self.scratch.o[i] + r;
+                }
             }
             // attn_out is now in self.scratch.x. Keep a copy for the
             // FFN residual.
@@ -1429,15 +1444,19 @@ impl LanguageModel for Gemma4Model {
             self.layers[layer]
                 .w_down
                 .matvec(&self.scratch.swiglu[..ffn_dim], &mut self.scratch.ffn_out);
-            let mut ffn_normed = vec![0.0_f32; hidden];
-            rmsnorm_f32(
-                &self.scratch.ffn_out,
-                &self.layers[layer].ffn_post_norm,
-                &mut ffn_normed,
-                cfg.rms_eps,
-            );
-            for i in 0..hidden {
-                self.scratch.x[i] = ffn_normed[i] + residual_ffn[i];
+            // FFN post-norm + residual. Optional, same shape as
+            // attn_post_norm above — pass FFN output through unchanged
+            // when the retrain dropped this weight.
+            if let Some(weight) = self.layers[layer].ffn_post_norm.as_ref() {
+                let mut ffn_normed = vec![0.0_f32; hidden];
+                rmsnorm_f32(&self.scratch.ffn_out, weight, &mut ffn_normed, cfg.rms_eps);
+                for i in 0..hidden {
+                    self.scratch.x[i] = ffn_normed[i] + residual_ffn[i];
+                }
+            } else {
+                for (i, r) in residual_ffn.iter().enumerate().take(hidden) {
+                    self.scratch.x[i] = self.scratch.ffn_out[i] + r;
+                }
             }
 
             // PLE injection (if the model has it on this layer).
