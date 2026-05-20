@@ -279,9 +279,11 @@ class ChatViewModel(
                     fgServiceUp = true,
                 )
             }.getOrNull()
-            if (metrics != null) {
-                _memoryMetrics.value = metrics
-            }
+            // Clear the chip rather than keep stale data when sampling
+            // fails. A persistent ROM-specific exception would otherwise
+            // freeze the readout on values from the last successful tick
+            // (potentially many minutes old).
+            _memoryMetrics.value = metrics
             kotlinx.coroutines.delay(2_000)
         }
     }

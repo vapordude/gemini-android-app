@@ -709,8 +709,21 @@ fn read_packed_embedding(
             info.dims.len()
         )));
     }
-    let n_vocab = info.dims[0] as usize;
-    let dim = info.dims[1] as usize;
+    // GGUF dim order: `dims[0]` is the innermost (contiguous) dim,
+    // `dims[1]` is the outer/stride dim. llama.cpp creates embedding
+    // tables as `create_tensor({n_embd, n_vocab})`, so for
+    // `token_embd.weight` and `per_layer_token_embd.weight`:
+    //   dims[0] = hidden  (row width — per-token contiguous floats)
+    //   dims[1] = vocab   (number of rows)
+    // An earlier revision had these swapped; with vocab=262144 and
+    // hidden=2048 the F32 row slice would have been ~262K floats long
+    // and read way past the end of the data buffer, and the packed
+    // row offset arithmetic would have used the vocab-sized stride
+    // for every token. The bug never fired on device because load
+    // failed earlier paths (OOM, then post-norm); would have surfaced
+    // as a panic on the first successful forward.
+    let dim = info.dims[0] as usize;
+    let n_vocab = info.dims[1] as usize;
 
     if allow_pack && info.ggml_type == GgmlType::Q6_K && dim % Q6K_BLOCK == 0 {
         let offset = g.file.tensor_data_start as usize + info.offset as usize;
@@ -1399,11 +1412,14 @@ impl LanguageModel for Gemma4Model {
             // some retrains; when None we pass the attn output through
             // unchanged before the residual add (identity replacement
             // for the RMSNorm step).
+            //
+            // Reuses `scratch.h` for the norm output instead of a fresh
+            // per-token allocation — the previous content of `h` was
+            // already consumed by the FFN matmuls above.
             if let Some(weight) = self.layers[layer].attn_post_norm.as_ref() {
-                let mut o_normed = vec![0.0_f32; hidden];
-                rmsnorm_f32(&self.scratch.o, weight, &mut o_normed, cfg.rms_eps);
-                for i in 0..hidden {
-                    self.scratch.x[i] = o_normed[i] + residual_attn[i];
+                rmsnorm_f32(&self.scratch.o, weight, &mut self.scratch.h, cfg.rms_eps);
+                for (i, r) in residual_attn.iter().enumerate().take(hidden) {
+                    self.scratch.x[i] = self.scratch.h[i] + r;
                 }
             } else {
                 for (i, r) in residual_attn.iter().enumerate().take(hidden) {
@@ -1446,12 +1462,17 @@ impl LanguageModel for Gemma4Model {
                 .matvec(&self.scratch.swiglu[..ffn_dim], &mut self.scratch.ffn_out);
             // FFN post-norm + residual. Optional, same shape as
             // attn_post_norm above — pass FFN output through unchanged
-            // when the retrain dropped this weight.
+            // when the retrain dropped this weight. Reuses `scratch.h`
+            // (free again now that gate/up have consumed it).
             if let Some(weight) = self.layers[layer].ffn_post_norm.as_ref() {
-                let mut ffn_normed = vec![0.0_f32; hidden];
-                rmsnorm_f32(&self.scratch.ffn_out, weight, &mut ffn_normed, cfg.rms_eps);
-                for i in 0..hidden {
-                    self.scratch.x[i] = ffn_normed[i] + residual_ffn[i];
+                rmsnorm_f32(
+                    &self.scratch.ffn_out,
+                    weight,
+                    &mut self.scratch.h,
+                    cfg.rms_eps,
+                );
+                for (i, r) in residual_ffn.iter().enumerate().take(hidden) {
+                    self.scratch.x[i] = self.scratch.h[i] + r;
                 }
             } else {
                 for (i, r) in residual_ffn.iter().enumerate().take(hidden) {
@@ -1776,30 +1797,43 @@ mod tests {
         assert_eq!(alias[5], 2);
     }
 
-    /// Synthetic config: confirm the 5:1-with-last-full default layer
-    /// pattern when GGUF doesn't carry an explicit `layer_types` array.
+    /// `read_layer_types` falls back to a synthetic 5:1-with-last-full
+    /// pattern when the GGUF metadata doesn't carry an explicit
+    /// `attention.sliding_window_pattern` array. Exercises the actual
+    /// function (not a hand-rolled copy) so a regression in the
+    /// fallback shape would fail this test.
     #[test]
     fn default_layer_types_e2b_pattern() {
-        // E2B has 35 layers. Indices 4, 9, 14, 19, 24, 29 are normally
-        // full per the 5:1 cycle, and index 34 is forced full.
-        let pattern = (0..35usize)
-            .map(|i| {
-                if (i + 1) % 6 == 0 {
-                    LayerType::Full
-                } else {
-                    LayerType::Sliding
-                }
-            })
-            .collect::<Vec<_>>();
-        for &i in &[5_usize, 11, 17, 23, 29] {
-            let layer_idx = i - 1; // (i+1) % 6 == 0  ⇒  i = 5, 11, …  ⇒  layer_idx = 4, 10, …
-            let _ = layer_idx;
+        let empty_gguf = GgufFile {
+            version: 3,
+            metadata: Vec::new(),
+            tensors: Vec::new(),
+            tensor_data_start: 0,
+        };
+        let n_layers = 35; // Gemma 4 E2B
+        let types = read_layer_types(&empty_gguf, "gemma4", n_layers);
+
+        assert_eq!(types.len(), n_layers);
+        // 5:1 cycle: indices 5, 11, 17, 23, 29 are Full (1-indexed mod 6 == 0).
+        // 0-indexed those are 5, 11, 17, 23, 29. The "(i+1) % 6 == 0"
+        // check in the fallback uses 0-indexed i, so:
+        //   i=5 → Full (cycle hit)
+        //   i=11 → Full (cycle hit)
+        //   i=17 → Full
+        //   i=23 → Full
+        //   i=29 → Full
+        // Everything else is Sliding except the last layer, which is
+        // forced Full regardless of cycle.
+        let expected_full: Vec<usize> = vec![5, 11, 17, 23, 29, n_layers - 1];
+        for (i, ty) in types.iter().enumerate() {
+            if expected_full.contains(&i) {
+                assert_eq!(*ty, LayerType::Full, "layer {i} should be Full");
+            } else {
+                assert_eq!(*ty, LayerType::Sliding, "layer {i} should be Sliding");
+            }
         }
-        // Last layer forced full.
-        let mut last_test = pattern.clone();
-        if let Some(last) = last_test.last_mut() {
-            *last = LayerType::Full;
-        }
-        assert_eq!(*last_test.last().unwrap(), LayerType::Full);
+        // Belt-and-braces: last layer is always Full per the synthetic
+        // pattern, even if the cycle wouldn't have hit it.
+        assert_eq!(*types.last().unwrap(), LayerType::Full);
     }
 }
