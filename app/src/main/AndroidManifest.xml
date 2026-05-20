@@ -54,13 +54,19 @@
         <!--
             Local on-device inference anchor. Foreground service raises the
             process's `oom_adj` so `lmkd` doesn't reap us while a multi-GB
-            mmap is resident. `specialUse` is the honest type for "we are
-            running an on-device LLM"; `dataSync` would be a lie.
+            mmap is resident.
+
+            The type declares BOTH `specialUse` (preferred; API 34+) and
+            `dataSync` (legacy; API 29-33). The runtime picks one per
+            Build.VERSION.SDK_INT in `LocalInferenceService.onCreate`.
+            Declaring both prevents `ForegroundServiceTypeMismatchException`
+            on devices below API 34 where the runtime falls back to
+            dataSync but the manifest only listed specialUse.
         -->
         <service
             android:name=".inference.LocalInferenceService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse|dataSync">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="on_device_llm_inference" />

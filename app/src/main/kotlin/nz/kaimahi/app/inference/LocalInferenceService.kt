@@ -43,27 +43,45 @@ class LocalInferenceService : Service() {
         // ForegroundServiceDidNotStartInTimeException. Doing it in
         // onCreate (which runs synchronously from the framework start
         // path) is the safest guarantee.
-        ensureChannel()
-        val notif = buildNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            // API 34+: declare specialUse for honesty. The manifest
-            // already advertises the subtype "on_device_llm_inference".
-            startForeground(
-                NOTIFICATION_ID,
-                notif,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
-            )
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // API 29-33: SPECIAL_USE doesn't exist yet; DATA_SYNC is the
-            // closest legacy bucket Android offers for a long-running
-            // CPU job without a microphone/camera/location grab.
-            startForeground(
-                NOTIFICATION_ID,
-                notif,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notif)
+        //
+        // Every call here can fail in surprising ways across OEMs and
+        // Android versions:
+        //   - getSystemService(NotificationManager) can return null on
+        //     a hardened ROM, leaving the channel uncreated
+        //   - startForeground can throw SecurityException if
+        //     POST_NOTIFICATIONS wasn't granted (API 33+)
+        //   - startForeground can throw ForegroundServiceTypeMismatch
+        //     if the runtime type doesn't match the manifest declaration
+        // The activity-side launch is best-effort already (it catches
+        // ForegroundServiceStartNotAllowedException), so we follow
+        // suit here: catch + log rather than letting a throw bubble
+        // up into a system-level kill of the entire process.
+        runCatching {
+            ensureChannel()
+            val notif = buildNotification()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                // API 34+: declare specialUse for honesty. The manifest
+                // already advertises the subtype "on_device_llm_inference".
+                startForeground(
+                    NOTIFICATION_ID,
+                    notif,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+                )
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // API 29-33: SPECIAL_USE doesn't exist yet; DATA_SYNC is
+                // the closest legacy bucket Android offers for a long-
+                // running CPU job without a mic/camera/location grab.
+                startForeground(
+                    NOTIFICATION_ID,
+                    notif,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notif)
+            }
+        }.onFailure {
+            android.util.Log.w(TAG, "startForeground failed; falling back to plain service", it)
+            stopSelf()
         }
     }
 
@@ -100,6 +118,7 @@ class LocalInferenceService : Service() {
             .build()
 
     companion object {
+        private const val TAG = "LocalInferenceService"
         const val CHANNEL_ID = "local_inference"
         const val NOTIFICATION_ID = 0x4B41 // 'KA'
     }

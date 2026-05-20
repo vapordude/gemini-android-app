@@ -19,8 +19,11 @@
 
 #![allow(non_snake_case)]
 
+pub mod sessions;
+
 #[cfg(target_os = "android")]
 mod android {
+    use crate::sessions::SessionTable;
     use jni::objects::{JClass, JObject, JString, JValue};
     use jni::sys::{jboolean, jfloat, jint, jlong, jstring, JNI_FALSE, JNI_TRUE};
     use jni::JNIEnv;
@@ -30,8 +33,8 @@ mod android {
     use std::panic::{catch_unwind, AssertUnwindSafe};
     use std::path::Path;
     use std::ptr;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc, Mutex};
+    use std::sync::atomic::Ordering;
+    use std::sync::Mutex;
 
     /// Status codes for `nativeGenerate`. Must mirror
     /// `inference-bridge/.../NativeInference.kt::Status`.
@@ -79,10 +82,10 @@ mod android {
     /// One loaded inference session. We hold the model + its KV cache
     /// + a sampler RNG so per-token state isn't shared across handles.
     ///
-    /// `cancel` is checked once per decode iteration so a Kotlin-side
-    /// `nativeRequestCancel(handle)` can break the generation loop
-    /// cleanly without killing the JVM thread. The flag is reset at
-    /// the start of every `nativeGenerate`.
+    /// Cancellation does NOT live in this struct — it lives on the
+    /// table slot (see [`crate::sessions::Slot`]) so a concurrent
+    /// `take()` removing the session doesn't drop the cancel signal
+    /// on the floor for an in-flight generate.
     struct Session {
         model: Box<dyn LanguageModel>,
         kv: KvCache,
@@ -90,35 +93,9 @@ mod android {
         rng: SamplerState,
         #[allow(dead_code)] // kept for diag dumps + future logging
         arch_tag: String,
-        cancel: Arc<AtomicBool>,
     }
 
-    static SESSIONS: Mutex<Vec<Option<Session>>> = Mutex::new(Vec::new());
-
-    fn store(sess: Session) -> jlong {
-        let mut g = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
-        for (i, slot) in g.iter_mut().enumerate() {
-            if slot.is_none() {
-                *slot = Some(sess);
-                return (i as jlong) + 1;
-            }
-        }
-        g.push(Some(sess));
-        g.len() as jlong
-    }
-
-    fn take(handle: jlong) -> Option<Session> {
-        let mut g = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
-        let idx = (handle as usize).checked_sub(1)?;
-        g.get_mut(idx).and_then(|s| s.take())
-    }
-
-    fn with<R>(handle: jlong, f: impl FnOnce(&mut Session) -> R) -> Option<R> {
-        let mut g = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
-        let idx = (handle as usize).checked_sub(1)?;
-        let slot = g.get_mut(idx)?.as_mut()?;
-        Some(f(slot))
-    }
+    static SESSIONS: SessionTable<Session> = SessionTable::new();
 
     #[no_mangle]
     pub extern "system" fn Java_nz_kaimahi_inference_NativeInference_nativeVersion<'a>(
@@ -234,9 +211,8 @@ mod android {
                 tokenizer,
                 rng: SamplerState::new(0),
                 arch_tag,
-                cancel: Arc::new(AtomicBool::new(false)),
             };
-            store(sess)
+            SESSIONS.store(sess)
         })
     }
 
@@ -277,50 +253,79 @@ mod android {
                 Err(_) => return STATUS_INTERNAL,
             };
 
-            // Reset the cancel flag at the start of every generate and
-            // clone the Arc so the decode loop can check it lock-free.
-            // If `nativeRequestCancel(handle)` runs concurrently it
-            // sets the flag through the same Arc; the next loop
-            // iteration sees it and breaks cleanly.
-            let cancel = match with(handle, |sess| {
-                sess.cancel.store(false, Ordering::Relaxed);
-                sess.cancel.clone()
-            }) {
+            // Cancel Arc lives at the slot level — clone it out under
+            // the table mutex, then release the lock. If close races
+            // and removes the session before generation finishes, the
+            // Arc we hold here is still observable to any concurrent
+            // `nativeRequestCancel` that already cloned the same Arc.
+            //
+            // Reset is atomic with the clone (single lock acquisition):
+            // a concurrent `nativeRequestCancel` landing between a
+            // separate clone-then-reset pair would have its store(true)
+            // immediately wiped. `reset_and_clone_cancel` closes that
+            // window.
+            let cancel = match SESSIONS.reset_and_clone_cancel(handle) {
                 Some(c) => c,
                 None => return STATUS_INVALID_HANDLE,
             };
 
             // Pull tokenizer + token ids out of the session under the lock
             // so we can release the lock for the long generation loop.
-            let (mut prompt_ids, eos_id, vocab_size, hidden) = match with(handle, |sess| {
+            // `encode_with_bos` prepends the model's BOS token — Gemma 4
+            // (and most modern instruction-tuned LLMs) expect every
+            // sequence to start with BOS, otherwise the model is being
+            // fed prompts mid-distribution and the first-token quality
+            // degrades silently.
+            let (prompt_ids, eos_id) = match SESSIONS.with(handle, |sess| {
                 let tok = sess.tokenizer.as_ref()?;
-                let info = sess.model.info();
-                let prompt_ids = tok.encode(&prompt_s);
-                Some((prompt_ids, tok.eos_id, info.vocab_size, info.context_length))
+                let prompt_ids = tok.encode_with_bos(&prompt_s);
+                Some((prompt_ids, tok.eos_id))
             }) {
                 Some(Some(v)) => v,
                 Some(None) => return STATUS_NO_TOKENIZER,
                 None => return STATUS_INVALID_HANDLE,
             };
-            let _ = vocab_size;
-            let _ = hidden;
             if prompt_ids.is_empty() {
                 return STATUS_EMPTY_PROMPT;
             }
 
             // Reseed if requested.
-            if seed != 0 {
-                with(handle, |sess| sess.rng = SamplerState::new(seed as u64));
+            if seed != 0
+                && SESSIONS
+                    .with(handle, |sess| sess.rng = SamplerState::new(seed as u64))
+                    .is_none()
+            {
+                return STATUS_INVALID_HANDLE;
             }
 
-            // Prefill: run forward on every prompt token but emit nothing.
-            let mut last_token: u32 = 0;
-            for &id in &prompt_ids {
-                let _ = with(handle, |sess| {
-                    let logits = sess.model.forward(id, &mut sess.kv);
-                    last_token = id;
-                    let _ = logits;
+            // Prefill: forward every prompt token EXCEPT the last. The
+            // final prompt token becomes `last_token` and is forwarded
+            // once at the start of the decode loop, where its logits
+            // are sampled for the first generated token.
+            //
+            // Forwarding the final prompt token in BOTH the prefill and
+            // the decode loop would advance the model's KV cache an
+            // extra position for that token (it'd sit twice at adjacent
+            // positions), and the first sample would attend to both
+            // copies — biasing generation toward repeating that token.
+            //
+            // If the session goes away mid-prefill (concurrent close)
+            // bail with INVALID_HANDLE rather than silently no-op and
+            // proceed to decode with stale state.
+            let mut last_token: u32 = *prompt_ids
+                .last()
+                .expect("prompt_ids non-empty: checked above");
+            let prefill_count = prompt_ids.len() - 1;
+            for &id in &prompt_ids[..prefill_count] {
+                if cancel.load(Ordering::Relaxed) {
+                    return STATUS_OK;
+                }
+                let stepped = SESSIONS.with(handle, |sess| {
+                    let _ = sess.model.forward(id, &mut sess.kv);
                 });
+                if stepped.is_none() {
+                    return STATUS_INVALID_HANDLE;
+                }
             }
 
             let max_new = max_tokens.max(1) as usize;
@@ -338,7 +343,7 @@ mod android {
                 if cancel.load(Ordering::Relaxed) {
                     break;
                 }
-                let next_id = match with(handle, |sess| {
+                let next_id = match SESSIONS.with(handle, |sess| {
                     let logits = sess.model.forward(last_token, &mut sess.kv);
                     if temp <= 0.0 {
                         argmax(logits)
@@ -355,7 +360,7 @@ mod android {
                 // in the streamed text — they're either end-of-response
                 // markers or signs the model has gone off the rails.
                 // Either way, don't emit them to the UI and stop decoding.
-                let is_structural = match with(handle, |sess| {
+                let is_structural = match SESSIONS.with(handle, |sess| {
                     sess.tokenizer.as_ref().map(|t| t.is_special(next_id))
                 }) {
                     Some(Some(b)) => b,
@@ -370,7 +375,7 @@ mod android {
                 // decoder strips one leading space, which would collapse the
                 // space between every word in streamed output —
                 // `▁hello ▁world` → `helloworld` instead of `hello world`.
-                let piece = match with(handle, |sess| {
+                let piece = match SESSIONS.with(handle, |sess| {
                     sess.tokenizer.as_ref().map(|t| t.decode_piece(next_id))
                 }) {
                     Some(Some(p)) => p,
@@ -392,7 +397,6 @@ mod android {
                     )
                 };
             }
-            let _ = prompt_ids.pop(); // silence unused-mut warning on stable
             STATUS_OK
         })
     }
@@ -402,6 +406,13 @@ mod android {
     /// iteration. Safe to call from any thread and from outside an
     /// active generate — the flag is reset at the start of every
     /// `nativeGenerate`.
+    ///
+    /// Clones the cancel Arc out from under the table mutex first,
+    /// then releases the lock before storing. This means a concurrent
+    /// `nativeCloseSession` can race with this cancel without losing
+    /// the signal: if cancel wins, the Arc is still observable to any
+    /// generate that already cloned it; if close wins, this returns a
+    /// stale handle and the cancel is correctly a no-op.
     #[no_mangle]
     pub extern "system" fn Java_nz_kaimahi_inference_NativeInference_nativeRequestCancel<'a>(
         _env: JNIEnv<'a>,
@@ -409,7 +420,9 @@ mod android {
         handle: jlong,
     ) {
         ffi_guard!((), {
-            let _ = with(handle, |sess| sess.cancel.store(true, Ordering::Relaxed));
+            if let Some(cancel) = SESSIONS.clone_cancel(handle) {
+                cancel.store(true, Ordering::Relaxed);
+            }
         })
     }
 
@@ -422,7 +435,7 @@ mod android {
         handle: jlong,
     ) {
         ffi_guard!((), {
-            let _ = with(handle, |sess| sess.model.reset(&mut sess.kv));
+            let _ = SESSIONS.with(handle, |sess| sess.model.reset(&mut sess.kv));
         })
     }
 
@@ -433,7 +446,7 @@ mod android {
         handle: jlong,
     ) {
         ffi_guard!((), {
-            drop(take(handle));
+            drop(SESSIONS.take(handle));
         })
     }
 
@@ -447,7 +460,9 @@ mod android {
         handle: jlong,
     ) -> jboolean {
         ffi_guard!(JNI_FALSE, {
-            let pinned = with(handle, |sess| sess.model.info().mmap_pinned).unwrap_or(false);
+            let pinned = SESSIONS
+                .with(handle, |sess| sess.model.info().mmap_pinned)
+                .unwrap_or(false);
             if pinned {
                 JNI_TRUE
             } else {

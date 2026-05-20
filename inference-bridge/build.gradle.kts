@@ -28,8 +28,13 @@ dependencies {
 // Opt-in task to cross-compile the Rust workspace via cargo-ndk and stage
 // the resulting .so files under src/main/jniLibs/<abi>/. NOT hooked into
 // preBuild — running it requires the Rust toolchain + cargo-ndk installed.
-// CI invokes it from the dedicated `native` workflow; the Android workflow
-// builds without native libs (the Kotlin facades fall back to stubs).
+//
+// The CI Android workflow (.github/workflows/android.yml) runs this task
+// before `:app:assembleDebug` / `:app:assembleRelease`, so APKs uploaded
+// as workflow artifacts always contain libkaimahi_native.so. LOCAL Gradle
+// builds without Rust installed will produce a stub APK — the Kotlin
+// facades detect the missing .so via `NativeInference.loaded == false`
+// and surface "Native runtime not available" errors on first use.
 val buildNative by tasks.registering {
     group = "build"
     description = "Cross-compile native/ for Android via cargo-ndk (requires Rust toolchain)."

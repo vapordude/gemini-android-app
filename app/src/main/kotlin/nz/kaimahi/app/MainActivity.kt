@@ -58,8 +58,37 @@ import nz.kaimahi.ui.KaimahiTheme
 
 class MainActivity : ComponentActivity() {
 
+    /**
+     * Runtime permission request for `POST_NOTIFICATIONS`. Required on
+     * Android 13+ (API 33+) before any notification can be posted —
+     * which our foreground inference service depends on. Result is
+     * ignored: if the user denies, the foreground service still tries
+     * to start; it'll show no notification but the process-tier boost
+     * still applies. The grant is sticky across launches.
+     */
+    private val requestNotificationPermission =
+        registerForActivityResult(
+            androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+        ) { granted ->
+            android.util.Log.i("MainActivity", "POST_NOTIFICATIONS granted=$granted")
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Ask for POST_NOTIFICATIONS on first launch (API 33+ only).
+        // Older versions grant notification posting implicitly. Without
+        // this, the foreground service's notification fails silently
+        // on Android 13+, and the FG service can be killed before
+        // promotion completes.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.POST_NOTIFICATIONS,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                requestNotificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
         setContent {
             var themeMode by remember { mutableStateOf(ThemeMode.SYSTEM) }
             val systemDark = isSystemInDarkTheme()
@@ -98,19 +127,6 @@ private fun KaimahiApp(
     val context = LocalContext.current
     val inferenceMode by vm.inferenceMode.collectAsState()
 
-    // Anchor: when the user is in LOCAL_AGENT mode, run a foreground
-    // service so lmkd doesn't reap us under memory pressure while a
-    // multi-GB mmap is resident. The service is purely a process-tier
-    // boost — the Rust session lives inside RustInferenceEngine.
-    LaunchedEffect(inferenceMode) {
-        val intent = android.content.Intent(context, LocalInferenceService::class.java)
-        if (inferenceMode == InferenceMode.LOCAL_AGENT) {
-            ContextCompat.startForegroundService(context, intent)
-        } else {
-            context.stopService(intent)
-        }
-    }
-
     // Splash gate — shown once per process. The math-spiral rotates at
     // 60s/turn so 1.5s of dwell reads as "loading", not "loading
     // forever". Auto-login happens behind it.
@@ -147,6 +163,32 @@ private fun KaimahiApp(
             isLoading = isLoading,
         )
         return
+    }
+
+    // Anchor: when the user is in LOCAL_AGENT mode, run a foreground
+    // service so lmkd doesn't reap us under memory pressure while a
+    // multi-GB mmap is resident. The service is purely a process-tier
+    // boost — the Rust session lives inside RustInferenceEngine.
+    //
+    // Declared AFTER the splash + login gates so the activity is
+    // guaranteed to be in STARTED state before `startForegroundService`
+    // fires. Earlier placement caused silent kills on Android 12+ with
+    // `ForegroundServiceStartNotAllowedException` because the system
+    // doesn't permit foreground starts during composition that runs
+    // before the activity reaches STARTED.
+    LaunchedEffect(inferenceMode) {
+        val intent = android.content.Intent(context, LocalInferenceService::class.java)
+        if (inferenceMode == InferenceMode.LOCAL_AGENT) {
+            // Best-effort: a hostile OEM ROM or unexpected lifecycle
+            // state can still reject the start. Catch + log rather
+            // than crashing the activity — the chat path falls back
+            // to running without an anchor (still works; just more
+            // vulnerable to lmkd).
+            runCatching { ContextCompat.startForegroundService(context, intent) }
+                .onFailure { android.util.Log.w("MainActivity", "startForegroundService failed", it) }
+        } else {
+            runCatching { context.stopService(intent) }
+        }
     }
 
     // ── Drawer-backed shell ─────────────────────────────────────────────
