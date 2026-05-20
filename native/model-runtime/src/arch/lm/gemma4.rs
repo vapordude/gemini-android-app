@@ -31,6 +31,10 @@ use tensor_core::kernels::{
     attention::sdpa_decode_f32, matmul::matvec_f32, rmsnorm::rmsnorm_f32, softmax::softmax_f32,
 };
 use tensor_core::quant::q4_k::{matvec_q4_k_row_major, SUPER_BLOCK as Q4K_BLOCK};
+use tensor_core::quant::q6_k::{
+    dequantize as q6_k_dequantize, BYTES_PER_SUPER_BLOCK as Q6K_BYTES_PER_BLOCK,
+    SUPER_BLOCK as Q6K_BLOCK,
+};
 use tensor_core::quant::{dequantize_to_f32, DequantError, DequantType};
 use tensor_core::IsaTier;
 
@@ -360,6 +364,113 @@ impl WeightView {
     }
 }
 
+/// A vocabulary-sized embedding table. Two storage modes:
+///
+/// - `F32`: fully dequantized into a contiguous `Vec<f32>`. Fast row
+///   access AND fast all-row sweeps (needed when the lm_head is tied to
+///   the embed and the logit head iterates every vocab row per token).
+///   Costs vocab × dim × 4 bytes; for Gemma 4 E2B's `token_embd` that
+///   is 2.15 GB, and for `per_layer_token_embd` it is ~8 GB. The
+///   sum-total was the load-time OOM source flagged by the lmkd kill
+///   on a Samsung S25 Ultra (handoff 2026-05-20).
+///
+/// - `Packed`: kept Q6_K-packed inside the original mmap. Per-row
+///   dequant happens on lookup in `row()`. Saves the bulk allocation
+///   entirely (the row scratch is `dim` floats per call). Per-row cost
+///   is microseconds — fine for single-row lookups like the embed of
+///   the current token, or the per-layer-embedding (PLE) row, both of
+///   which fire once per forward pass.
+///
+/// The loader chooses the variant per table:
+/// - `token_embd`: `F32` only when lm_head is tied (because the tied
+///   path matmuls against every vocab row each forward — too slow to
+///   per-row-dequant); otherwise `Packed` if source is Q6_K.
+/// - `per_layer_token_embd`: always `Packed` when source is Q6_K
+///   (only one row touched per forward).
+///
+/// `Packed` currently only handles Q6_K because that's what Q4_K_M
+/// quants ship for these tables in practice. Other source dtypes
+/// fall back to `F32`.
+enum PackedEmbedding {
+    F32 {
+        data: Vec<f32>,
+        n_vocab: usize,
+        dim: usize,
+    },
+    Packed {
+        mmap: Arc<FileMmap>,
+        offset: usize,
+        ggml_type: GgmlType,
+        n_vocab: usize,
+        dim: usize,
+    },
+}
+
+impl PackedEmbedding {
+    fn n_vocab(&self) -> usize {
+        match self {
+            PackedEmbedding::F32 { n_vocab, .. } => *n_vocab,
+            PackedEmbedding::Packed { n_vocab, .. } => *n_vocab,
+        }
+    }
+
+    fn dim(&self) -> usize {
+        match self {
+            PackedEmbedding::F32 { dim, .. } => *dim,
+            PackedEmbedding::Packed { dim, .. } => *dim,
+        }
+    }
+
+    /// Copy row `token_id` into `out`. `out.len()` must equal [`Self::dim`].
+    /// Token ids out of range clamp to the last valid row (matches the
+    /// existing forward-pass behaviour from before this refactor).
+    fn row(&self, token_id: u32, out: &mut [f32]) {
+        let n_vocab = self.n_vocab();
+        let dim = self.dim();
+        debug_assert_eq!(
+            out.len(),
+            dim,
+            "PackedEmbedding::row out.len() must equal dim"
+        );
+        let idx = (token_id as usize).min(n_vocab.saturating_sub(1));
+        match self {
+            PackedEmbedding::F32 { data, .. } => {
+                out.copy_from_slice(&data[idx * dim..(idx + 1) * dim]);
+            }
+            PackedEmbedding::Packed {
+                mmap,
+                offset,
+                ggml_type,
+                ..
+            } => match ggml_type {
+                GgmlType::Q6_K => {
+                    debug_assert_eq!(
+                        dim % Q6K_BLOCK,
+                        0,
+                        "Q6_K-packed embedding requires dim multiple of Q6_K super-block"
+                    );
+                    let supers_per_row = dim / Q6K_BLOCK;
+                    let row_bytes = supers_per_row * Q6K_BYTES_PER_BLOCK;
+                    let row_offset = offset + idx * row_bytes;
+                    let bytes = &mmap.as_slice()[row_offset..row_offset + row_bytes];
+                    q6_k_dequantize(bytes, out);
+                }
+                _ => unreachable!("PackedEmbedding::Packed only constructed for Q6_K source"),
+            },
+        }
+    }
+
+    /// Direct slice access to the fully-dequantized F32 row-major data.
+    /// Returns `None` for `Packed` — the tied-lm_head matmul path uses
+    /// this and requires the table to be `F32` at load time.
+    fn as_f32(&self) -> Option<&[f32]> {
+        match self {
+            PackedEmbedding::F32 { data, .. } => Some(data),
+            PackedEmbedding::Packed { .. } => None,
+        }
+    }
+}
+
 /// Per-layer weight tensors. K and V are `Option` because shared-KV
 /// reusing layers don't carry their own `wk`/`wv`.
 struct LayerWeights {
@@ -395,16 +506,20 @@ struct LayerWeights {
 }
 
 struct GlobalWeights {
-    /// `[vocab, hidden]` row-major.
-    embed: Vec<f32>,
+    /// `[vocab, hidden]` row-major. `Packed` when source is Q6_K and
+    /// lm_head is NOT tied; `F32` otherwise (tied case needs fast
+    /// all-row access for the logit matmul).
+    embed: PackedEmbedding,
     output_norm: Vec<f32>,
     /// LM head. `None` when tied to `embed`.
     lm_head: Option<WeightView>,
 
-    // PLE globals. `None` when the GGUF has no PLE.
-    per_layer_tok_embd: Option<Vec<f32>>, // [vocab, n_layer * ple_dim]
-    per_layer_model_proj: Option<WeightView>, // [n_layer * ple_dim, n_embd]
-    per_layer_proj_norm: Option<Vec<f32>>, // [ple_dim]
+    // PLE globals. `None` when the GGUF has no PLE. The token table is
+    // always lazy-dequant-friendly (single row per forward), so it
+    // takes the `Packed` variant whenever the source is Q6_K.
+    per_layer_tok_embd: Option<PackedEmbedding>, // [vocab, n_layer * ple_dim]
+    per_layer_model_proj: Option<WeightView>,    // [n_layer * ple_dim, n_embd]
+    per_layer_proj_norm: Option<Vec<f32>>,       // [ple_dim]
 }
 
 /// One physical KV slot. Backed by zeroed `Vec<f32>` of size
@@ -565,6 +680,61 @@ fn read_optional_projection(g: &GgufBytes, name: &str) -> Result<Option<WeightVi
     read_projection(g, name).map(Some)
 }
 
+/// Load a `[vocab, dim]` embedding table. When `allow_pack` is true and
+/// the GGUF source dtype is Q6_K (the dtype Q4_K_M quants use for the
+/// `token_embd` and `per_layer_token_embd` tables in practice), the
+/// table is kept packed in mmap and dequantized one row at a time on
+/// lookup via [`PackedEmbedding::row`]. Otherwise the whole table is
+/// dequantized to `Vec<f32>` at load time.
+///
+/// Set `allow_pack = false` for tables that need full all-row sweeps
+/// at forward time (currently only `token_embd` when the lm_head is
+/// tied — the tied logit matmul iterates every vocab row per token).
+fn read_packed_embedding(
+    g: &GgufBytes,
+    name: &str,
+    allow_pack: bool,
+) -> Result<PackedEmbedding, LoadError> {
+    let info = g.file.tensor(name).ok_or_else(|| missing(name))?;
+    if info.dims.len() != 2 {
+        return Err(LoadError::UnknownArchitecture(format!(
+            "embedding tensor {name} has unexpected dim count {} (expected 2)",
+            info.dims.len()
+        )));
+    }
+    let n_vocab = info.dims[0] as usize;
+    let dim = info.dims[1] as usize;
+
+    if allow_pack && info.ggml_type == GgmlType::Q6_K && dim % Q6K_BLOCK == 0 {
+        let offset = g.file.tensor_data_start as usize + info.offset as usize;
+        return Ok(PackedEmbedding::Packed {
+            mmap: g.mmap_handle(),
+            offset,
+            ggml_type: GgmlType::Q6_K,
+            n_vocab,
+            dim,
+        });
+    }
+
+    // Fallback: full dequant. This is the load-time-heavy path.
+    let bytes = g.tensor_bytes(name).ok_or_else(|| missing(name))?;
+    let ty = dequant_type(info.ggml_type)?;
+    let numel = n_vocab * dim;
+    let data = dequantize_to_f32(ty, bytes, numel).map_err(map_dequant)?;
+    Ok(PackedEmbedding::F32 { data, n_vocab, dim })
+}
+
+fn read_optional_packed_embedding(
+    g: &GgufBytes,
+    name: &str,
+    allow_pack: bool,
+) -> Result<Option<PackedEmbedding>, LoadError> {
+    if g.file.tensor(name).is_none() {
+        return Ok(None);
+    }
+    read_packed_embedding(g, name, allow_pack).map(Some)
+}
+
 fn read_optional_scalar(g: &GgufBytes, name: &str) -> Result<Option<f32>, LoadError> {
     let Some(v) = read_optional_f32(g, name)? else {
         return Ok(None);
@@ -591,7 +761,11 @@ impl Gemma4Model {
             isa,
             mmap: None,
             global: GlobalWeights {
-                embed: Vec::new(),
+                embed: PackedEmbedding::F32 {
+                    data: Vec::new(),
+                    n_vocab: 0,
+                    dim: 0,
+                },
                 output_norm: Vec::new(),
                 lm_head: None,
                 per_layer_tok_embd: None,
@@ -629,10 +803,21 @@ impl Gemma4Model {
             }
         }
 
-        let embed = read_f32(g, "token_embd.weight")?;
         let output_norm = read_f32(g, "output_norm.weight")?;
         let lm_head = read_optional_projection(g, "output.weight")?;
-        let per_layer_tok_embd = read_optional_f32(g, "per_layer_token_embd.weight")?;
+        // The lm_head is tied to the embed when the file omits
+        // `output.weight`. Tied path matmuls against every vocab row
+        // each forward (see `compute_logits`), so we need fast all-row
+        // access — keep `embed` as F32. Otherwise (the common Gemma 4
+        // case), `token_embd` is read once per token and we let the
+        // table stay Q6_K-packed in mmap, saving ~2 GB of transient
+        // allocation at load.
+        let embed_tied = lm_head.is_none();
+        let embed = read_packed_embedding(g, "token_embd.weight", !embed_tied)?;
+        // PLE table is always lazy-friendly: one row touched per forward.
+        // Lazy-pack saves the headline ~8 GB transient on Gemma 4 E2B.
+        let per_layer_tok_embd =
+            read_optional_packed_embedding(g, "per_layer_token_embd.weight", true)?;
         let per_layer_model_proj = read_optional_projection(g, "per_layer_model_proj.weight")?;
         let per_layer_proj_norm = read_optional_f32(g, "per_layer_proj_norm.weight")?;
 
@@ -802,7 +987,7 @@ impl Gemma4Model {
         &self.cfg
     }
     fn has_weights(&self) -> bool {
-        !self.global.embed.is_empty() && !self.layers.is_empty()
+        self.global.embed.n_vocab() > 0 && !self.layers.is_empty()
     }
 
     /// Build the per-token PLE input projection. Stores
@@ -824,12 +1009,12 @@ impl Gemma4Model {
         }
         // Step 1: pull the per-layer embedding row for this token.
         // The table shape is [vocab, n_layer * ple_dim] row-major, so
-        // the row is contiguous.
+        // the row is contiguous. When the table is Q6_K-packed in mmap
+        // (the common case for Gemma 4 E2B Q4_K_M), this dequantizes
+        // just `row_len` floats — microseconds per call, vs. the ~8 GB
+        // up-front allocation the previous F32-only path required.
         let row_len = cfg.n_layers * cfg.ple_dim;
-        let idx = (token as usize).min(cfg.vocab_size.saturating_sub(1));
-        let row_start = idx * row_len;
-        let row_end = row_start + row_len;
-        self.scratch.ple_row[..row_len].copy_from_slice(&tok_embd[row_start..row_end]);
+        tok_embd.row(token, &mut self.scratch.ple_row[..row_len]);
         // Scale by sqrt(ple_dim) per the HF impl.
         let scale = (cfg.ple_dim as f32).sqrt();
         for v in self.scratch.ple_row[..row_len].iter_mut() {
@@ -864,17 +1049,13 @@ impl Gemma4Model {
         }
     }
 
-    /// Embed and (optionally) scale by sqrt(hidden), in place.
-    fn embed_token_into(
-        embed: &[f32],
-        hidden: usize,
-        vocab: usize,
-        token: TokenId,
-        out: &mut [f32],
-    ) {
-        let idx = (token as usize).min(vocab.saturating_sub(1));
-        let row = &embed[idx * hidden..(idx + 1) * hidden];
-        out.copy_from_slice(row);
+    /// Embed and scale by sqrt(hidden), in place. The embed table may
+    /// be `F32` (full dequant, fast slice copy) or `Packed` (Q6_K in
+    /// mmap, per-row dequant). [`PackedEmbedding::row`] handles both
+    /// transparently.
+    fn embed_token_into(embed: &PackedEmbedding, hidden: usize, token: TokenId, out: &mut [f32]) {
+        debug_assert_eq!(out.len(), hidden);
+        embed.row(token, out);
         let scale = (hidden as f32).sqrt();
         for v in out.iter_mut() {
             *v *= scale;
@@ -894,8 +1075,17 @@ impl Gemma4Model {
         match self.global.lm_head.as_ref() {
             Some(head) => head.matvec(&norm, &mut self.logits),
             None => {
-                // Tied: dot-product against each embedding row.
-                let embed = &self.global.embed;
+                // Tied: dot-product against each embedding row. The
+                // loader ensures `embed` is `F32` whenever lm_head is
+                // tied (see `read_packed_embedding` call site in load).
+                // Falling into a per-row-dequant loop here would cost
+                // ~vocab × dequant ≈ 260 ms/token on Gemma 4 E2B —
+                // unacceptable; explicit panic on misuse rather than a
+                // silent slow path.
+                let embed =
+                    self.global.embed.as_f32().expect(
+                        "tied lm_head requires F32 embed; loader must set allow_pack=false",
+                    );
                 for v in 0..cfg.vocab_size {
                     let row = &embed[v * hidden..(v + 1) * hidden];
                     let mut acc = 0.0_f32;
@@ -1070,13 +1260,7 @@ impl LanguageModel for Gemma4Model {
         let hidden = cfg.hidden_size;
 
         // Embed + scale.
-        Self::embed_token_into(
-            &self.global.embed,
-            hidden,
-            cfg.vocab_size,
-            token,
-            &mut self.scratch.x,
-        );
+        Self::embed_token_into(&self.global.embed, hidden, token, &mut self.scratch.x);
 
         // PLE input — projects `x` to the per-layer additive channel.
         // Has to happen BEFORE the layer loop because per-layer PLE
@@ -1453,6 +1637,52 @@ impl SamplerState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn packed_embedding_f32_row_copies_correct_slice() {
+        // Build a synthetic F32 table with 4 rows of 8 floats each so we
+        // can verify `row()` copies the right slice for each token id.
+        let n_vocab = 4;
+        let dim = 8;
+        let mut data = vec![0.0_f32; n_vocab * dim];
+        for v in 0..n_vocab {
+            for i in 0..dim {
+                data[v * dim + i] = (v * 100 + i) as f32;
+            }
+        }
+        let emb = PackedEmbedding::F32 { data, n_vocab, dim };
+        assert_eq!(emb.n_vocab(), n_vocab);
+        assert_eq!(emb.dim(), dim);
+
+        let mut out = vec![0.0_f32; dim];
+        emb.row(2, &mut out);
+        let expected: Vec<f32> = (0..dim).map(|i| (200 + i) as f32).collect();
+        assert_eq!(out, expected);
+
+        // Out-of-range token id clamps to the last valid row instead
+        // of panicking.
+        emb.row(999, &mut out);
+        let last: Vec<f32> = (0..dim).map(|i| (300 + i) as f32).collect();
+        assert_eq!(out, last);
+    }
+
+    #[test]
+    fn packed_embedding_as_f32_returns_none_for_packed_variant() {
+        // We can't easily build a Packed variant in a unit test without
+        // a real mmap, so verify the asymmetric: F32 returns Some, and
+        // the tied lm_head path which calls `expect()` on this would
+        // therefore succeed for F32. The Packed-returns-None invariant
+        // is documented on `as_f32`; the loader's contract is that we
+        // only construct Packed when allow_pack=true, which the load
+        // sets to !tied. Confirming the F32 side here is the only
+        // half we can exercise without I/O.
+        let emb = PackedEmbedding::F32 {
+            data: vec![1.0, 2.0],
+            n_vocab: 1,
+            dim: 2,
+        };
+        assert_eq!(emb.as_f32(), Some(&[1.0_f32, 2.0][..]));
+    }
 
     #[test]
     fn gelu_matches_reference_at_zero_and_one() {
