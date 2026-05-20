@@ -249,25 +249,39 @@ class ChatViewModel(
         val am = appContext.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
             ?: return
         while (true) {
-            val sysInfo = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
-            val rss = sampleResidentBytes()
-            val pinned = if (localInferenceLazy.isInitialized()) {
-                runCatching { localInference.isPinnedNow() }.getOrDefault(false)
-            } else {
-                false
+            // Every system-service call below is best-effort. Restricted
+            // ROMs (Samsung One UI in some modes, FireOS, custom AOSP
+            // forks) can throw SecurityException / IllegalStateException
+            // / RuntimeException from `getMemoryInfo` and friends. An
+            // uncaught throw here would propagate out of
+            // `viewModelScope.launch` and crash the ViewModel, taking
+            // the chat surface down. The chip is a decorative readout;
+            // it's allowed to go quiet, not allowed to take the app.
+            val metrics = runCatching {
+                val sysInfo = android.app.ActivityManager.MemoryInfo()
+                    .also { am.getMemoryInfo(it) }
+                val rss = sampleResidentBytes()
+                val pinned = if (localInferenceLazy.isInitialized()) {
+                    runCatching { localInference.isPinnedNow() }.getOrDefault(false)
+                } else {
+                    false
+                }
+                MemoryMetrics(
+                    rssBytes = rss,
+                    totalMemBytes = sysInfo.totalMem,
+                    availMemBytes = sysInfo.availMem,
+                    lowMemory = sysInfo.lowMemory,
+                    pinned = pinned,
+                    // Approximation: we're in LOCAL_AGENT and the activity
+                    // started the service, so the foreground anchor is up.
+                    // A proper check would require binding back to the
+                    // service — that's heavier than this chip warrants.
+                    fgServiceUp = true,
+                )
+            }.getOrNull()
+            if (metrics != null) {
+                _memoryMetrics.value = metrics
             }
-            _memoryMetrics.value = MemoryMetrics(
-                rssBytes = rss,
-                totalMemBytes = sysInfo.totalMem,
-                availMemBytes = sysInfo.availMem,
-                lowMemory = sysInfo.lowMemory,
-                pinned = pinned,
-                // Approximation: we're in LOCAL_AGENT and the activity
-                // started the service, so the foreground anchor is up.
-                // A proper check would require binding back to the
-                // service — that's heavier than this chip warrants.
-                fgServiceUp = true,
-            )
             kotlinx.coroutines.delay(2_000)
         }
     }
